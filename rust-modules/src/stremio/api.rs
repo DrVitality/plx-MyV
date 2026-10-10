@@ -316,6 +316,16 @@ impl Stremio for Live {
     }
 
     fn fetch_range(&self, url: &str, from: u64, len: u64) -> Result<Vec<u8>, ApiError> {
+        // The player's own media transport first: it follows a debrid service's redirect chain
+        // hop by hop, waits out a slow first byte (an addon resolving the torrent on the request)
+        // and reads a server that ignores the Range as a plain stream it simply stops reading —
+        // the three ways the control-plane request below failed on real Comet links, which then
+        // played with tracks guessed from the release name.
+        if plx_media::curlio::available() {
+            if let Some(bytes) = media_read(url, from, len) {
+                return Ok(bytes);
+            }
+        }
         let headers = [format!("Range: bytes={from}-{}", from + len.max(1) - 1)];
         // A server that ignores the range answers the whole file; the cap turns that into a
         // failure rather than a download.
@@ -328,3 +338,29 @@ impl Stremio for Live {
         Ok(resp.body)
     }
 }
+
+/// Up to `len` bytes of `url` from byte `from`, through `plx_media::curlio` on a private transfer
+/// (its abort handle is its own, so the player's teardown never reaches it and it never takes the
+/// player's slot). `None` when nothing could be read in [`MEDIA_READ_BUDGET`].
+fn media_read(url: &str, from: u64, len: u64) -> Option<Vec<u8>> {
+    let len = usize::try_from(len).ok()?;
+    let (mut src, _abort) = plx_media::curlio::CurlSource::open_private(url, i64::try_from(from).ok()?).ok()?;
+    let deadline = std::time::Instant::now() + MEDIA_READ_BUDGET;
+    let mut out = vec![0u8; len];
+    let mut got = 0usize;
+    while got < len {
+        let n = src.read_until(&mut out[got..], Some(deadline), &mut plx_base::checkpoint::NoCheckpoint);
+        if n <= 0 {
+            break;
+        }
+        got += n as usize;
+    }
+    (got > 0).then(|| {
+        out.truncate(got);
+        out
+    })
+}
+
+/// How long one track read may take, first byte included: a debrid addon may add the torrent to
+/// the account on the request before it redirects.
+const MEDIA_READ_BUDGET: std::time::Duration = std::time::Duration::from_secs(25);
