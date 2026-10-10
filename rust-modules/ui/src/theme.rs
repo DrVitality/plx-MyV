@@ -962,6 +962,20 @@ pub const DIAG_NETWORK_MEAN: [f32; 4] = AMBER_300;
 /// The fixed-slot plot's overwrite cursor. Near-white survives every state colour and a phone
 /// camera's chroma subsampling, which is the output format of this surface.
 pub const DIAG_SWEEP_CURSOR: [f32; 4] = COOL_0;
+/// A shelf TRAY's body (`widgets::shelf_tray`): the faint lift a row of cards sits on so each
+/// titled shelf reads as one container. White at a whisper, so it takes the page's own colour (the
+/// ground's gradient, an item-keyed wash) rather than adding one; brighter at the top, the way the
+/// app's light falls.
+pub const SHELF_TRAY_TOP: [f32; 4] = with_a(WHITE, 0.045);
+/// …and its foot, fading toward the page.
+pub const SHELF_TRAY_BOT: [f32; 4] = with_a(WHITE, 0.015);
+/// A shelf tray's perimeter: quieter than [`HAIRLINE`], with the brighter top line carried by the
+/// rim's `rim_top` weight ([`SHELF_TRAY_RIM_TOP`]) — the divider the eye reads between two shelves.
+pub const SHELF_TRAY_RIM: [f32; 4] = with_a(WHITE, 0.07);
+/// Extra rim weight on a shelf tray's top edge.
+pub const SHELF_TRAY_RIM_TOP: f32 = 0.08;
+/// A shelf tray's corner radius (capped by the viewer's Corners choice like every shape).
+pub const SHELF_TRAY_RAD: f32 = 18.0;
 /// Section divider hairline.
 pub const HAIRLINE: [f32; 4] = with_a(WHITE, 0.10);
 /// A glass container's **perimeter line** — the design system's `--glass-rim`, one notch under the
@@ -1500,13 +1514,24 @@ pub mod appearance {
 
     /// The ground: the app's background and the surfaces built on it.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum Ground { Charcoal, Graphite, Midnight, Black }
+    pub enum Ground { Ember, Charcoal, Graphite, Midnight, Black }
     impl Ground {
-        pub const LADDER: [Ground; 4] = [Ground::Charcoal, Ground::Graphite, Ground::Midnight, Ground::Black];
+        /// The order Settings lists them in and the session stores them by; the first is the
+        /// default a fresh install (and a session that never chose) gets.
+        pub const LADDER: [Ground; 5] = [Ground::Ember, Ground::Charcoal, Ground::Graphite, Ground::Midnight, Ground::Black];
+        /// The order the live static holds them in: the palette's own stops (`Charcoal`) are 0, so
+        /// [`remap`]'s fast path and every test that never calls [`apply`] draw the palette as
+        /// written, whatever the stored default is.
+        const LIVE: [Ground; 5] = [Ground::Charcoal, Ground::Ember, Ground::Graphite, Ground::Midnight, Ground::Black];
         /// Its stops, in [`DEFAULT_GROUND`]'s order.
         const fn stops(self) -> [[f32; 4]; 8] {
             match self {
                 Ground::Charcoal => DEFAULT_GROUND,
+                // a warm umber gray: the surfaces lean toward the accent's red without competing
+                // with it; the page itself carries a soft ember-to-slate gradient (`EMBER_WASH`)
+                Ground::Ember => [rgb8(0x2a, 0x22, 0x1e), rgb8(0x26, 0x1e, 0x1a), rgb8(0x22, 0x1b, 0x18),
+                    rgb8(0x1c, 0x16, 0x13), rgb8(0x14, 0x10, 0x0e), rgb8(0x0a, 0x07, 0x06),
+                    rgb8(0x24, 0x1c, 0x18), rgb8(0x19, 0x13, 0x11)],
                 // the neutral gray of the original design, no warmth in it
                 Ground::Graphite => [rgb8(0x24, 0x24, 0x26), rgb8(0x25, 0x25, 0x27), rgb8(0x22, 0x22, 0x24),
                     rgb8(0x1b, 0x1b, 0x1d), rgb8(0x14, 0x14, 0x16), rgb8(0x08, 0x08, 0x0a),
@@ -1578,6 +1603,8 @@ pub mod appearance {
 
     /// Make the stored choices live: ladder indexes, out of range meaning the default.
     pub fn apply(accent: u8, ground: u8, corners: u8, peek: u8) {
+        // stored by the Settings ladder, held by the live one
+        let ground = index_of(&Ground::LIVE, &pick(&Ground::LADDER, ground));
         let changed = (ACCENT.swap(accent, Relaxed) != accent)
             | (GROUND.swap(ground, Relaxed) != ground)
             | (CORNERS.swap(corners, Relaxed) != corners)
@@ -1588,7 +1615,7 @@ pub mod appearance {
     }
 
     pub fn accent_choice() -> Accent { pick(&Accent::LADDER, ACCENT.load(Relaxed)) }
-    pub fn ground_choice() -> Ground { pick(&Ground::LADDER, GROUND.load(Relaxed)) }
+    pub fn ground_choice() -> Ground { pick(&Ground::LIVE, GROUND.load(Relaxed)) }
     pub fn corners_choice() -> Corners { pick(&Corners::LADDER, CORNERS.load(Relaxed)) }
     pub fn peek_choice() -> Peek { pick(&Peek::LADDER, PEEK.load(Relaxed)) }
 
@@ -1604,6 +1631,44 @@ pub mod appearance {
         (g[0], g[1], g[2])
     }
 
+    /// The page gradient the Ember ground lays under a browsing screen, corner-major in the
+    /// wash's order (top-left, top-right, bottom-right, bottom-left): a dim ember glow in the top
+    /// left that cools to a neutral slate in the bottom right, all of it within a few codes of the
+    /// ground so it reads as light, not as colour.
+    const EMBER_WASH: [[f32; 4]; 4] = [rgb8(0x3a, 0x25, 0x1a), rgb8(0x2f, 0x24, 0x1f),
+        rgb8(0x21, 0x20, 0x21), rgb8(0x2a, 0x21, 0x1d)];
+
+    /// Does the live ground draw a gradient of its own, so a page wash that has settled on the
+    /// flat surface must still be painted (`widgets::AmbientWash::is_flat`)?
+    #[inline]
+    pub fn ground_pass() -> bool {
+        GROUND.load(Relaxed) == 1 // `Ground::LIVE[1]`, Ember
+    }
+
+    /// What the live ground adds to a page-wash colour at the screen fraction `(u, v)` (0..1 from
+    /// the top left): the ground's own offset from the palette surface the wash was mixed from,
+    /// and, under Ember, the gradient. Zero under the palette's own ground, after one load.
+    pub fn wash_shift(u: f32, v: f32) -> [f32; 3] {
+        let g = GROUND.load(Relaxed);
+        if g == 0 {
+            return [0.0; 3];
+        }
+        let ground = pick(&Ground::LIVE, g);
+        let to = ground.stops()[0];
+        let from = DEFAULT_GROUND[0];
+        let (u, v) = (u.clamp(0.0, 1.0), v.clamp(0.0, 1.0));
+        std::array::from_fn(|i| {
+            let mut d = to[i] - from[i];
+            if ground == Ground::Ember {
+                let k = |q: usize| EMBER_WASH[q][i] - to[i];
+                let top = k(0) + (k(1) - k(0)) * u;
+                let bot = k(3) + (k(2) - k(3)) * u;
+                d += top + (bot - top) * v;
+            }
+            d
+        })
+    }
+
     #[inline]
     fn same(a: [f32; 4], b: [f32; 4]) -> bool {
         a[0] == b[0] && a[1] == b[1] && a[2] == b[2]
@@ -1617,7 +1682,7 @@ pub mod appearance {
         if a == 0 && g == 0 {
             return c;
         }
-        remap_slow(c, pick(&Accent::LADDER, a), pick(&Ground::LADDER, g))
+        remap_slow(c, pick(&Accent::LADDER, a), pick(&Ground::LIVE, g))
     }
 
     fn remap_slow(c: [f32; 4], accent: Accent, ground: Ground) -> [f32; 4] {
@@ -1665,6 +1730,13 @@ pub mod appearance {
             assert!(Corners::Round.cap().is_infinite());
             assert_eq!(Peek::Off.dwell_ms(), None);
             assert_eq!(pick(&Accent::LADDER, 200), Accent::Crimson, "out of range is the default");
+            // the stored order and the live order name the same grounds
+            for g in Ground::LADDER {
+                assert!(Ground::LIVE.contains(&g));
+            }
+            assert_eq!(Ground::LIVE[0], Ground::Charcoal, "the palette's own ground is the live zero");
+            assert_eq!(Ground::LIVE[1], Ground::Ember, "`ground_pass` reads index 1 as Ember");
+            assert_eq!(Ground::LADDER[0], Ground::Ember, "a fresh install opens on Ember");
         }
     }
 }

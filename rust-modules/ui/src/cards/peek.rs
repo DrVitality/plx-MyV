@@ -17,6 +17,14 @@
 //! the left when the right would leave the safe margin — so it covers only neighbours in the same
 //! row, which the focused card is already drawn over; it never reaches into the row below.
 //!
+//! **Its two buttons.** The foot of the bubble is a Play button and a Details button. The one OK
+//! performs on the card (the card-press preference) is lit in the accent, so the remote's answer
+//! is the button that looks pressed; holding OK still opens the card's menu, which the line under
+//! them says. With a pointer (the Magic Remote, the simulator's mouse) both are clickable: the
+//! bubble publishes where it drew them ([`hit`]) and the application performs a click there
+//! itself, and a pointer resting over the bubble ([`covers`]) does not hand focus to the cards the
+//! bubble is drawn over — otherwise reaching for a button would close the bubble on the way.
+//!
 //! **Motion.** The dwell is real time from the frame tick, and while it runs the state reports
 //! itself as moving (exactly what a spring does) so the frame gate keeps ticking until the bubble
 //! appears; the appearance is a spring. A move to another card closes it at once and starts the
@@ -41,6 +49,13 @@ const RISE: f32 = 14.0;
 /// The panel's radius as laid out (the Corners choice decides how much of it is drawn).
 const PANEL_RAD: f32 = 16.0;
 
+/// The height of the bubble's two buttons.
+const BTN_H: f32 = 52.0;
+/// The buttons' radius as laid out (a pill at the default Corners cap's own judgement).
+const BTN_RAD: f32 = 26.0;
+/// The size of the glyph inside a button.
+const BTN_ICON: f32 = 22.0;
+
 /// What a card's bubble says: plain strings the screen fills from its row.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Peek {
@@ -50,6 +65,84 @@ pub struct Peek {
     pub summary: String,
     /// The line at the foot (how to act on the card). May be empty.
     pub hint: String,
+    /// The Play button's label; no buttons are drawn when it or [`details`](Self::details) is
+    /// empty.
+    pub play: String,
+    /// The Details button's label.
+    pub details: String,
+    /// Whether OK on the card plays it (so Play is the lit button) rather than opening its page.
+    pub ok_plays: bool,
+    /// The card's own key, handed back with a click ([`hit`]) so the application acts on the item
+    /// the bubble was drawn for. Opaque here.
+    pub key: String,
+}
+
+/// One of the bubble's buttons.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PeekButton {
+    Play,
+    Details,
+}
+
+/// Where the open bubble was last drawn, in screen space, for the pointer.
+#[derive(Clone, Debug, Default)]
+struct Drawn {
+    /// The bubble, widened over the gap to its card so a pointer crossing it stays "on" it.
+    cover: Option<Rect>,
+    play: Option<Rect>,
+    details: Option<Rect>,
+    key: String,
+    /// The button under the pointer, lit on the next draw.
+    hover: Option<PeekButton>,
+}
+
+static DRAWN: std::sync::Mutex<Drawn> = std::sync::Mutex::new(Drawn {
+    cover: None, play: None, details: None, key: String::new(), hover: None,
+});
+
+fn drawn() -> std::sync::MutexGuard<'static, Drawn> {
+    DRAWN.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Forget where a bubble was drawn — called once before a frame's page is drawn, so a bubble that
+/// closed takes its buttons with it. A frame that is not redrawn keeps the last picture's.
+pub fn begin_frame() {
+    let mut d = drawn();
+    d.cover = None;
+    d.play = None;
+    d.details = None;
+}
+
+/// The bubble button under the screen point `(x, y)`, with the key of the card it belongs to.
+pub fn hit(x: f32, y: f32) -> Option<(PeekButton, String)> {
+    let d = drawn();
+    let inside = |r: Option<Rect>| r.is_some_and(|r| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+    if inside(d.play) {
+        Some((PeekButton::Play, d.key.clone()))
+    } else if inside(d.details) {
+        Some((PeekButton::Details, d.key.clone()))
+    } else {
+        None
+    }
+}
+
+/// Is the screen point `(x, y)` over the open bubble (or the gap to its card)? A pointer there must
+/// not move focus to the cards under it. Also records which button it is over, for the hover look.
+pub fn covers(x: f32, y: f32) -> bool {
+    let inside = |r: Option<Rect>| r.is_some_and(|r| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+    let mut d = drawn();
+    let hover = if inside(d.play) {
+        Some(PeekButton::Play)
+    } else if inside(d.details) {
+        Some(PeekButton::Details)
+    } else {
+        None
+    };
+    if hover != d.hover {
+        d.hover = hover;
+        plx_machine::idle::invalidate();
+    }
+    inside(d.cover)
 }
 
 /// The dwell and the appearance of the one bubble a section can show.
@@ -128,6 +221,11 @@ pub fn draw(p: Painter, card: Rect, peek: &Peek, alpha: f32, measure: &dyn Measu
     let p = p.alpha(alpha).translate(side * RISE * (1.0 - alpha), 0.0);
     // a panel's own radius: the viewer's Corners choice caps it at the paint door
     crate::widgets::panel_ground(p, r, PANEL_RAD, None);
+    // the accent's edge on the side facing the card, so the bubble reads as the card's own
+    let edge_w = 4.0;
+    let edge_x = if side < 0.0 { r.x } else { r.x + r.w - edge_w };
+    p.rect(Rect::new(edge_x, r.y + PANEL_RAD, edge_w, r.h - 2.0 * PANEL_RAD), edge_w * 0.5,
+        theme::ACCENT, theme::ACCENT, 0.0);
     let pad = theme::space::MD;
     let inner = Rect::new(r.x + pad, r.y + pad, r.w - 2.0 * pad, r.h - 2.0 * pad);
     let mut y = inner.y;
@@ -142,6 +240,8 @@ pub fn draw(p: Painter, card: Rect, peek: &Peek, alpha: f32, measure: &dyn Measu
     });
     let hint_body = hint.as_ref().map_or(0.0, |h| h.measure_h(inner.w));
     let hint_h = if hint.is_some() { hint_body + theme::space::XS } else { 0.0 };
+    let buttons = !peek.play.is_empty() && !peek.details.is_empty();
+    let buttons_h = if buttons { BTN_H + theme::space::SM } else { 0.0 };
 
     let title = TextView::new(&peek.title, theme::size::HEADLINE, theme::TEXT_PRIMARY)
         .bold()
@@ -161,16 +261,73 @@ pub fn draw(p: Painter, card: Rect, peek: &Peek, alpha: f32, measure: &dyn Measu
     if !peek.summary.is_empty() {
         y += theme::space::SM;
         let body = TextView::new(&peek.summary, theme::size::LABEL, theme::TEXT_SECONDARY).with_measure(measure);
-        let room = bottom - hint_h - y;
+        let room = bottom - hint_h - buttons_h - y;
         let lines = (room / body.line_h()).floor();
         if lines >= 1.0 {
             body.max_lines(lines as usize).draw(p, Rect::new(inner.x, y, inner.w, room));
         }
     }
 
+    let hover = drawn().hover;
+    let mut placed = (None, None);
+    if buttons {
+        let top = bottom - hint_h - BTN_H;
+        let w = (inner.w - theme::space::SM) * 0.5;
+        let play = Rect::new(inner.x, top, w, BTN_H);
+        let details = Rect::new(inner.x + w + theme::space::SM, top, w, BTN_H);
+        button(p, play, &peek.play, Some(crate::icons::Icon::Play), peek.ok_plays,
+            hover == Some(PeekButton::Play), measure);
+        button(p, details, &peek.details, None, !peek.ok_plays,
+            hover == Some(PeekButton::Details), measure);
+        placed = (Some(play), Some(details));
+    }
+
     if let Some(hint) = hint {
         hint.draw(p, Rect::new(inner.x, bottom - hint_body, inner.w, hint_body));
     }
+
+    // where it stands on screen, for the pointer — only once it is fully there
+    if alpha >= 0.99 && !p.records() {
+        let screen = |q: Rect| Rect::new(q.x + p.dx(), q.y + p.dy(), q.w, q.h);
+        let cover = if side < 0.0 {
+            Rect::new(card.x + card.w, r.y, r.x + r.w - (card.x + card.w), r.h)
+        } else {
+            Rect::new(r.x, r.y, card.x - r.x, r.h)
+        };
+        let mut d = drawn();
+        d.cover = Some(screen(cover));
+        d.play = placed.0.map(screen);
+        d.details = placed.1.map(screen);
+        if d.key != peek.key {
+            d.key = peek.key.clone();
+        }
+    }
+}
+
+/// One of the bubble's buttons: the lit one (what OK does) in the accent, the other a quiet face;
+/// a pointer over either rims it.
+fn button(p: Painter, r: Rect, label: &str, icon: Option<crate::icons::Icon>, lit: bool, hover: bool,
+    measure: &dyn Measure) {
+    let (fill, ink) = if lit {
+        (theme::ACCENT, theme::ACCENT_INK)
+    } else {
+        (theme::CONTROL_IDLE_FILL_UNKEYED, theme::TEXT_PRIMARY)
+    };
+    let rim = if hover { theme::CONTROL_RIM_FOCUS_UNKEYED } else { theme::CONTROL_RIM_IDLE_UNKEYED };
+    p.rect_rimmed(r, BTN_RAD, fill, fill, if lit && !hover { fill } else { rim }, 0.0);
+    let sz = theme::size::LABEL;
+    let gap = theme::space::XS;
+    let room = r.w - 2.0 * theme::space::SM - icon.map_or(0.0, |_| BTN_ICON + gap);
+    let run = measure.fit_line(label, room.max(0.0), sz, true);
+    let tw = measure.width(&run, sz, true);
+    let total = tw + icon.map_or(0.0, |_| BTN_ICON + gap);
+    let mut x = r.x + (r.w - total) * 0.5;
+    let cy = r.y + r.h * 0.5;
+    if let Some(icon) = icon {
+        crate::icons::draw(p, icon, Rect::new(x, cy - BTN_ICON * 0.5, BTN_ICON, BTN_ICON), ink);
+        x += BTN_ICON + gap;
+    }
+    p.text(run.as_ptr(), x, plx_gfx::text::text_vcenter_y(sz, 1, cy), sz, ink, 0, 1);
 }
 
 #[cfg(test)]

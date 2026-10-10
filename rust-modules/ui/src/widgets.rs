@@ -3313,8 +3313,11 @@ impl AmbientWash {
     /// [`theme::SURFACE_APP`] is snapped to exact codes for the `GL_DITHER` reason in its own doc,
     /// so that is the unit this value is reasoned in.) Its own method because the corner springs are
     /// private.
+    ///
+    /// A ground that draws a gradient of its own (Ember, `theme::appearance::ground_pass`) is never
+    /// flat: the settled wash IS that gradient, and skipping it would leave the flat clear.
     pub fn is_flat(&self, c: [f32; 4], eps: f32) -> bool {
-        self.corners
+        !theme::appearance::ground_pass() && self.corners
             .iter()
             .all(|q| q.iter().zip(c).all(|(s, v)| (s.pos - v).abs() <= eps))
     }
@@ -3326,7 +3329,18 @@ impl AmbientWash {
     /// way to dissolve that cut rather than disguise it is to lay the ground's own colour over it
     /// at a falling alpha. A guessed constant cannot do that here — this ground is keyed to the
     /// host's artwork and is a different colour on every page.
+    ///
+    /// It includes the live ground's shift (`theme::appearance::wash_shift`, read at `(x, y)` as a
+    /// screen position), exactly as the painter adds it, so the fade lands on the colour drawn.
     pub fn sample(&self, r: Rect, x: f32, y: f32) -> [f32; 3] {
+        let c = self.sample_raw(r, x, y);
+        let full = Rect::FULL;
+        let d = theme::appearance::wash_shift(x / full.w, y / full.h);
+        std::array::from_fn(|i| (c[i] + d[i]).clamp(0.0, 1.0))
+    }
+    /// [`sample`](Self::sample) before the ground's shift — the corners a band of this wash hands
+    /// the painter, which adds the shift itself.
+    fn sample_raw(&self, r: Rect, x: f32, y: f32) -> [f32; 3] {
         let u = if r.w > 0.0 { ((x - r.x) / r.w).clamp(0.0, 1.0) } else { 0.0 };
         let v = if r.h > 0.0 { ((y - r.y) / r.h).clamp(0.0, 1.0) } else { 0.0 };
         let c = |i: usize, q: usize| self.corners[q][i].pos;
@@ -3381,7 +3395,7 @@ impl AmbientWash {
         };
         let corners = |b: Rect| {
             [(b.x, b.y), (b.x + b.w, b.y), (b.x + b.w, b.y + b.h), (b.x, b.y + b.h)]
-                .map(|(x, y)| self.sample(r, x, y))
+                .map(|(x, y)| self.sample_raw(r, x, y))
         };
         let knees = ramp.map_or([None, None], |q| [Some(q.stops[0].0), Some(q.stops[1].0)]);
         let ink = |b: Rect| {
@@ -3499,6 +3513,42 @@ pub fn art_wash_split(r: Rect, art: Rect) -> Option<(Rect, [Option<Rect>; 4])> {
             band(x1, y0, rx1, y1),
         ],
     ))
+}
+
+// ---- shelf_tray: the container a titled shelf of cards sits in. ----
+
+/// How far a shelf tray reaches past the cards it holds, px at 1080p: left and right of the
+/// shelf's margin, and above the tiles' top edge. A focused tile's pop grows past it on purpose —
+/// the card lifting OUT of its tray is the focus.
+pub const SHELF_TRAY_PAD: f32 = 14.0;
+
+/// **The tray one titled shelf of cards sits in** — a faint, rimmed sheet behind the row, so each
+/// filter (Popular, Trending, a genre) reads as one container and two shelves are visibly apart.
+/// The heading stays ABOVE it as the tray's title: a shelf's pitch keeps only a region gap
+/// between one row's cards and the next row's heading, and a tray that also wrapped the heading
+/// would have left no air between two trays.
+///
+/// `cards_top` is the top of the tiles (screen space, as the screen lays the row out), `cards_h`
+/// the tile height, `band` the label band the shelf reserves right now (`Shelf::under_band`) and
+/// `margin_x` the shelf's left margin; the tray is symmetric about the screen. Drawn BEFORE the
+/// row, under its cards.
+pub fn shelf_tray(p: Painter, margin_x: f32, cards_top: f32, cards_h: f32, band: f32) {
+    let collapsed = crate::card_row::LABEL_BAND_COLLAPSED;
+    let open = ((band - collapsed) / (crate::card_row::UNDER_LABEL_H - collapsed)).clamp(0.0, 1.0);
+    // collapsed: one pad of sheet under the posters; open: the whole label block plus a little
+    let foot = SHELF_TRAY_PAD + (crate::card_row::UNDER_LABEL_H + 4.0 - SHELF_TRAY_PAD) * open;
+    let x = margin_x - SHELF_TRAY_PAD;
+    let w = crate::consts::SCR_W - 2.0 * x;
+    let top = cards_top - SHELF_TRAY_PAD;
+    let r = Rect::new(x, top, w, cards_h + SHELF_TRAY_PAD + foot);
+    p.rect_rimmed(
+        r,
+        theme::SHELF_TRAY_RAD,
+        theme::SHELF_TRAY_TOP,
+        theme::SHELF_TRAY_BOT,
+        theme::SHELF_TRAY_RIM,
+        theme::SHELF_TRAY_RIM_TOP,
+    );
 }
 
 // ---- PageGround: the item-keyed ground a BROWSING screen stands on. ----

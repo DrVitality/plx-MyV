@@ -480,6 +480,7 @@ pub fn card_peek(m: &plx_data::pms::PmsMovie) -> Option<plx_ui::cards::Peek> {
     if m.audience > 0.0 {
         facts.push(plx_platform::i18n::msg::browse_peek_imdb(&format!("{:.1}", m.audience)));
     }
+    note_peeked(m);
     let hint = if card_press_plays(m.kind) {
         plx_platform::i18n::msg::browse_peek_hint_play()
     } else {
@@ -495,7 +496,40 @@ pub fn card_peek(m: &plx_data::pms::PmsMovie) -> Option<plx_ui::cards::Peek> {
             m.summary.clone()
         },
         hint: hint.to_string(),
+        play: plx_platform::i18n::msg::browse_peek_play().to_string(),
+        details: plx_platform::i18n::msg::browse_peek_details().to_string(),
+        ok_plays: card_press_plays(m.kind),
+        key: peek_key(m),
     })
+}
+
+/// The key a bubble's buttons hand back ([`plx_ui::cards::peek::hit`]): the server and the item.
+fn peek_key(m: &plx_data::pms::PmsMovie) -> String {
+    format!("{}/{}", m.sid.raw(), m.rk)
+}
+
+/// The rows the details bubble was last opened on, newest last — what a click on one of its
+/// buttons acts on ([`peeked_row`]). A handful, because a frame can draw a bubble per section.
+static PEEKED: std::sync::Mutex<Vec<plx_data::pms::PmsMovie>> = std::sync::Mutex::new(Vec::new());
+const PEEKED_KEEP: usize = 4;
+
+/// Remember `m` as a row a bubble is showing (a no-op when it already is the newest).
+fn note_peeked(m: &plx_data::pms::PmsMovie) {
+    let mut rows = PEEKED.lock().unwrap_or_else(|e| e.into_inner());
+    if rows.last().is_some_and(|r| r.sid == m.sid && r.rk == m.rk) {
+        return;
+    }
+    rows.retain(|r| !(r.sid == m.sid && r.rk == m.rk));
+    rows.push(m.clone());
+    if rows.len() > PEEKED_KEEP {
+        rows.remove(0);
+    }
+}
+
+/// The row a details bubble with this key ([`plx_ui::cards::Peek::key`]) was opened on.
+pub fn peeked_row(key: &str) -> Option<plx_data::pms::PmsMovie> {
+    let rows = PEEKED.lock().unwrap_or_else(|e| e.into_inner());
+    rows.iter().rev().find(|m| peek_key(m) == key).cloned()
 }
 
 /// Which of the three menus this is, and the data its row set is built from.

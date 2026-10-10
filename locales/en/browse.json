@@ -481,6 +481,14 @@
       "score": "str"
     }
   },
+  "browse.peek.play": {
+    "value": "Play",
+    "description": "Button in the details bubble beside a focused card: plays the item (clickable with the pointer; lit when OK does the same)."
+  },
+  "browse.peek.details": {
+    "value": "Details",
+    "description": "Button in the details bubble beside a focused card: opens the item's page (clickable with the pointer; lit when OK does the same)."
+  },
   "browse.peek.hint_play": {
     "value": "OK plays · hold OK for more",
     "description": "Foot line of the details bubble that opens beside a focused card: pressing OK plays the item, holding OK opens its menu (with Go to Movie / Show)."

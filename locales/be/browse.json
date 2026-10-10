@@ -125,6 +125,8 @@
   "browse.menu.instant_only": "Толькі імгненныя",
   "browse.player.still_watching": "Яшчэ глядзіце? Націсніце OK, каб працягнуць.",
   "browse.peek.imdb": "IMDb {score}",
+  "browse.peek.play": "Прайграць",
+  "browse.peek.details": "Падрабязнасці",
   "browse.peek.hint_play": "OK — прайграць · утрымлівайце OK — больш",
   "browse.peek.hint_details": "OK — адкрыць · утрымлівайце OK — больш",
   "browse.kind.anime": "Анімэ",

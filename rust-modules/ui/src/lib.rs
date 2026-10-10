@@ -1189,8 +1189,8 @@ impl Painter {
             k.record(data);
         }) { return; }
         if self.records() { return; }
-        let k = self.wash_corners(k);
         let m = self.place(r);
+        let k = self.wash_corners(k, m);
         plx_gfx::gfx::draw_ambient(
             m.x, m.y, m.w, m.h,
             dim,
@@ -1239,7 +1239,7 @@ impl Painter {
         let (m, am) = (self.place(r), self.place(art));
         plx_gfx::gfx::draw_art_wash(
             (m.x, m.y, m.w, m.h),
-            self.wash_corners(k),
+            self.wash_corners(k, m),
             tex,
             (am.x, am.y, am.w, am.h),
             uv,
@@ -1262,9 +1262,9 @@ impl Painter {
             ink.1.record(data);
         }) { return; }
         if self.records() { return; }
-        let k = self.wash_corners(k);
-        let (ink, inka) = self.ink(ink);
         let m = self.place(r);
+        let k = self.wash_corners(k, m);
+        let (ink, inka) = self.ink(ink);
         plx_gfx::gfx::draw_ambient_inked(
             m.x, m.y, m.w, m.h,
             1.0,
@@ -1283,7 +1283,12 @@ impl Painter {
     /// [`ambient_art`](Self::ambient_art) must apply identically: the wash stays OPAQUE, so an alpha
     /// below 1 mixes it toward [`theme::SURFACE_APP`] rather than thinning it, and the rgb gain
     /// scales what is left.
-    fn wash_corners(self, k: [[f32; 3]; 4]) -> [[f32; 3]; 4] {
+    ///
+    /// `m` is the wash's PLACED rect: the live ground's own shift
+    /// ([`theme::appearance::wash_shift`] — another ground's offset from the palette surface, and
+    /// Ember's page gradient) is added at each corner's screen position, so a wash cut into bands
+    /// still paints one continuous gradient.
+    fn wash_corners(self, k: [[f32; 3]; 4], m: Rect) -> [[f32; 3]; 4] {
         let a = self.a.clamp(0.0, 1.0);
         let g = theme::SURFACE_APP; // `theme::mix` is rgba; a wash corner is rgb
         let k = if a >= 1.0 {
@@ -1291,7 +1296,16 @@ impl Painter {
         } else {
             k.map(|c| std::array::from_fn(|i| g[i] + (c[i] - g[i]) * a))
         };
-        k.map(|c| c.map(|v| v * self.rgb))
+        let full = Rect::FULL;
+        let at = [(m.x, m.y), (m.x + m.w, m.y), (m.x + m.w, m.y + m.h), (m.x, m.y + m.h)];
+        let mut out = k;
+        for (c, (x, y)) in out.iter_mut().zip(at) {
+            let d = theme::appearance::wash_shift(x / full.w, y / full.h);
+            for i in 0..3 {
+                c[i] = (c[i] + d[i]).clamp(0.0, 1.0) * self.rgb;
+            }
+        }
+        out
     }
     /// Bilinear 4-corner gradient with real per-corner ALPHA, folded through the cascade — the
     /// counterpart of [`ambient`](Self::ambient), which is opaque by contract and therefore cannot

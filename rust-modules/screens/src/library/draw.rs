@@ -156,6 +156,9 @@ impl LibraryScreen {
                 let origin = self.layout.shelf_y(&self.run, index, self.scroll.pos);
                 if !shelf_on_screen(origin, self.layout.shelf_pitch(&self.run, index)) { continue; }
                 let heading_y = origin - plx_ui::consts::TITLE_DY - row.cards.heading_lift();
+                // the shelf's container, under its heading's line and its cards
+                plx_ui::widgets::shelf_tray(p, MARGIN_X, origin + plx_ui::consts::CARD_DY,
+                    row.cards.style().h, row.cards.under_band());
                 if let Some(heading) = self.heading_widget(index, f.cx) {
                     let focused = f.focus.current.is_some_and(|key| key.entry == self.entry
                         && Some(key.elem) == row.heading_elem());

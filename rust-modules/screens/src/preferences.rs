@@ -634,6 +634,7 @@ fn accent_label(a: plx_ui::theme::appearance::Accent) -> &'static str {
 fn ground_label(g: plx_ui::theme::appearance::Ground) -> &'static str {
     use plx_ui::theme::appearance::Ground;
     match g {
+        Ground::Ember => plx_platform::i18n::msg::settings_appearance_ground_ember(),
         Ground::Charcoal => plx_platform::i18n::msg::settings_appearance_ground_charcoal(),
         Ground::Graphite => plx_platform::i18n::msg::settings_appearance_ground_graphite(),
         Ground::Midnight => plx_platform::i18n::msg::settings_appearance_ground_midnight(),

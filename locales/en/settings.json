@@ -755,9 +755,13 @@
     "value": "The tone of the app's background and panels.",
     "description": "Explanation under the Background picker title."
   },
+  "settings.appearance.ground.ember": {
+    "value": "Ember",
+    "description": "Background option (the default): warm umber gray with a soft orange-to-gray gradient across the page."
+  },
   "settings.appearance.ground.charcoal": {
     "value": "Warm charcoal",
-    "description": "Background option (the default): dark gray with a hint of red."
+    "description": "Background option: dark gray with a hint of red."
   },
   "settings.appearance.ground.graphite": {
     "value": "Graphite",

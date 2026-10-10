@@ -119,7 +119,35 @@ pub fn shelves(addons: &[Addon]) -> Vec<Shelf> {
             out.push(Shelf { addon: a, catalog: c, lib });
         }
     }
+    lead_anime(addons, &mut out);
     out
+}
+
+/// Where an anime catalog stands among the Anime tab's shelves: Popular first, Trending second,
+/// everything else after them in the account's addon order.
+fn anime_rank(addons: &[Addon], s: &Shelf) -> u8 {
+    let Some(c) = addons.get(s.addon).and_then(|a| a.manifest.catalogs.get(s.catalog)) else {
+        return 2;
+    };
+    let words = format!("{} {}", c.id, c.title()).to_ascii_lowercase();
+    if words.contains("popular") {
+        0
+    } else if words.contains("trending") {
+        1
+    } else {
+        2
+    }
+}
+
+/// Reorder the anime shelves in place (`anime_rank`, stable), leaving every other library's
+/// shelves exactly where they were.
+fn lead_anime(addons: &[Addon], out: &mut [Shelf]) {
+    let slots: Vec<usize> = (0..out.len()).filter(|&i| out[i].lib == Lib::Anime).collect();
+    let mut anime: Vec<Shelf> = slots.iter().map(|&i| out[i]).collect();
+    anime.sort_by_key(|s| anime_rank(addons, s));
+    for (slot, shelf) in slots.into_iter().zip(anime) {
+        out[slot] = shelf;
+    }
 }
 
 /// The libraries that have at least one shelf, in tab order.

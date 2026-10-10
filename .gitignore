@@ -67,6 +67,8 @@ rust-poc/
 # per-checkout OVERRIDE: tools/tv-config.sh also reads ~/.config/plxnative/tv-host (and tv-mac), the
 # once-per-machine home for these that every worktree shares.
 .tv-host
+# the simulator's last event log, copied out of WSL by tools/sim.ps1 run
+.sim-events.log
 .tv-stream.pid
 .tv-stream.log
 pkg/sockprobe

@@ -266,10 +266,32 @@ fn catalogs_land_in_movies_shows_and_anime_and_others_are_left_out() {
     assert_eq!(placed, vec![
         (0, 0, Lib::Movies),
         (0, 1, Lib::Shows),
-        (0, 3, Lib::Anime),
+        // Trending leads the Anime tab, ahead of an addon listed earlier
         (1, 0, Lib::Anime),
+        (0, 3, Lib::Anime),
     ]);
     assert_eq!(library::libraries(&all), vec![Lib::Movies, Lib::Shows, Lib::Anime]);
+}
+
+#[test]
+fn the_anime_tab_opens_on_popular_then_trending_and_other_libraries_keep_their_order() {
+    let mut k = kitsu();
+    k.manifest.catalogs = vec![
+        catalog("anime", "kitsu-anime-airing", Some("Top Airing")),
+        catalog("anime", "kitsu-anime-trending", Some("Trending")),
+        catalog("anime", "kitsu-anime-rating", Some("Highest Rated")),
+        catalog("anime", "kitsu-anime-popular", Some("Most Popular")),
+    ];
+    let all = library::shelves(&[cinemeta(), k]);
+    let placed: Vec<(usize, usize, Lib)> = all.iter().map(|s| (s.addon, s.catalog, s.lib)).collect();
+    assert_eq!(placed, vec![
+        (0, 0, Lib::Movies),
+        (0, 1, Lib::Shows),
+        (1, 3, Lib::Anime),
+        (1, 1, Lib::Anime),
+        (1, 0, Lib::Anime),
+        (1, 2, Lib::Anime),
+    ]);
 }
 
 // ---------------------------------------------------------------- ids and titles

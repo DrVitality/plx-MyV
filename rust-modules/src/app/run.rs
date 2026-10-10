@@ -1268,6 +1268,11 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
         // drove HOME's focus underneath instead. The press-cancel each of them paid for
         // by hand — a pointer sliding off the control it armed must abandon that press —
         // is `dispatch`'s ingest, which cancels an arm whose hit no longer resolves to it.
+        // Over an open details bubble the pointer is reaching for its buttons: the cards drawn
+        // under it must not take focus (which would close the bubble on the way).
+        if !matches!(app.route(), AppArg::Player) && plx_ui::cards::peek::covers(mx, my) {
+            return;
+        }
         if super::bridge::owns_input(&app.pages) {
             // `app.last_input`, stamped from the clock at the top of this arm: `fr.now`
             // is not written until after ingest (`tree_tick` above says why).
@@ -1314,6 +1319,22 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
         // replaces each spelled out the two activation shapes by hand — a control FACE
         // dips and commits on the spring-back, a table row commits on the button-down —
         // which is exactly what `ElemKind` says once, per element, for every owned screen.
+        // A click on one of the details bubble's buttons: Play or Details for the card the
+        // bubble was drawn for, the same activation OK and the card's menu perform.
+        if !matches!(app.route(), AppArg::Player) {
+            let (cx, cy) = ptr_xy(&app.ev);
+            if let Some((button, key)) = plx_ui::cards::peek::hit(cx, cy) {
+                if let Some(item) = plx_screens::registry::peeked_row(&key) {
+                    log("bubble: button clicked");
+                    let play = button == plx_ui::cards::peek::PeekButton::Play;
+                    super::input::activate_card(&mut app.player.session, &mut app.adapters.player, &item, play,
+                        HUD_LINGER_MS, None, &mut app.pages, &mut app.bridge, &mut app.menu_play_await,
+                        clock::now());
+                    plx_machine::idle::invalidate();
+                    return;
+                }
+            }
+        }
         if super::bridge::owns_input(&app.pages) {
             let (cx, cy) = ptr_xy(&app.ev);
             app.inputs.push(super::bridge::click_input(
@@ -2537,6 +2558,8 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                                 app.bridge.redraw_opener(&app.pages);
                             }
                         };
+                        // a bubble that closed takes its clickable buttons with it
+                        plx_ui::cards::peek::begin_frame();
                         {
                             let _declarations = plx_ui::frame::backdrop::discover(sources.clone());
                             plx_base::diag::spans::span("disc", || page(Z::ALL));

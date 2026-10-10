@@ -256,8 +256,22 @@ echo "Built $target/release/plxnative-sim"
         Assert-WslgFastTransport
         Invoke-WslShell -Environment $commonEnvironment -Script ($instanceLocks + "`n" + $prepare + "`n" + @'
 build_simulator
-printf '%s\n' "$$" > "$runtime/plxnative-sim.pid"
-exec "$target/release/plxnative-sim" "$pms" "$port"
+# Not exec'd, so the log can be copied out afterwards; the pid file still names the simulator
+# itself, which is what `send` checks against /proc.
+"$target/release/plxnative-sim" "$pms" "$port" &
+pid=$!
+printf '%s\n' "$pid" > "$runtime/plxnative-sim.pid"
+trap 'kill "$pid" 2>/dev/null || true' INT TERM
+status=0
+wait "$pid" || status=$?
+rm -f "$runtime/plxnative-sim.pid"
+# Leave this run's event log beside the checkout (gitignored), so it can be read from Windows
+# without reaching into the WSL home: .sim-events.log.
+if [ -f "$runtime/plxnative-events.log" ]; then
+    cp -f "$runtime/plxnative-events.log" "$repo/.sim-events.log" || true
+    echo "Event log: .sim-events.log"
+fi
+exit "$status"
 '@)
     }
     "shot" {

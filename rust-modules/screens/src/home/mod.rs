@@ -1667,6 +1667,16 @@ impl HomeScreen {
                 continue;
             }
             let row_y = self.grid.base_y(row);
+            if env.sp > 0.02 {
+                // the shelf's container, under its heading's line and its cards
+                plx_ui::widgets::shelf_tray(
+                    p.alpha(env.sp),
+                    MARGIN_X,
+                    row_y + CARD_DY,
+                    CARD_H,
+                    self.grid.under_band(row),
+                );
+            }
             if let Some(linked) = self.heading_widget(view, row).filter(|_| env.sp > 0.02) {
                 let m = linked.measure(f.measure);
                 let focus_t = f32::from(heading == Some(row) && env.sp > 0.5);
