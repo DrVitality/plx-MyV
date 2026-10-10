@@ -1,10 +1,11 @@
-{"updated":"2026-10-10T04:49:27Z",
+{"updated":"2026-10-10T05:17:03Z",
 "ci":[
 {"id":38024928237,"at":"2026-10-10T04:41:13Z","sha":"23c632920","title":"plex: account evidence tests address the account host the build now uses","pr":1,"event":"pull_request","conclusion":"success","attempt":1,"jobs":{"host harness tests":159,"cross-build (armv7) + artifact assertions":303,"host unit tests (hostsim)":163,"host lint + type-checks":162,"host python/shell/C gates":142,"host unit tests (default features)":288,"host checks (NOT a device gate)":4}}
 ],
 "sim":[
 {"id":38024435672,"at":"2026-10-10T04:32:38Z","sha":"0b95ea4cd","title":"stremio: drop an unused import; keep build noise out of CI error annotations","pr":1,"event":"pull_request","conclusion":"success","attempt":1,"jobs":{"macOS simulator build + launch":382,"macOS tests against bundled FFmpeg and ASS":311,"Linux simulator build + launch":347,"Windows launcher syntax":20}},
-{"id":38024928239,"at":"2026-10-10T04:41:13Z","sha":"23c632920","title":"plex: account evidence tests address the account host the build now uses","pr":1,"event":"pull_request","conclusion":"success","attempt":1,"jobs":{"macOS tests against bundled FFmpeg and ASS":106,"Windows launcher syntax":20,"macOS simulator build + launch":175,"Linux simulator build + launch":218}}
+{"id":38024928239,"at":"2026-10-10T04:41:13Z","sha":"23c632920","title":"plex: account evidence tests address the account host the build now uses","pr":1,"event":"pull_request","conclusion":"success","attempt":1,"jobs":{"macOS tests against bundled FFmpeg and ASS":106,"Windows launcher syntax":20,"macOS simulator build + launch":175,"Linux simulator build + launch":218}},
+{"id":38026689449,"at":"2026-10-10T05:11:58Z","sha":"3e948a5af","title":"stremio: Movies, TV Shows and Anime libraries, Home, search and title pages from addons","pr":1,"event":"pull_request","conclusion":"success","attempt":1,"jobs":{"macOS simulator build + launch":132,"Windows launcher syntax":18,"Linux simulator build + launch":229,"macOS tests against bundled FFmpeg and ASS":176}}
 ],
 "nightly":[],
 "cancelled":{"2026-10-10":{"push":0,"pull_request":5}},
