@@ -1,8 +1,9 @@
-{"updated":"2026-10-10T04:39:42Z",
+{"updated":"2026-10-10T04:45:02Z",
 "ci":[],
 "sim":[
-{"id":38024435672,"at":"2026-10-10T04:32:38Z","sha":"0b95ea4cd","title":"stremio: drop an unused import; keep build noise out of CI error annotations","pr":1,"event":"pull_request","conclusion":"success","attempt":1,"jobs":{"macOS simulator build + launch":382,"macOS tests against bundled FFmpeg and ASS":311,"Linux simulator build + launch":347,"Windows launcher syntax":20}}
+{"id":38024435672,"at":"2026-10-10T04:32:38Z","sha":"0b95ea4cd","title":"stremio: drop an unused import; keep build noise out of CI error annotations","pr":1,"event":"pull_request","conclusion":"success","attempt":1,"jobs":{"macOS simulator build + launch":382,"macOS tests against bundled FFmpeg and ASS":311,"Linux simulator build + launch":347,"Windows launcher syntax":20}},
+{"id":38024928239,"at":"2026-10-10T04:41:13Z","sha":"23c632920","title":"plex: account evidence tests address the account host the build now uses","pr":1,"event":"pull_request","conclusion":"success","attempt":1,"jobs":{"macOS tests against bundled FFmpeg and ASS":106,"Windows launcher syntax":20,"macOS simulator build + launch":175,"Linux simulator build + launch":218}}
 ],
 "nightly":[],
-"cancelled":{"2026-10-10":{"push":0,"pull_request":4}},
+"cancelled":{"2026-10-10":{"push":0,"pull_request":5}},
 "daily":[]}
