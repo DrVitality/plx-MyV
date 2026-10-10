@@ -1018,6 +1018,7 @@ fn settings_boot_arm(app: &mut App, fr: &mut Frame) {
                 "picker-deck-press" => plx_screens::family::SettingsPage::Picker(plx_screens::family::PickerKind::DeckPress),
                 "picker-skip-interval" => plx_screens::family::SettingsPage::Picker(plx_screens::family::PickerKind::SkipInterval),
                 "audio" => plx_screens::family::SettingsPage::AudioSubtitles,
+                "appearance" => plx_screens::family::SettingsPage::Appearance,
                 _other => {
                     #[cfg(feature = "devtriggers")]
                     plx_base::eventlog::log(&format!("BADTRIGGER settings-boot target {_other:?} unknown; opened root instead"));
@@ -2034,6 +2035,7 @@ pub(crate) fn nav_osc_tick(app: &mut App, now: u32) {
                 if let Some(kind) = app.bridge.browse_directory().tab_kind(0) {
                     let tab = match kind {
                         plx_data::stores::browse::SecKind::Show => HomeTab::Shows,
+                        plx_data::stores::browse::SecKind::Anime => HomeTab::Anime,
                         _ => HomeTab::Movies,
                     };
                     crate::app::bridge::nav_tab(&mut app.pages, &mut app.bridge, tab, None, None);
@@ -2259,6 +2261,7 @@ fn push_bench_open(app: &mut App, target: bench::PushTarget) -> bench::PushTarge
             if let Some(kind) = app.bridge.browse_directory().tab_kind(0) {
                 let tab = match kind {
                     plx_data::stores::browse::SecKind::Show => HomeTab::Shows,
+                        plx_data::stores::browse::SecKind::Anime => HomeTab::Anime,
                     _ => HomeTab::Movies,
                 };
                 crate::app::bridge::nav_tab(&mut app.pages, &mut app.bridge, tab, None, None);
