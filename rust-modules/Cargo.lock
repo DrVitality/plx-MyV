@@ -751,6 +751,7 @@ version = "0.8.0"
 dependencies = [
  "image",
  "libc",
+ "miniz_oxide",
  "plx_appkit",
  "plx_base",
  "plx_data",

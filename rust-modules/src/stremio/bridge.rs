@@ -19,6 +19,7 @@ mod config;
 mod content;
 mod play;
 mod subs;
+mod watched;
 
 use super::api::{Addon, ApiError, Stremio};
 use super::catalog::ArtMap;

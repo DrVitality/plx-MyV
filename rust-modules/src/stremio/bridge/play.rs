@@ -425,6 +425,16 @@ impl Bridge {
             },
             Rk::Season { .. } => return Err(Response::empty(404)),
         };
+        match rk {
+            Rk::Episode { .. } => self.mark_watched_rows(token, &t, std::slice::from_mut(&mut row)),
+            _ => {
+                let items = self.library_items(token);
+                let it = items.iter().find(|it| it.get("_id").and_then(Value::as_str) == Some(t.id.as_str()));
+                if it.is_some_and(super::content::film_watched) {
+                    row["viewCount"] = json!(1);
+                }
+            }
+        }
         if let Some(r) = self.resolved(token, rk, rk_s, t.minutes) {
             // what will play, said before the press: the first line of the synopsis
             let ready = match r.chosen.map(|i| &r.streams[i].1) {
@@ -596,7 +606,7 @@ impl Bridge {
         if due {
             if let Some(rk) = Rk::decode(&rk_s) {
                 let finished = state == "stopped" && duration > 0 && time as f64 >= duration as f64 * WATCHED_AT;
-                self.write_progress(token, &rk, if finished { 0 } else { time }, duration, finished);
+                self.write_progress(token, &rk, if finished { 0 } else { time }, duration, finished, finished);
             }
         }
         Response::json(200, &container(json!({})))
@@ -605,14 +615,18 @@ impl Bridge {
     /// `/:/scrobble` and `/:/unscrobble`: mark watched, or not.
     pub(super) fn scrobble(&self, req: &Request, token: &str, watched: bool) -> Response {
         if let Some(rk) = req.query("key").and_then(Rk::decode) {
-            self.write_progress(token, &rk, 0, 0, watched);
+            self.write_progress(token, &rk, 0, 0, watched, true);
         }
         Response::json(200, &container(json!({})))
     }
 
     /// Writes one item's progress to the account's library: its own entry when it has one, a
-    /// temporary one (as Stremio's apps make for an unsaved title) when not.
-    fn write_progress(&self, token: &str, rk: &Rk, offset: i64, duration: i64, watched: bool) {
+    /// temporary one (as Stremio's apps make for an unsaved title) when not. `mark` also writes
+    /// `watched` into the show's watched-episodes field (a finish, or a Mark as (un)watched) —
+    /// for a season or a whole show, that field is all that changes.
+    fn write_progress(&self, token: &str, rk: &Rk, offset: i64, duration: i64, watched: bool, mark: bool) {
+        let many = matches!(rk, Rk::Season { .. } | Rk::Item { kind: catalog::Kind::Show, .. });
+        let movie = matches!(rk, Rk::Item { kind: catalog::Kind::Movie, .. });
         let (stype, show_id) = rk.show();
         let video = match rk {
             Rk::Episode { video, .. } => video.clone(),
@@ -636,18 +650,37 @@ impl Bridge {
             }
         };
         item["_mtime"] = json!(now);
+        let field = if mark && !movie {
+            let stored = item.pointer("/state/watched").and_then(Value::as_str).map(str::to_string);
+            match self.watched_field_after(token, rk, stored.as_deref(), watched) {
+                Some(f) => Some(f),
+                // a season or show whose field cannot be written has nothing else to write
+                None if many => return,
+                None => None,
+            }
+        } else {
+            None
+        };
         let state = &mut item["state"];
-        state["lastWatched"] = json!(now);
-        state["timeOffset"] = json!(offset);
-        if duration > 0 {
-            state["duration"] = json!(duration);
+        if let Some(f) = field {
+            state["watched"] = json!(f);
         }
-        state["video_id"] = json!(video);
-        if watched {
-            let times = state.get("timesWatched").and_then(Value::as_i64).unwrap_or(0);
-            state["timesWatched"] = json!(times + 1);
-            state["flaggedWatched"] = json!(1);
-            state["timeOffset"] = json!(0);
+        if !many {
+            state["lastWatched"] = json!(now);
+            state["timeOffset"] = json!(offset);
+            if duration > 0 {
+                state["duration"] = json!(duration);
+            }
+            state["video_id"] = json!(video);
+            if watched {
+                let times = state.get("timesWatched").and_then(Value::as_i64).unwrap_or(0);
+                state["timesWatched"] = json!(times + 1);
+                state["flaggedWatched"] = json!(1);
+                state["timeOffset"] = json!(0);
+            } else if mark && movie {
+                state["flaggedWatched"] = json!(0);
+                state["timesWatched"] = json!(0);
+            }
         }
         match self.stremio.library_put(token, &[item]) {
             Ok(()) => *self.library.lock().unwrap_or_else(|e| e.into_inner()) = None,

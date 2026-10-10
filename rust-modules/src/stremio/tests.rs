@@ -937,3 +937,52 @@ fn an_aniskip_recap_is_skipped_like_an_opening_only_when_there_is_none() {
     assert_eq!(m.len(), 1);
     assert_eq!(m[0]["startTimeOffset"], 90_000);
 }
+
+/// Game of Thrones with its first episode ticked in Stremio's watched field.
+fn watched_scripted() -> Scripted {
+    let mut s = content_scripted();
+    s.library[0]["state"]["watched"] = json!("tt0944947:1:1:1:eJxjBAAAAgAC");
+    s
+}
+
+#[test]
+fn episodes_and_seasons_carry_the_ticks_stremio_keeps() {
+    let b = bridge_with(watched_scripted());
+    let show = Rk::item("series", "tt0944947").unwrap().encode();
+    let seasons = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{show}/children"))));
+    let seasons = seasons["MediaContainer"]["Metadata"].as_array().unwrap();
+    assert_eq!(seasons[0]["viewedLeafCount"], 1);
+    assert_eq!(seasons[1]["viewedLeafCount"], 0);
+    let s1 = seasons[0]["ratingKey"].as_str().unwrap();
+    let eps = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{s1}/children"))));
+    let eps = eps["MediaContainer"]["Metadata"].as_array().unwrap();
+    assert_eq!(eps[0]["viewCount"], 1);
+    assert!(eps[1].get("viewCount").is_none());
+    let page = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{show}"))));
+    assert_eq!(page["MediaContainer"]["Metadata"][0]["viewedLeafCount"], 1);
+}
+
+#[test]
+fn marking_a_season_watched_ticks_its_episodes_and_keeps_the_resume_point() {
+    let written = std::sync::Arc::new(Mutex::new(Vec::<Value>::new()));
+    let b = Bridge::new(Box::new(Recording { inner: watched_scripted(), written: written.clone() }), 32498);
+    let s1 = Rk::Season { stype: "series".into(), id: "tt0944947".into(), season: 1 }.encode();
+    b.handle(&authed("GET", &format!("/:/scrobble?key={s1}&identifier=com.plexapp.plugins.library")));
+    let w = written.lock().unwrap();
+    assert_eq!(w.len(), 1);
+    let field = w[0]["state"]["watched"].as_str().unwrap();
+    assert!(field.starts_with("tt0944947:1:2:2:"), "the last watched episode anchors it: {field}");
+    assert_eq!(w[0]["state"]["timeOffset"], 600000, "a season mark is not a viewing");
+    assert_eq!(w[0]["state"]["video_id"], "tt0944947:1:2");
+}
+
+#[test]
+fn a_watched_field_this_app_cannot_line_up_is_left_alone() {
+    let mut s = content_scripted();
+    s.library[0]["state"]["watched"] = json!("tt0944947:9:9:4:eJxjBAAAAgAC");
+    let written = std::sync::Arc::new(Mutex::new(Vec::<Value>::new()));
+    let b = Bridge::new(Box::new(Recording { inner: s, written: written.clone() }), 32498);
+    let s1 = Rk::Season { stype: "series".into(), id: "tt0944947".into(), season: 1 }.encode();
+    b.handle(&authed("GET", &format!("/:/scrobble?key={s1}")));
+    assert!(written.lock().unwrap().is_empty(), "nothing is written over a field that did not read");
+}

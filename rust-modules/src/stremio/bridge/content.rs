@@ -45,6 +45,13 @@ const NEW_EPISODE_DAYS: i64 = 21;
 /// Saved shows New Episodes looks at, most recently changed first.
 const NEW_EPISODE_SHOWS: usize = 24;
 
+/// Has the account watched this film? Stremio marks a finish with `flaggedWatched`, and counts
+/// viewings in `timesWatched`.
+pub(super) fn film_watched(it: &Value) -> bool {
+    it.pointer("/state/flaggedWatched").and_then(Value::as_i64).unwrap_or(0) > 0
+        || it.pointer("/state/timesWatched").and_then(Value::as_i64).unwrap_or(0) > 0
+}
+
 /// Is this library item one the account saved (not removed, not a temporary watch entry)?
 pub(super) fn is_saved(it: &Value) -> bool {
     !it.get("removed").and_then(Value::as_bool).unwrap_or(false)
@@ -246,12 +253,16 @@ impl Bridge {
 
     fn rows(&self, titles: &[Title], lib: Lib) -> Vec<Value> {
         let saved = self.saved_ids();
+        let seen = self.watched_film_ids();
         titles
             .iter()
             .map(|t| {
                 let mut row = catalog::title_row(t, row_shelf(lib), &self.art);
                 if saved.contains(&t.id) {
                     row["stremioInLibrary"] = json!(true);
+                }
+                if seen.contains(&t.id) && row.get("type").and_then(Value::as_str) == Some("movie") {
+                    row["viewCount"] = json!(1);
                 }
                 row
             })
@@ -267,6 +278,20 @@ impl Bridge {
             .map(|(_, _, items)| {
                 items.iter()
                     .filter(|it| is_saved(it))
+                    .filter_map(|it| it.get("_id").and_then(Value::as_str).map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The films the account has watched (Stremio's `flaggedWatched` or a finished viewing), as
+    /// last read — like [`saved_ids`](Self::saved_ids), never a fetch of its own.
+    pub(super) fn watched_film_ids(&self) -> std::collections::HashSet<String> {
+        let memo = self.library.lock().unwrap_or_else(|e| e.into_inner());
+        memo.as_ref()
+            .map(|(_, _, items)| {
+                items.iter()
+                    .filter(|it| it.get("type").and_then(Value::as_str) == Some("movie") && film_watched(it))
                     .filter_map(|it| it.get("_id").and_then(Value::as_str).map(str::to_string))
                     .collect()
             })
@@ -909,7 +934,9 @@ impl Bridge {
                 None => return Response::empty(404),
             },
         };
-        Response::json(200, &container(json!({"size": 1, "Metadata": [row]})))
+        let mut rows = [row];
+        self.mark_watched_rows(token, &t, &mut rows);
+        Response::json(200, &container(json!({"size": 1, "Metadata": rows})))
     }
 
     /// `/library/metadata/{rk}/children`: a show's seasons, or a season's episodes.
@@ -920,7 +947,7 @@ impl Bridge {
             Err(r) => return r,
         };
         let shelf = row_shelf(Lib::of_title(&t.stype, &t.id));
-        let rows: Vec<Value> = match &rk {
+        let mut rows: Vec<Value> = match &rk {
             Rk::Item { .. } => catalog::season_rows(&t, shelf, &self.art),
             Rk::Season { season, .. } => t
                 .episodes(*season)
@@ -929,6 +956,7 @@ impl Bridge {
                 .collect(),
             Rk::Episode { .. } => Vec::new(),
         };
+        self.mark_watched_rows(token, &t, &mut rows);
         Response::json(200, &container(json!({"size": rows.len(), "Metadata": rows})))
     }
 
@@ -940,12 +968,13 @@ impl Bridge {
             Err(r) => return r,
         };
         let shelf = row_shelf(Lib::of_title(&t.stype, &t.id));
-        let rows: Vec<Value> = t
+        let mut rows: Vec<Value> = t
             .seasons()
             .into_iter()
             .flat_map(|s| t.episodes(s))
             .map(|e| catalog::episode_row(&t, e, shelf, &self.art, true))
             .collect();
+        self.mark_watched_rows(token, &t, &mut rows);
         Response::json(200, &container(json!({"size": rows.len(), "Metadata": rows})))
     }
 
