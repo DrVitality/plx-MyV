@@ -9,7 +9,14 @@ set -u
 out=""
 for log in "$@"; do
     [ -s "$log" ] || continue
-    part=$(grep -v 'host link: could not discover\| Compiling ' "$log" | grep -E -A8 '^(error|warning)(\[[A-Z0-9]+\])?:|panicked at|^test .* FAILED|^failures:|^FAIL|Error:|error:|^::error' | head -n 160)
+    # Every failing test's NAME first (one line each, so none is cut off by a long panic above
+    # it), then each panic with its assertion, then compiler and gate errors with context.
+    clean=$(grep -v 'host link: could not discover\| Compiling ' "$log")
+    part=$( {
+        printf '%s\n' "$clean" | grep -E '^test .* FAILED' | head -n 80
+        printf '%s\n' "$clean" | grep -E -A5 'panicked at' | head -n 240
+        printf '%s\n' "$clean" | grep -E -A8 '^(error|warning)(\[[A-Z0-9]+\])?:|^FAIL|Error:|error:|^::error' | head -n 160
+    } )
     [ -n "$part" ] && out="$out$(basename "$log"):
 $part
 "

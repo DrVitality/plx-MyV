@@ -684,6 +684,17 @@ fn the_card_anchor_rect_tracks_the_drawn_card_through_scroll_and_snap() {
     }
 }
 
+/// Equal to the 8-bit code: a blend that lands ON a colour may differ from it in the last float
+/// bit (the ground's channels are no longer all equal), which no pixel can show.
+#[track_caller]
+fn assert_same_colours(got: [[f32; 4]; 4], want: [[f32; 4]; 4], why: &str) {
+    for (g, w) in got.iter().zip(want.iter()) {
+        for (a, b) in g.iter().zip(w.iter()) {
+            assert!((a - b).abs() < 0.5 / 255.0, "{why}: {got:?} vs {want:?}");
+        }
+    }
+}
+
 fn blurred(blur: [[f32; 3]; 4]) -> PmsMovie {
     PmsMovie {
         has_blur: true,
@@ -714,15 +725,15 @@ fn the_wash_floors_on_the_app_surface_and_never_dims_toward_black() {
         [0.8, 0.75, 0.2],
         [0.1, 0.1, 0.12],
     ]);
-    assert_eq!(
+    assert_same_colours(
         wash_corners(Some(&bright), flat, 1.0),
         flat,
-        "the dive resolves to the app ground, not to black"
+        "the dive resolves to the app ground, not to black",
     );
-    assert_eq!(
+    assert_same_colours(
         wash_corners(Some(&bright), flat, 1.5),
         flat,
-        "…and an overshooting snap cannot push past it"
+        "…and an overshooting snap cannot push past it",
     );
 
     // **The grid end held at the app's own surface, which is what makes every assertion below

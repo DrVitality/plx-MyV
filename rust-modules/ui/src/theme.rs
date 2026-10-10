@@ -41,16 +41,16 @@ const COOL_150: [f32; 4] = rgb8(0xdb, 0xe0, 0xeb);
 const COOL_200: [f32; 4] = rgb8(0xcd, 0xd3, 0xdd);
 const COOL_300: [f32; 4] = rgb8(0xb8, 0xbf, 0xcc);
 const COOL_400: [f32; 4] = rgb8(0x94, 0x99, 0xa3);
-// Artwork that has not loaded sits a step above the charcoal ground, on its warm side.
-const COOL_850: [f32; 4] = rgb8(0x2a, 0x23, 0x25);
-const COOL_900: [f32; 4] = rgb8(0x1f, 0x1a, 0x1c);
+// Artwork that has not loaded sits a step below the charcoal ground, on its warm side.
+const COOL_850: [f32; 4] = rgb8(0x21, 0x1c, 0x1e);
+const COOL_900: [f32; 4] = rgb8(0x17, 0x13, 0x14);
 
 // Neutral — warm charcoal: the shelf, panels, control plates, inks. A hair of red in every stop,
 // so the surfaces belong to the crimson accent instead of fighting it as a cold grey.
-const NEUTRAL_600: [f32; 4] = rgb8(0x2d, 0x26, 0x27);
-const NEUTRAL_650: [f32; 4] = rgb8(0x27, 0x21, 0x23);
-const NEUTRAL_750: [f32; 4] = rgb8(0x1f, 0x1a, 0x1b);
-const NEUTRAL_850: [f32; 4] = rgb8(0x15, 0x11, 0x12);
+const NEUTRAL_600: [f32; 4] = rgb8(0x23, 0x1d, 0x1f);
+const NEUTRAL_650: [f32; 4] = rgb8(0x20, 0x1b, 0x1c);
+const NEUTRAL_750: [f32; 4] = rgb8(0x1a, 0x16, 0x17);
+const NEUTRAL_850: [f32; 4] = rgb8(0x13, 0x10, 0x11);
 const NEUTRAL_950: [f32; 4] = rgb8(0x0a, 0x07, 0x08);
 
 // Crimson — the brand accent. Used where the eye should go and nowhere else: the focused control,
@@ -96,7 +96,7 @@ const SAND_100: [f32; 4] = rgb8(0xe9, 0xe6, 0xe0);
 // an authored key light would use — bright near one corner, dark at its opposite — while every
 // corner still clears 3:1 against `TEXT_TERTIARY` and 7:1 against `TEXT_PRIMARY`, the same floors
 // `AmbientWash::keyed` holds a real hero to.
-const ATMOS_CHARCOAL: [f32; 4] = rgb8(0x18, 0x18, 0x1a);
+const ATMOS_CHARCOAL: [f32; 4] = rgb8(0x0e, 0x0c, 0x0d);
 const ATMOS_WARM_GREY: [f32; 4] = rgb8(0x4a, 0x46, 0x40);
 const ATMOS_UMBER: [f32; 4] = rgb8(0x5e, 0x3e, 0x24);
 const ATMOS_ASH: [f32; 4] = rgb8(0x42, 0x42, 0x4a);

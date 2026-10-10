@@ -64,7 +64,10 @@ fn a_ground_never_outshines_the_fine_print_that_sits_on_it() {
 #[test]
 fn a_ground_stays_light_enough_for_a_card_shadow() {
     let floor = AmbientWash::keyed([[0.0; 3]; 4], [AmbientWash::GROUND_W; 4]);
-    let rejected = [25.0 / 255.0, 25.0 / 255.0, 29.0 / 255.0, 1.0];
+    // The near-black the palette rejects, `#19191d`, judged by LIGHTNESS so the floor holds for a
+    // warm ground as much as for the old cool one.
+    let luma = |c: [f32; 4]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    let rejected = luma([25.0 / 255.0, 25.0 / 255.0, 29.0 / 255.0, 1.0]);
     for corner in floor {
         for ch in 0..3 {
             let want = theme::SURFACE_APP[ch] * (1.0 - AmbientWash::GROUND_W);
@@ -72,12 +75,12 @@ fn a_ground_stays_light_enough_for_a_card_shadow() {
                 (corner[ch] - want).abs() < 1e-6,
                 "the darkest ground is the surface scaled by 1-GROUND_W"
             );
-            assert!(
-                corner[ch] > rejected[ch],
-                "channel {ch} sank to {} — into the near-black the palette rejects",
-                corner[ch]
-            );
         }
+        assert!(
+            luma(corner) > rejected,
+            "the ground sank to luma {} — into the near-black the palette rejects",
+            luma(corner)
+        );
     }
 }
 

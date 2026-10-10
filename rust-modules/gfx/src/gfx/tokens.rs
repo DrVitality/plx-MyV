@@ -28,9 +28,11 @@ pub const fn rgb8(r: u8, g: u8, b: u8) -> [f32; 4] {
 // Neutral — achromatic. These two stops are the ones the renderer paints with directly; the rest of
 // the palette is `ui::theme`'s private primitive layer, which imports these so a code is still
 // written down in exactly one place.
-/// The app ground, a warm charcoal `#1c1819` (`theme::SURFACE_APP`'s stop) — the dark, faintly
-/// red-warm base the crimson accent sits on. It was Apple TV's shelf gray `#2c2c2e`.
-pub const NEUTRAL_500: [f32; 4] = rgb8(0x1c, 0x18, 0x19);
+/// The app ground, a warm charcoal `#282224` (`theme::SURFACE_APP`'s stop) — the dark, faintly
+/// red-warm base the crimson accent sits on. It was Apple TV's shelf gray `#2c2c2e`. Not darker:
+/// the darkest ambient ground (this scaled by `1 - AmbientWash::GROUND_W`) must stay light enough
+/// for a card's shadow to read on it.
+pub const NEUTRAL_500: [f32; 4] = rgb8(0x28, 0x22, 0x24);
 /// The scrim ink, near-black `#050508` (`theme::scrim`'s stop).
 pub const NEUTRAL_1000: [f32; 4] = rgb8(0x05, 0x05, 0x08);
 
