@@ -9,7 +9,7 @@ set -u
 out=""
 for log in "$@"; do
     [ -s "$log" ] || continue
-    part=$(grep -E -A8 '^(error|warning)(\[[A-Z0-9]+\])?:|panicked at|^test .* FAILED|^failures:|^FAIL|Error:|error:|^::error' "$log" | head -n 160)
+    part=$(grep -v 'host link: could not discover\| Compiling ' "$log" | grep -E -A8 '^(error|warning)(\[[A-Z0-9]+\])?:|panicked at|^test .* FAILED|^failures:|^FAIL|Error:|error:|^::error' | head -n 160)
     [ -n "$part" ] && out="$out$(basename "$log"):
 $part
 "

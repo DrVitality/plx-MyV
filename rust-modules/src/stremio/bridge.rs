@@ -17,7 +17,6 @@
 use super::api::{Addon, ApiError, Stremio};
 use super::http::{Request, Response};
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
