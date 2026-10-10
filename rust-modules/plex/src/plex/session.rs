@@ -1421,6 +1421,11 @@ pub struct Appearance {
     /// Settings > Video & playback > Skip intros: 1 = skip a marked intro on its own; 0 = offer
     /// the Skip Intro button.
     pub skip_intros: u8,
+    /// The player's More › Audio delay, in milliseconds (0 = none): a soundbar's lag is the set's,
+    /// not one film's, so it is kept.
+    pub audio_delay_ms: i16,
+    /// Settings > Appearance > Home opens on: 1 = the Continue Watching row, 0 = the hero.
+    pub home_start: u8,
 }
 
 impl Appearance {
@@ -6240,7 +6245,7 @@ mod appearance_tests {
 
     #[test]
     fn a_look_round_trips_through_both_formats() {
-        let look = Appearance { accent: 5, ground: 2, corners: 3, peek: 1, stream_res: 1, stream_source: 1, skip_intros: 1 };
+        let look = Appearance { accent: 5, ground: 2, corners: 3, peek: 1, stream_res: 1, stream_source: 1, skip_intros: 1, audio_delay_ms: -50, home_start: 1 };
         let session = Session::default().with_appearance(look);
         let round: Session = serde_json::from_str(&serde_json::to_string(&session).unwrap()).unwrap();
         assert_eq!(round.appearance(), look);

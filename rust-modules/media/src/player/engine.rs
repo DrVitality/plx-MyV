@@ -2743,7 +2743,8 @@ fn feed_audio_lane(mt: &MainThread, eng: &mut Engine) {
     // hoisted out of the loop: pts_shift is stable once rebase clears (only the video lane's rebase
     // arm writes it, on this same thread), and one pres_fed sample per tick is plenty against the
     // multi-second audio budget.
-    let shift = SHARED.pts_shift.load(Ordering::Relaxed);
+    // the viewer's audio delay rides on the same shift (`player::audio_delay_ms`)
+    let shift = SHARED.pts_shift.load(Ordering::Relaxed) + i64::from(super::audio_delay_ms()) * 1_000_000;
     let pres = eng.feed_pace.reference(SHARED.pres_fed.load(Ordering::Relaxed), super::vclock_ms());
     let slice = FeedSlice::begin();
     let mut fed = 0;

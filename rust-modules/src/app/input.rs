@@ -996,6 +996,29 @@ pub(super) fn player_stream_tick(
     }
 }
 
+/// **Search's suggested terms**: asked of the Stremio bridge once a run, on a worker, as soon as a
+/// server is registered, and handed to the Search screen (`search::set_suggestions`).
+pub(super) fn search_suggestions_fetch() {
+    static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if ASKED.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let Some(client) = plx_plex::plex::client_opt() else { return };
+    ASKED.store(true, std::sync::atomic::Ordering::Relaxed);
+    let started = plx_base::task::spawn_off_frame("search suggestions", move |_| {
+        let terms: Vec<String> = client.stremio_get("/stremio/suggest")
+            .and_then(|v| v.get("terms").and_then(|t| t.as_array()).cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|t| t.as_str().map(str::to_string))
+            .collect();
+        plx_screens::search::set_suggestions(terms);
+    });
+    if !started {
+        ASKED.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// A one-line notice through the television's own toast, off the frame thread (an LS2 call).
 fn notify(message: &str) {
     let message = message.to_owned();

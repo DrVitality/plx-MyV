@@ -269,8 +269,13 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
 
 fn recents<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: Painter) {
     let env = Env::inert();
+    let suggested = screen.showing_suggestions();
     Label::new(
-        plx_platform::i18n::msg::browse_search_recents_c().as_ptr(),
+        if suggested {
+            plx_platform::i18n::msg::browse_search_suggested_c().as_ptr()
+        } else {
+            plx_platform::i18n::msg::browse_search_recents_c().as_ptr()
+        },
         theme::size::CAPTION,
         theme::TEXT_TERTIARY,
     )
@@ -288,9 +293,9 @@ fn recents<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p
         let Some(key) = screen.keys.iter().find(|key| key.elem == *elem) else {
             continue;
         };
-        let Identity::Recent(_) = &key.identity else {
+        if !matches!(&key.identity, Identity::Recent(_) | Identity::Suggested(_)) {
             continue;
-        };
+        }
         let rect = layout::recent(index, screen.stack.scroll());
         let focused = f.cx.focus.current == Some(screen.key(*elem));
         if focused {
@@ -306,8 +311,18 @@ fn recents<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p
                 theme::ACCENT,
             );
         }
-        let Some(run) = screen.render.recent_runs.get(index) else {
-            continue;
+        // a suggestion's run is made here: at most a handful of short titles, and only while no
+        // recents exist to have cached runs
+        let made;
+        let run = if suggested {
+            made = cstring(&elide(screen.chip_term(*elem).unwrap_or(""), 820.0 - 2.0 * plx_ui::table::CONTENT_X,
+                theme::size::HEADLINE, true, f.cx.measure));
+            &made
+        } else {
+            let Some(run) = screen.render.recent_runs.get(index) else {
+                continue;
+            };
+            run
         };
         Label::new(
             run.as_ptr(),
@@ -324,6 +339,9 @@ fn recents<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p
             Rect::new(rect.x + plx_ui::table::CONTENT_X, rect.y, 0.0, rect.h),
         );
         stop(screen, *elem, ElemKind::Bare, f, p);
+    }
+    if suggested {
+        return; // nothing of the profile's to clear
     }
     let rect = layout::clear(shown, screen.stack.scroll(), f.cx.measure);
     Button::new(plx_platform::i18n::msg::browse_search_clear_c().as_ptr(), theme::size::BODY, rect)

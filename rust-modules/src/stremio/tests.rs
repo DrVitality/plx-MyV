@@ -986,3 +986,11 @@ fn a_watched_field_this_app_cannot_line_up_is_left_alone() {
     b.handle(&authed("GET", &format!("/:/scrobble?key={s1}")));
     assert!(written.lock().unwrap().is_empty(), "nothing is written over a field that did not read");
 }
+
+#[test]
+fn search_suggests_the_top_of_the_movie_and_show_catalogs() {
+    let b = content_bridge();
+    let got = json_of(&b.handle(&authed("GET", "/stremio/suggest")));
+    let terms: Vec<&str> = got["terms"].as_array().unwrap().iter().map(|t| t.as_str().unwrap()).collect();
+    assert_eq!(terms, ["The Shawshank Redemption", "The Godfather", "Game of Thrones"]);
+}

@@ -92,6 +92,9 @@ pub enum Action {
     /// play the item from another of its streams — the bridge's ranked index ([`StreamRow::index`])
     /// — at the same position
     PickStream(u16),
+    /// move the sound against the picture by this many milliseconds
+    /// ([`plx_media::player::set_audio_delay_ms`]); one of [`plx_media::player::AUDIO_DELAY_LADDER`]
+    SetAudioDelay(i16),
 }
 
 /// One stream the **Streams page** lists (the Stremio bridge's `/stremio/choices`): its place in the
@@ -155,6 +158,8 @@ pub enum MorePage {
     Quality,
     /// The item's other streams ([`Action::PickStream`]), the playing one checked.
     Streams,
+    /// The audio delay ladder ([`Action::SetAudioDelay`]), the current delay checked.
+    AudioDelay,
 }
 
 impl MorePage {
@@ -163,6 +168,7 @@ impl MorePage {
         match self {
             Self::Quality => plx_platform::i18n::msg::widgets_menu_quality().to_string(),
             Self::Streams => plx_platform::i18n::msg::widgets_menu_streams().to_string(),
+            Self::AudioDelay => plx_platform::i18n::msg::widgets_menu_audio_delay().to_string(),
         }
     }
 
@@ -171,6 +177,7 @@ impl MorePage {
         match self {
             Self::Quality => 1,
             Self::Streams => 2,
+            Self::AudioDelay => 3,
         }
     }
 }
@@ -183,6 +190,8 @@ pub enum MoreRow {
     OpenQuality,
     /// The root's Change stream row ([`MorePage::Streams`]).
     OpenStreams,
+    /// The root's Audio delay row ([`MorePage::AudioDelay`]): reads out the current delay.
+    OpenAudioDelay,
     Act(Action),
 }
 
@@ -249,6 +258,9 @@ impl FormId for Action {
             Action::SetQuality(Quality::P720Low) => 15,
             Action::SetQuality(Quality::P480) => 16,
             Action::PickStream(i) => 100 + u32::from(*i),
+            // 60..=70: the ladder's place (a value off the ladder takes the slot past it)
+            Action::SetAudioDelay(ms) => 60 + plx_media::player::AUDIO_DELAY_LADDER.iter()
+                .position(|l| *l == i32::from(*ms)).unwrap_or(plx_media::player::AUDIO_DELAY_LADDER.len()) as u32,
         })
     }
 }
@@ -259,6 +271,7 @@ impl FormId for MoreRow {
             // free in `Action`'s key space (0..=2 and 10..=16)
             MoreRow::OpenQuality => RowKey(3),
             MoreRow::OpenStreams => RowKey(4),
+            MoreRow::OpenAudioDelay => RowKey(5),
             MoreRow::Act(a) => a.key(),
         }
     }
@@ -283,6 +296,13 @@ fn root_form(
     for a in rows.iter().copied().filter(|a| !matches!(a, Action::SetQuality(_))) {
         options = options.item(MoreRow::Act(a), RowKind::Button, a, row_for(ps, a));
     }
+    options = options.item(
+        MoreRow::OpenAudioDelay,
+        RowKind::Nav(MorePage::AudioDelay),
+        Action::None,
+        Row::new(plx_platform::i18n::msg::widgets_menu_audio_delay())
+            .value(delay_label(plx_media::player::audio_delay_ms())),
+    );
     let quality = FormSection::new("").item_if(
         quality_offered(rows, forced),
         MoreRow::OpenQuality,
@@ -318,6 +338,27 @@ fn streams_form(ps: &plx_media::route::PlaybackSession) -> MoreForm {
         let row = Row::new(r.label.clone()).server_label().detail(r.detail.clone()).server_detail();
         sec.choice(MoreRow::Act(a), a, row, |id| {
             playing.is_some_and(|p| *id == MoreRow::Act(Action::PickStream(p)))
+        })
+    });
+    Form::new().section(sec)
+}
+
+/// A delay as the menu says it: "Off", "+100 ms", "−50 ms".
+fn delay_label(ms: i32) -> String {
+    match ms {
+        0 => plx_platform::i18n::msg::widgets_menu_audio_delay_off().to_string(),
+        ms if ms > 0 => plx_platform::i18n::msg::widgets_menu_audio_delay_ms(&format!("+{ms}")),
+        ms => plx_platform::i18n::msg::widgets_menu_audio_delay_ms(&ms.to_string()),
+    }
+}
+
+/// The Audio delay PAGE: one checked row per rung of the ladder, the current one checked.
+fn audio_delay_form() -> MoreForm {
+    let current = plx_media::player::audio_delay_ms();
+    let sec = plx_media::player::AUDIO_DELAY_LADDER.iter().fold(FormSection::new(""), |sec, ms| {
+        let a = Action::SetAudioDelay(*ms as i16);
+        sec.choice(MoreRow::Act(a), a, Row::new(delay_label(*ms)), |id| {
+            *id == MoreRow::Act(Action::SetAudioDelay(current as i16))
         })
     });
     Form::new().section(sec)
@@ -378,6 +419,7 @@ impl MoreMenuState {
         match page {
             MorePage::Quality => quality_form(ps, &self.rows, self.current),
             MorePage::Streams => streams_form(ps),
+            MorePage::AudioDelay => audio_delay_form(),
         }
     }
 
@@ -387,6 +429,7 @@ impl MoreMenuState {
         match page {
             MorePage::Quality => Some(MoreRow::Act(Action::SetQuality(self.current))),
             MorePage::Streams => STREAMS.lock().unwrap_or_else(|e| e.into_inner()).playing.map(|p| MoreRow::Act(Action::PickStream(p))),
+            MorePage::AudioDelay => Some(MoreRow::Act(Action::SetAudioDelay(plx_media::player::audio_delay_ms() as i16))),
         }
     }
 
@@ -472,6 +515,7 @@ impl MoreMenuState {
             let offered = match page {
                 MorePage::Quality => quality_offered(&self.rows, self.forced),
                 MorePage::Streams => streams_for(ps).is_some(),
+                MorePage::AudioDelay => true,
             };
             if offered {
                 let fallback = self.page_initial(page);
@@ -746,6 +790,7 @@ fn label(a: Action) -> std::borrow::Cow<'static, str> {
         Action::SendDiagnostics => plx_platform::i18n::msg::widgets_menu_diagnostics().into(),
         // a stream row draws its own line ([`streams_form`]); this is only a fallback
         Action::PickStream(_) => plx_platform::i18n::msg::widgets_menu_streams().into(),
+        Action::SetAudioDelay(ms) => delay_label(i32::from(ms)).into(),
         Action::None => "".into(),
     }
 }
@@ -777,7 +822,7 @@ fn is_on(a: Action) -> bool {
     match a {
         Action::ToggleStats => stats_on(),
         // a rung is not a switch — see `row_for`, which gives it the leading mark instead
-        Action::SetQuality(_) | Action::SendDiagnostics | Action::PickStream(_) | Action::None => false,
+        Action::SetQuality(_) | Action::SendDiagnostics | Action::PickStream(_) | Action::SetAudioDelay(_) | Action::None => false,
     }
 }
 
@@ -1219,6 +1264,8 @@ mod tests {
         let mut all: Vec<MoreRow> = plx_media::route::QUALITY_LADDER.iter().map(|q| MoreRow::Act(Action::SetQuality(*q))).collect();
         all.extend([MoreRow::OpenQuality, MoreRow::OpenStreams, MoreRow::Act(Action::ToggleStats), MoreRow::Act(Action::SendDiagnostics)]);
         all.extend((0..STREAM_ROWS as u16).map(|i| MoreRow::Act(Action::PickStream(i))));
+        all.push(MoreRow::OpenAudioDelay);
+        all.extend(plx_media::player::AUDIO_DELAY_LADDER.iter().map(|ms| MoreRow::Act(Action::SetAudioDelay(*ms as i16))));
         let mut keys: Vec<u32> = all.iter().map(|a| a.key().0).collect();
         keys.sort_unstable();
         keys.dedup();

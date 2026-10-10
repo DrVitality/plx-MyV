@@ -145,6 +145,24 @@ pub(crate) fn apply_more_action(ps: &mut plx_media::route::PlaybackSession, pa: 
         plx_appkit::more_menu::Action::PickStream(index) => {
             bridge.player_stream = super::input::start_player_stream(ps, index);
         }
+        // Audio delay: live at once, landed by a seek to where the viewer is (both lanes are
+        // re-anchored there, so the sound timeline never jumps under a running pipeline), and kept.
+        plx_appkit::more_menu::Action::SetAudioDelay(ms) => {
+            plx_media::player::set_audio_delay_ms(i32::from(ms));
+            if is_started() {
+                request_seek(intended_pos(ps));
+            }
+            let _ = plx_base::storage_worker::submit_retained(move || {
+                let saved = plx_plex::plex::session::update_with_outcome(|s| {
+                    let mut look = s.appearance();
+                    look.audio_delay_ms = ms;
+                    Some(s.with_appearance(look))
+                });
+                if saved.is_none() {
+                    log("audio delay: not saved; it holds for this run");
+                }
+            });
+        }
         plx_appkit::more_menu::Action::None => {}
     }
 }

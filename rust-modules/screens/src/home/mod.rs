@@ -1104,7 +1104,15 @@ impl HomeScreen {
                 .current
                 .is_none_or(|key| key.elem >= plx_ui::dispatch::STRIP_BASE)
         {
-            self.reseat(FocusTarget::ContainerGroup(HERO_GROUP), cx, fx);
+            // Appearance › Home opens on: Continue Watching seats its first card instead of the hero
+            let deck = start_on_continue()
+                .then(|| self.rows.iter().position(|r| r.identity == HomeHubIdentity::ContinueWatching))
+                .flatten()
+                .and_then(|row| self.dev_focus_key(row, 0, cx));
+            match deck {
+                Some(key) => self.reseat(FocusTarget::Elem(key), cx, fx),
+                None => self.reseat(FocusTarget::ContainerGroup(HERO_GROUP), cx, fx),
+            }
         }
         self.cta_available = cta_available;
         if self.rows.is_empty() {
@@ -1879,6 +1887,18 @@ impl HomeScreen {
             elem: *self.rows.get(row)?.elems.get(col)?,
         })
     }
+}
+
+/// Settings › Appearance › Home opens on, as the app last applied it: whether Home's first seat is
+/// its Continue Watching row rather than the hero.
+static START_ON_CONTINUE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_start_on_continue(on: bool) {
+    START_ON_CONTINUE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn start_on_continue() -> bool {
+    START_ON_CONTINUE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 impl LogicalState for HomeScreen {

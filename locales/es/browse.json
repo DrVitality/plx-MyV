@@ -85,6 +85,7 @@
   "browse.login.instructions": "Escanea el código con la cámara del teléfono o vincula este televisor manualmente usando la dirección y el código que aparecen aquí.",
   "browse.search.placeholder": "Buscar en tu biblioteca",
   "browse.search.one_more": "un carácter más",
+  "browse.search.suggested": "SUGERENCIAS",
   "browse.search.recents": "BÚSQUEDAS RECIENTES",
   "browse.search.clear": "Borrar búsquedas recientes",
   "browse.search.failed": "La búsqueda no llegó al servidor",

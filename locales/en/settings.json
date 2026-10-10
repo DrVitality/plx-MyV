@@ -1363,6 +1363,22 @@
     "value": "Automatically",
     "description": "Skip intros option: skip without asking"
   },
+  "settings.appearance.home_start": {
+    "value": "Home opens on",
+    "description": "Appearance row: where Home's focus starts"
+  },
+  "settings.appearance.home_start.copy": {
+    "value": "Where the focus sits when Home first opens: on the featured title at the top, or on the first card of Continue Watching.",
+    "description": "Picker explanation for Home opens on"
+  },
+  "settings.appearance.home_start.hero": {
+    "value": "Featured title",
+    "description": "Home opens on option: the hero at the top"
+  },
+  "settings.appearance.home_start.continue": {
+    "value": "Continue Watching",
+    "description": "Home opens on option: the Continue Watching row"
+  },
   "settings.appearance.accent.silver": {
     "value": "Silver",
     "description": "Accent colour option"

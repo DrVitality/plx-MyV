@@ -54,6 +54,8 @@ pub const SHAPE: &str = concat!("SearchScreen{entry:u32,instance:u32,draft:{text
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Identity {
     Recent(String),
+    /// A suggested term ([`set_suggestions`]), shown where recents go when there are none.
+    Suggested(String),
     Media(Kind, plx_plex::plex::ServerId, String),
     Tag(Kind, plx_plex::plex::ServerId, String),
     Slot(Kind, u32, usize),
@@ -212,13 +214,20 @@ impl SearchScreen {
         let query_changed = self.query_gen != view.query_gen();
         self.query_gen = view.query_gen();
         if query_changed && restored.is_none() {
-            self.keys.retain(|key| matches!(key.identity, Identity::Recent(_)));
+            self.keys.retain(|key| matches!(key.identity, Identity::Recent(_) | Identity::Suggested(_)));
         }
         self.recents.clear();
         if !self.real_query() && !self.recent_clear_pending {
             for (slot, term) in view.recents().terms().iter().enumerate() {
                 let elem = self.intern(Identity::Recent(term.clone()), RECENTS_GROUP, slot);
                 self.recents.push(elem);
+            }
+            // nothing searched yet: what is popular now, in the same place, pressed the same way
+            if self.recents.is_empty() {
+                for (slot, term) in suggestions().into_iter().take(layout::RECENT_CAP).enumerate() {
+                    let elem = self.intern(Identity::Suggested(term), RECENTS_GROUP, slot);
+                    self.recents.push(elem);
+                }
             }
         }
         if self.draft.pending() || !self.real_query() {
@@ -270,7 +279,7 @@ impl SearchScreen {
             self.keyboard(!self.editing, true, fx);
             return Handled::Yes;
         }
-        if elem == CLEAR && !self.recents.is_empty() {
+        if elem == CLEAR && !self.recents.is_empty() && !self.showing_suggestions() {
             self.store(SearchCmd::ClearRecents { profile_generation: self.draft.profile() }, fx);
             self.recent_clear_pending = true; self.recents.clear();
             self.content_dirty = true;
@@ -279,7 +288,7 @@ impl SearchScreen {
         }
         if self.recents.contains(&elem) {
             let term = self.keys.iter().find_map(|key| match &key.identity {
-                Identity::Recent(term) if key.elem == elem => Some(term.clone()), _ => None,
+                Identity::Recent(term) | Identity::Suggested(term) if key.elem == elem => Some(term.clone()), _ => None,
             });
             if let Some(term) = term {
                 if let Some(query) = self.draft.replace(&term) {
@@ -617,7 +626,9 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
             let shown = self.recents.len().min(layout::RECENT_CAP) as f32;
             out.push(SectionSpec::new(Sec::Recents, plx_ui::cards::Kind::Custom {
                 height: plx_ui::table::HDR_H + shown * plx_ui::table::ROW_H, focusable: true }, RECENTS_GROUP));
-            out.push(SectionSpec::new(Sec::Clear, plx_ui::cards::Kind::Custom { height: 0.0, focusable: true }, CLEAR_GROUP));
+            if !self.showing_suggestions() {
+                out.push(SectionSpec::new(Sec::Clear, plx_ui::cards::Kind::Custom { height: 0.0, focusable: true }, CLEAR_GROUP));
+            }
         }
         for row in &self.rows {
             let elem = if matches!(row.kind, Kind::Movie | Kind::Show | Kind::Episode) { ElemKind::Card } else { ElemKind::Bare };
@@ -642,10 +653,10 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
         matches!(self.selected_item(Some(key), cx), Some(Item::Media(media)) if crate::registry::item_has_menu(media))
     }
     fn elem_of(&self, k: Sec) -> Option<u32> {
-        match k { Sec::Head => Some(FIELD), Sec::Clear if !self.recents.is_empty() => Some(CLEAR), _ => None }
+        match k { Sec::Head => Some(FIELD), Sec::Clear if !self.recents.is_empty() && !self.showing_suggestions() => Some(CLEAR), _ => None }
     }
     fn plain_len(&self, k: Sec) -> usize {
-        match k { Sec::Recents => self.recents.len(), Sec::Head => 1, Sec::Clear => (!self.recents.is_empty()) as usize, Sec::Row(..) => 0 }
+        match k { Sec::Recents => self.recents.len(), Sec::Head => 1, Sec::Clear => (!self.recents.is_empty() && !self.showing_suggestions()) as usize, Sec::Row(..) => 0 }
     }
     fn plain_elem(&self, k: Sec, n: usize) -> Option<u32> {
         match k { Sec::Recents => self.recents.get(n).copied(), _ => if n == 0 { StackPage::<H>::elem_of(self, k) } else { None } }
@@ -745,7 +756,7 @@ impl<H: SearchLike> Screen<H> for SearchScreen {
             out.push(Link { from: FIELD_GROUP, dir: Dir::Down, to: first });
             out.push(Link { from: first, dir: Dir::Up, to: FIELD_GROUP });
         }
-        if !self.recents.is_empty() {
+        if !self.recents.is_empty() && !self.showing_suggestions() {
             out.push(Link { from: RECENTS_GROUP, dir: Dir::Down, to: CLEAR_GROUP });
             out.push(Link { from: CLEAR_GROUP, dir: Dir::Up, to: RECENTS_GROUP });
         }
@@ -790,10 +801,39 @@ impl LogicalState for SearchScreen {
     }
 }
 
+/// Search's suggested terms (the Stremio bridge's `/stremio/suggest`, fetched by the app once a
+/// run): shown in the recents' place while the profile has searched for nothing.
+static SUGGESTIONS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+pub fn set_suggestions(terms: Vec<String>) {
+    *SUGGESTIONS.lock().unwrap_or_else(|e| e.into_inner()) = terms;
+}
+
+fn suggestions() -> Vec<String> {
+    SUGGESTIONS.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+impl SearchScreen {
+    /// Whether the term chips showing are suggestions rather than the profile's recents.
+    pub(super) fn showing_suggestions(&self) -> bool {
+        self.recents.first().is_some_and(|elem| self.keys.iter()
+            .any(|key| key.elem == *elem && matches!(key.identity, Identity::Suggested(_))))
+    }
+
+    /// The term a chip shows (a recent or a suggestion).
+    pub(super) fn chip_term(&self, elem: u32) -> Option<&str> {
+        self.keys.iter().find_map(|key| match &key.identity {
+            Identity::Recent(term) | Identity::Suggested(term) if key.elem == elem => Some(term.as_str()),
+            _ => None,
+        })
+    }
+}
+
 impl KeyEntry {
     fn write(&self, c: &mut Canon) {
         match &self.identity {
             Identity::Recent(term) => { c.u32(0).str(term); }
+            Identity::Suggested(term) => { c.u32(4).str(term); }
             Identity::Media(kind, sid, rk) => { c.u32(1).u32(layout::ordinal(*kind)).u32(sid.raw() as u32).str(rk); }
             Identity::Tag(kind, sid, id) => { c.u32(2).u32(layout::ordinal(*kind)).u32(sid.raw() as u32).str(id); }
             Identity::Slot(kind, generation, slot) => { c.u32(3).u32(layout::ordinal(*kind)).u32(*generation).u64(*slot as u64); }

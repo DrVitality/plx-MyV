@@ -26,6 +26,9 @@ const SEARCH_CATALOGS: usize = 2;
 /// Pages of a catalog fetched at most to serve one request.
 const MAX_PAGES: usize = 10;
 
+/// Search suggestions taken from each of the movie and show catalogs.
+const SUGGESTIONS_PER_LIB: usize = 3;
+
 /// Continue Watching cards resolved ahead of a press.
 const WARM_CONTINUE: usize = 3;
 
@@ -1290,5 +1293,27 @@ impl Bridge {
             }
             Err(e) => api_failure(e),
         }
+    }
+}
+
+impl Bridge {
+    /// `GET /stremio/suggest`: what Search suggests before anything is typed — the first few titles
+    /// of the first movie and show catalogs (what is popular now), as search terms.
+    pub(super) fn suggest(&self, token: &str) -> Response {
+        let addons = match self.addons(token) {
+            Ok(addons) => addons,
+            Err(e) => return api_failure(e),
+        };
+        let all = self.shelves(&addons);
+        let mut terms: Vec<String> = Vec::new();
+        for lib in [Lib::Movies, Lib::Shows] {
+            let Some((_, s)) = shelves_of(&all, lib).into_iter().next() else { continue };
+            for t in self.catalog_page(&addons[s.addon], (s.addon, s.catalog), 0, None).into_iter().take(SUGGESTIONS_PER_LIB) {
+                if !terms.contains(&t.name) {
+                    terms.push(t.name);
+                }
+            }
+        }
+        Response::json(200, &json!({"terms": terms}))
     }
 }

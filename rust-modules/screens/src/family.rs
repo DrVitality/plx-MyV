@@ -129,6 +129,8 @@ pub enum PickerKind {
     StreamSource,
     /// Video & playback: skip a marked intro on its own, or offer the button.
     SkipIntros,
+    /// Appearance: whether Home opens on the hero or on Continue Watching.
+    HomeStart,
 }
 
 impl SettingsPage {
@@ -150,7 +152,7 @@ impl PickerKind {
             PickerKind::Quality | PickerKind::DirectPlay | PickerKind::SubtitleSize | PickerKind::SubtitlePosition | PickerKind::NextEpisode | PickerKind::DeckPress | PickerKind::SkipInterval
             | PickerKind::StreamQuality | PickerKind::StreamSource | PickerKind::SkipIntros => SettingsPage::Playback,
             PickerKind::AudioLanguage | PickerKind::SubtitleMode | PickerKind::SubtitleLanguage | PickerKind::ForcedSubtitles => SettingsPage::AudioSubtitles,
-            PickerKind::Accent | PickerKind::Ground | PickerKind::Corners | PickerKind::Peek => SettingsPage::Appearance,
+            PickerKind::Accent | PickerKind::Ground | PickerKind::Corners | PickerKind::Peek | PickerKind::HomeStart => SettingsPage::Appearance,
         }
     }
 }

@@ -1615,6 +1615,8 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
         if crate::stremio::take_home_changed() {
             app.refresh_hubs_at = fr.now | 1;
         }
+        // Search's suggestions, once a run, as soon as there is a server to ask
+        crate::app::input::search_suggestions_fetch();
         // a title sent from the phone remote: its page opens (never playback); while the player
         // is up it waits, so a phone cannot cut into what is playing
         if !fr.player {

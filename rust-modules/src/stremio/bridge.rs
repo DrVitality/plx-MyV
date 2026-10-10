@@ -288,6 +288,7 @@ impl Bridge {
             ["stremio", "choose", rk] => self.choose(req, rk),
             ["stremio", "library", rk] => self.library_toggle(req, token, rk),
             ["stremio", "config"] => self.config_route(req, token),
+            ["stremio", "suggest"] => self.suggest(token),
             // The part URL (`catalog::part_key`): the chosen stream, by redirect.
             ["library", "parts", _, rk, _] => self.play(token, rk),
             ["video", ":", "transcode", "universal", "decision"] => self.decision(req, token),
