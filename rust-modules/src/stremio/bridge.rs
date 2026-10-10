@@ -16,6 +16,7 @@
 //! account's library and each addon answer, so a burst of requests costs one Stremio call.
 
 mod content;
+mod play;
 
 use super::api::{Addon, ApiError, Stremio};
 use super::catalog::ArtMap;
@@ -69,6 +70,8 @@ pub struct Bridge {
     library: Mutex<Option<(String, Instant, Arc<Vec<Value>>)>>,
     /// Artwork stand-ins.
     art: ArtMap,
+    /// Chosen streams, track choices, subtitles and progress bookkeeping.
+    play: play::PlayState,
 }
 
 fn container(fields: Value) -> Value {
@@ -111,6 +114,7 @@ impl Bridge {
             json: Mutex::new(HashMap::new()),
             library: Mutex::new(None),
             art: ArtMap::default(),
+            play: play::PlayState::default(),
         }
     }
 
@@ -136,8 +140,23 @@ impl Bridge {
                 Some(token) => self.read(req, token, &segs),
                 None => Response::empty(401),
             },
-            ("POST" | "PUT" | "DELETE", _) => Response::empty(200),
+            ("POST" | "PUT" | "DELETE", _) => match req.token() {
+                Some(token) => self.write(req, token, &segs),
+                None => Response::empty(401),
+            },
             _ => Response::empty(405),
+        }
+    }
+
+    /// The media server's writes. Anything not translated is accepted and changes nothing.
+    fn write(&self, req: &Request, token: &str, segs: &[&str]) -> Response {
+        match segs {
+            ["playQueues"] => self.play_queue(req, token),
+            ["library", "parts", part] => self.select_tracks(req, part),
+            [":", "timeline"] => self.timeline(req, token),
+            [":", "scrobble"] => self.scrobble(req, token, true),
+            [":", "unscrobble"] => self.scrobble(req, token, false),
+            _ => Response::json(200, &container(json!({}))),
         }
     }
 
@@ -156,6 +175,14 @@ impl Bridge {
             ["library", "metadata", rk, "allLeaves"] => self.all_leaves(token, rk),
             ["stremio", "art", key] => self.art(key),
             ["stremio", "streams", rk] => self.streams_route(token, rk),
+            ["stremio", "choose", rk] => self.choose(req, rk),
+            ["stremio", "play", rk] => self.play(token, rk),
+            ["video", ":", "transcode", "universal", "decision"] => self.decision(req, token),
+            ["playQueues", _] => self.play_queue_again(),
+            ["library", "streams", id] => self.subtitle_file(id),
+            [":", "timeline"] => self.timeline(req, token),
+            [":", "scrobble"] => self.scrobble(req, token, true),
+            [":", "unscrobble"] => self.scrobble(req, token, false),
             ["photo", ":", "transcode"] => self.photo(req),
             // Everything not translated is a valid, empty answer rather than an error, so a screen
             // asking for something Stremio has no equivalent of shows nothing instead of failing.

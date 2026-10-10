@@ -20,6 +20,10 @@ struct Scripted {
     library: Vec<Value>,
     /// URL → JSON body.
     pages: HashMap<String, Value>,
+    /// URL → file bytes, for range reads.
+    files: HashMap<String, Vec<u8>>,
+    /// Every library write, in order.
+    written: Mutex<Vec<Value>>,
 }
 
 impl Stremio for Scripted {
@@ -48,8 +52,21 @@ impl Stremio for Scripted {
         }
         Ok(self.library.clone())
     }
+    fn library_put(&self, auth_key: &str, items: &[Value]) -> Result<(), ApiError> {
+        if auth_key != KEY {
+            return Err(ApiError::Unauthorized);
+        }
+        self.written.lock().unwrap().extend(items.iter().cloned());
+        Ok(())
+    }
     fn fetch(&self, url: &str) -> Result<Vec<u8>, ApiError> {
         self.pages.get(url).map(|v| serde_json::to_vec(v).unwrap()).ok_or(ApiError::Unavailable)
+    }
+    fn fetch_range(&self, url: &str, from: u64, len: u64) -> Result<Vec<u8>, ApiError> {
+        let file = self.files.get(url).ok_or(ApiError::Unavailable)?;
+        let from = usize::try_from(from).unwrap().min(file.len());
+        let to = (from + usize::try_from(len).unwrap()).min(file.len());
+        Ok(file[from..to].to_vec())
     }
 }
 
@@ -294,6 +311,10 @@ fn a_meta_reads_forgivingly_into_a_title() {
 // ---------------------------------------------------------------- the media server
 
 fn content_bridge() -> Bridge {
+    bridge_with(content_scripted())
+}
+
+fn content_scripted() -> Scripted {
     let mut s = scripted(vec![cinemeta(), kitsu(), torrentio()]);
     s.pages.insert("https://v3-cinemeta.example/catalog/movie/top.json".into(), metas(json!([
         {"id": "tt0111161", "type": "movie", "name": "The Shawshank Redemption",
@@ -336,7 +357,7 @@ fn content_bridge() -> Bridge {
         json!({"_id": "tt0068646", "type": "movie", "name": "The Godfather", "removed": false, "temp": false,
                "state": {"timeOffset": 0}}),
     ];
-    bridge_with(s)
+    s
 }
 
 #[test]
@@ -463,4 +484,157 @@ fn a_films_streams_are_ranked_and_the_cached_one_is_picked() {
     assert_eq!(rows[0]["best"], true);
     assert_eq!(rows[1]["ready"], "Uncached");
     assert!(rows.iter().all(|r| r.get("url").is_none()), "no debrid link leaves the bridge");
+}
+
+// ---------------------------------------------------------------- playback
+
+/// An EBML element.
+fn el(id: u32, data: &[u8]) -> Vec<u8> {
+    let idb = id.to_be_bytes();
+    let skip = idb.iter().take_while(|b| **b == 0).count();
+    let mut out = idb[skip..].to_vec();
+    if data.len() < 127 {
+        out.push(0x80 | data.len() as u8);
+    } else {
+        out.push(0x01);
+        out.extend_from_slice(&(data.len() as u64).to_be_bytes()[1..]);
+    }
+    out.extend_from_slice(data);
+    out
+}
+
+/// A Matroska file with HEVC video, TrueHD and E-AC-3 English audio, and an English SRT.
+fn sample_mkv() -> Vec<u8> {
+    let track = |n: u8, kind: u8, codec: &str, lang: &str, extra: Vec<u8>| {
+        el(0xAE, &[el(0xD7, &[n]), el(0x83, &[kind]), el(0x86, codec.as_bytes()),
+                   el(0x22B59C, lang.as_bytes()), extra].concat())
+    };
+    let tracks = el(0x1654AE6B, &[
+        track(1, 1, "V_MPEGH/ISO/HEVC", "und", el(0xE0, &[el(0xB0, &[0x0F, 0x00]), el(0xBA, &[0x08, 0x70])].concat())),
+        track(2, 2, "A_TRUEHD", "eng", el(0xE1, &el(0x9F, &[8]))),
+        track(3, 2, "A_EAC3", "eng", el(0xE1, &el(0x9F, &[6]))),
+        track(4, 17, "S_TEXT/UTF8", "eng", Vec::new()),
+    ].concat());
+    [el(0x1A45DFA3, &el(0x4282, b"matroska")), el(0x18538067, &[tracks, el(0x1F43B675, &[0; 8])].concat())].concat()
+}
+
+fn playback_bridge() -> Bridge {
+    let mut s = content_scripted();
+    s.files.insert("https://t/r/2".into(), sample_mkv());
+    bridge_with(s)
+}
+
+#[test]
+fn a_film_plays_its_chosen_stream_with_the_tracks_read_from_the_file() {
+    let b = playback_bridge();
+    let rk = Rk::item("movie", "tt0111161").unwrap().encode();
+    let detail = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{rk}"))));
+    let media = &detail["MediaContainer"]["Metadata"][0]["Media"][0];
+    assert_eq!(media["videoCodec"], "hevc");
+    assert_eq!(media["audioCodec"], "eac3", "the playable English track, not the TrueHD default");
+    assert_eq!(media["videoResolution"], "4k");
+    let streams = media["Part"][0]["Stream"].as_array().unwrap();
+    assert_eq!(streams.len(), 4, "the file has an English subtitle, so no external one");
+    assert_eq!(streams[3]["selected"], true);
+
+    // The part redirects to the cached stream the ranking chose.
+    let part = media["Part"][0]["key"].as_str().unwrap();
+    let played = b.handle(&authed("GET", part));
+    assert_eq!(played.status, 302);
+    assert_eq!(played.location.as_deref(), Some("https://t/r/2"));
+
+    // The decision is direct play, every stream copied.
+    let decision = json_of(&b.handle(&authed("GET",
+        &format!("/video/:/transcode/universal/decision?path=%2Flibrary%2Fmetadata%2F{rk}&directPlay=1"))));
+    let mc = &decision["MediaContainer"];
+    assert_eq!(mc["generalDecisionCode"], 1000);
+    assert_eq!(mc["Metadata"][0]["Media"][0]["Part"][0]["decision"], "directplay");
+}
+
+#[test]
+fn a_track_choice_sticks_to_the_item() {
+    let b = playback_bridge();
+    let rk = Rk::item("movie", "tt0111161").unwrap().encode();
+    let detail = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{rk}"))));
+    let part = detail["MediaContainer"]["Metadata"][0]["Media"][0]["Part"][0]["id"].as_i64().unwrap();
+    let truehd = detail["MediaContainer"]["Metadata"][0]["Media"][0]["Part"][0]["Stream"][1]["id"].as_i64().unwrap();
+    let put = format!("/library/parts/{part}?audioStreamID={truehd}&subtitleStreamID=0");
+    assert_eq!(b.handle(&authed("PUT", &put)).status, 200);
+    let again = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{rk}"))));
+    let media = &again["MediaContainer"]["Metadata"][0]["Media"][0];
+    assert_eq!(media["audioCodec"], "truehd");
+    assert_eq!(media["Part"][0]["Stream"][3]["selected"], false, "subtitles off");
+}
+
+#[test]
+fn nothing_cached_is_a_refusal_the_player_can_read_out() {
+    let mut s = content_scripted();
+    s.pages.insert("https://v3-cinemeta.example/meta/movie/tt0068646.json".into(),
+                   json!({"meta": {"id": "tt0068646", "type": "movie", "name": "The Godfather"}}));
+    let b = bridge_with(s);
+    let rk = Rk::item("movie", "tt0068646").unwrap().encode();
+    // A title with no streams has no version, so its page shows no play button…
+    let page = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{rk}"))));
+    assert!(page["MediaContainer"]["Metadata"][0].get("Media").is_none());
+    // …and the decision says why, in the field the player reads out.
+    let decision = json_of(&b.handle(&authed("GET",
+        &format!("/video/:/transcode/universal/decision?path=/library/metadata/{rk}"))));
+    let mc = &decision["MediaContainer"];
+    assert_eq!(mc["generalDecisionCode"], 2000);
+    assert!(mc["transcodeDecisionText"].as_str().unwrap().contains("cached"));
+}
+
+#[test]
+fn an_episode_queue_continues_through_the_following_episodes() {
+    let b = content_bridge();
+    let ep = Rk::Episode { stype: "series".into(), id: "tt0944947".into(), video: "tt0944947:1:2".into() }.encode();
+    let uri = format!("server%3A%2F%2Fstremio-bridge%2Fcom.plexapp.plugins.library%2Flibrary%2Fmetadata%2F{ep}");
+    let q = json_of(&b.handle(&authed("POST", &format!("/playQueues?type=video&uri={uri}&continuous=1"))));
+    let rows = q["MediaContainer"]["Metadata"].as_array().unwrap();
+    let titles: Vec<&str> = rows.iter().map(|r| r["title"].as_str().unwrap()).collect();
+    assert_eq!(titles, vec!["The Kingsroad", "The North Remembers"]);
+    assert_eq!(rows[1]["playQueueItemID"], 2);
+    // Resume where the account stopped.
+    assert_eq!(rows[0]["viewOffset"], 600000);
+}
+
+#[test]
+fn progress_is_written_to_the_stremio_library_and_finishing_marks_it_watched() {
+    let s = content_scripted();
+    let written = std::sync::Arc::new(Mutex::new(Vec::<Value>::new()));
+    let b = Bridge::new(Box::new(Recording { inner: s, written: written.clone() }), 32498);
+    let ep = Rk::Episode { stype: "series".into(), id: "tt0944947".into(), video: "tt0944947:2:1".into() }.encode();
+    b.handle(&authed("GET", &format!("/:/timeline?ratingKey={ep}&state=paused&time=120000&duration=3000000")));
+    // A second playing report inside the minute is not written.
+    b.handle(&authed("GET", &format!("/:/timeline?ratingKey={ep}&state=playing&time=125000&duration=3000000")));
+    b.handle(&authed("GET", &format!("/:/timeline?ratingKey={ep}&state=stopped&time=2900000&duration=3000000")));
+    let w = written.lock().unwrap();
+    assert_eq!(w.len(), 2);
+    assert_eq!(w[0]["_id"], "tt0944947");
+    assert_eq!(w[0]["state"]["timeOffset"], 120000);
+    assert_eq!(w[0]["state"]["video_id"], "tt0944947:2:1");
+    assert_eq!(w[1]["state"]["flaggedWatched"], 1);
+    assert_eq!(w[1]["state"]["timeOffset"], 0);
+}
+
+/// A scripted account whose library writes the test can read after the bridge owns it.
+struct Recording {
+    inner: Scripted,
+    written: std::sync::Arc<Mutex<Vec<Value>>>,
+}
+
+impl Stremio for Recording {
+    fn create_link(&self) -> Result<LinkCode, ApiError> { self.inner.create_link() }
+    fn read_link(&self, code: &str) -> Result<Option<String>, ApiError> { self.inner.read_link(code) }
+    fn user(&self, k: &str) -> Result<User, ApiError> { self.inner.user(k) }
+    fn addons(&self, k: &str) -> Result<Vec<Addon>, ApiError> { self.inner.addons(k) }
+    fn library(&self, k: &str) -> Result<Vec<Value>, ApiError> { self.inner.library(k) }
+    fn library_put(&self, _k: &str, items: &[Value]) -> Result<(), ApiError> {
+        self.written.lock().unwrap().extend(items.iter().cloned());
+        Ok(())
+    }
+    fn fetch(&self, url: &str) -> Result<Vec<u8>, ApiError> { self.inner.fetch(url) }
+    fn fetch_range(&self, url: &str, from: u64, len: u64) -> Result<Vec<u8>, ApiError> {
+        self.inner.fetch_range(url, from, len)
+    }
 }

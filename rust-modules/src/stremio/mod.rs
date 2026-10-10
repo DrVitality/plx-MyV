@@ -18,7 +18,8 @@
 //!
 //! Files: [`http`] the wire, [`api`] Stremio's services and what each addon is for, [`library`] how
 //! addon catalogs become the Movies / TV Shows / Anime libraries, [`catalog`] Stremio titles in the
-//! media server's shapes, [`streams`] reading and ranking where a title can be played, [`bridge`] the router, [`qr`]
+//! media server's shapes, [`streams`] reading and ranking where a title can be played, [`probe`] reading a chosen file's
+//! tracks, [`media`] that file as a playable version with this viewer's tracks chosen, [`bridge`] the router, [`qr`]
 //! the sign-in code's image.
 
 mod api;
@@ -26,6 +27,8 @@ mod bridge;
 mod catalog;
 mod http;
 mod library;
+mod media;
+mod probe;
 mod qr;
 mod streams;
 #[cfg(test)]

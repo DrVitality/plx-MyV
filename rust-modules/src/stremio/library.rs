@@ -146,6 +146,11 @@ pub fn stream_providers<'a>(addons: &'a [Addon], stype: &'a str, id: &'a str) ->
     addons.iter().filter(move |a| a.provides(Resource::Stream, stype, id))
 }
 
+/// The addons that offer subtitles for a title, in the account's order.
+pub fn subtitle_providers<'a>(addons: &'a [Addon], stype: &'a str, id: &'a str) -> impl Iterator<Item = &'a Addon> {
+    addons.iter().filter(move |a| a.provides(Resource::Subtitles, stype, id))
+}
+
 /// A one-line account of what each installed addon was classified as, for the event log.
 pub fn summary(addons: &[Addon]) -> String {
     let count = |r: Resource| addons.iter().filter(|a| a.has(r)).count();

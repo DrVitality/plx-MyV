@@ -226,8 +226,13 @@ pub trait Stremio: Send + Sync {
     /// The account's library items (`libraryItem` collection) as Stremio stores them: what is
     /// saved, and how far each was watched.
     fn library(&self, auth_key: &str) -> Result<Vec<serde_json::Value>, ApiError>;
+    /// Writes changed library items back (watch progress, watched state).
+    fn library_put(&self, auth_key: &str, items: &[serde_json::Value]) -> Result<(), ApiError>;
     /// A public resource: an addon's catalog, meta, stream or subtitles JSON, or an image.
     fn fetch(&self, url: &str) -> Result<Vec<u8>, ApiError>;
+    /// `len` bytes of the resource at `url` starting at `from` (an HTTP range request, following
+    /// redirects): the first bytes of a video file, to read its tracks.
+    fn fetch_range(&self, url: &str, from: u64, len: u64) -> Result<Vec<u8>, ApiError>;
 }
 
 /// The network implementation.
@@ -300,7 +305,26 @@ impl Stremio for Live {
         result_of::<Vec<serde_json::Value>>(&body)?.ok_or(ApiError::Unauthorized)
     }
 
+    fn library_put(&self, auth_key: &str, items: &[serde_json::Value]) -> Result<(), ApiError> {
+        let body = Self::post("datastorePut", &serde_json::json!({
+            "authKey": auth_key, "collection": "libraryItem", "changes": items}))?;
+        result_of::<serde_json::Value>(&body)?.map(|_| ()).ok_or(ApiError::Unauthorized)
+    }
+
     fn fetch(&self, url: &str) -> Result<Vec<u8>, ApiError> {
         Self::get(url)
+    }
+
+    fn fetch_range(&self, url: &str, from: u64, len: u64) -> Result<Vec<u8>, ApiError> {
+        let headers = [format!("Range: bytes={from}-{}", from + len.max(1) - 1)];
+        // A server that ignores the range answers the whole file; the cap turns that into a
+        // failure rather than a download.
+        let cap = usize::try_from(len).unwrap_or(usize::MAX).saturating_add(64 * 1024);
+        let resp = plx_net::net::request(url, &headers, "GET", None, plx_net::net::API, true,
+            Some(cap), None).ok_or(ApiError::Unavailable)?;
+        if !resp.ok() {
+            return Err(ApiError::Unavailable);
+        }
+        Ok(resp.body)
     }
 }

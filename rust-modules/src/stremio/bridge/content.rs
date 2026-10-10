@@ -477,9 +477,16 @@ impl Bridge {
         self.title(&addons, stype, id).ok_or_else(|| Response::empty(404))
     }
 
-    /// `/library/metadata/{rk}`: a title, season or episode.
+    /// `/library/metadata/{rk}`: a title, season or episode. A film or episode carries its
+    /// resolved, playable version and where the account stopped in it (`super::play`).
     pub(super) fn metadata(&self, token: &str, rk_s: &str) -> Response {
         let Some(rk) = Rk::decode(rk_s) else { return Response::empty(404) };
+        if matches!(rk, Rk::Item { kind: catalog::Kind::Movie, .. } | Rk::Episode { .. }) {
+            return match self.metadata_row(token, &rk, rk_s) {
+                Ok(row) => Response::json(200, &container(json!({"size": 1, "Metadata": [row]}))),
+                Err(r) => r,
+            };
+        }
         let t = match self.rk_title(token, &rk) {
             Ok(t) => t,
             Err(r) => return r,
