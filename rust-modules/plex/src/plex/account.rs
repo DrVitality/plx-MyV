@@ -34,12 +34,19 @@ pub use preferences::{PreferenceError, PreferenceRequest, PreferenceSnapshot, Pr
 
 const PLEX_TV: &str = "https://plex.tv";
 
-/// plex.tv's base URL: [`PLEX_TV`], or — in a dev build only — a LOOPBACK stand-in named by
-/// `/tmp/plxnative-plextv=http://127.0.0.1:<port>`. The screenshot pipeline's mock
-/// (`tests/mock_pms.py --catalog`) answers the sign-in pin and serves its QR there, so no
-/// documentation figure ever shows a live code minted by the real service. Anything that is not
-/// plain `http://` to `127.0.0.1`/`localhost` is refused and logged: this trigger must never be
-/// able to point the account API, and the token it carries, at another host. Read once.
+/// The loopback port the Stremio bridge (the application crate's `stremio` module) listens on.
+/// It is fixed because the server it advertises is remembered in the session: a port that moved
+/// between launches would be a different server to the next boot.
+pub const STREMIO_BRIDGE_PORT: u16 = 32498;
+
+/// plex.tv's base URL. In this fork that is the **Stremio bridge** on
+/// `http://127.0.0.1:`[`STREMIO_BRIDGE_PORT`], which answers the account API from a Stremio
+/// account (sign-in is Stremio's device link); [`PLEX_TV`] itself is never dialled for the account.
+/// A dev build may still name another LOOPBACK stand-in with
+/// `/tmp/plxnative-plextv=http://127.0.0.1:<port>` — the screenshot pipeline's mock
+/// (`tests/mock_pms.py --catalog`) answers the sign-in pin and serves its QR there. Anything that
+/// is not plain `http://` to `127.0.0.1`/`localhost` is refused and logged: this trigger must never
+/// be able to point the account API, and the token it carries, at another host. Read once.
 pub fn plex_tv() -> &'static str {
     static BASE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     BASE.get_or_init(|| match plx_base::devtrig::read("plextv") {
@@ -51,10 +58,14 @@ pub fn plex_tv() -> &'static str {
         Some(_) => {
             #[cfg(feature = "devtriggers")]
             plx_base::eventlog::log("BADTRIGGER plextv: only http://127.0.0.1:<port> or http://localhost:<port> is accepted");
-            PLEX_TV.to_string()
+            stremio_bridge()
         }
-        None => PLEX_TV.to_string(),
+        None => stremio_bridge(),
     })
+}
+
+fn stremio_bridge() -> String {
+    format!("http://127.0.0.1:{STREMIO_BRIDGE_PORT}")
 }
 
 /// `http://127.0.0.1:<port>` or `http://localhost:<port>`, optionally with a trailing `/`.
@@ -822,9 +833,9 @@ mod reachability_tests {
         *LAST_REACHABLE.lock().unwrap() = None;
         assert!(!plex_tv_recently_reachable(), "nothing proven yet");
         assert!(!plex_tv_recently_unreachable());
-        note_contact(PLEX_TV, true);
+        note_contact(plex_tv(), true);
         assert!(plex_tv_recently_reachable());
-        note_contact(PLEX_TV, false);
+        note_contact(plex_tv(), false);
         assert!(plex_tv_recently_unreachable());
         assert!(!plex_tv_recently_reachable(), "a failure since the answer wins");
         note_contact("https://discover.provider.plex.tv/x", true);

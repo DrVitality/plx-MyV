@@ -814,6 +814,9 @@ pub(crate) unsafe fn construct(
     // means this device has no libcurl we can bind, so plex.tv sign-in will not work — the app
     // still runs, and `net::global_init` has already said so in the event log.
     let _ = plx_net::net::global_init();
+    // The Stremio bridge answers every plex.tv and media-server request this fork makes, so it
+    // must be listening before the first one, and its own Stremio calls need libcurl bound.
+    crate::stremio::start();
     // Drain whatever the LAST session left behind, on a worker — and **after `global_init`,
     // which is the whole reason this line is here and not beside `telemetry::boot()` 170 lines
     // up.** It was there first, and the end-to-end run showed why that was wrong: the worker

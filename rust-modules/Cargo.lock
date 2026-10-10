@@ -764,6 +764,7 @@ dependencies = [
  "plx_session",
  "plx_telemetry",
  "plx_ui",
+ "qrcodegen",
  "serde",
  "serde_json",
  "xxhash-rust",

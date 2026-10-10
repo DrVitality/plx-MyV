@@ -81,7 +81,7 @@
   "browse.login.expired": "El código anterior caducó: escanea este",
   "browse.login.waiting": "Esperando a que inicies sesión…",
   "browse.login.slow": "Esto está tardando más de lo habitual.",
-  "browse.login.title": "Iniciar sesión en Plex",
+  "browse.login.title": "Iniciar sesión en Stremio",
   "browse.login.instructions": "Escanea el código con la cámara del teléfono o vincula este televisor manualmente usando la dirección y el código que aparecen aquí.",
   "browse.search.placeholder": "Buscar en tu biblioteca",
   "browse.search.one_more": "un carácter más",

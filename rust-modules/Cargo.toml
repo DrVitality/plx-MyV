@@ -224,7 +224,7 @@ plx_gfx = { path = "gfx" }
 # fixtures need `rcgen` and `rustls`, which therefore left this crate's dev-dependencies.
 plx_net = { path = "net" }
 # The ui layer (ci/module-layers.ini `[ui]`): the UI library, with no application type in it. It
-# owns the QR encoder, so `qrcodegen` left this manifest.
+# owns the on-screen QR encoder; this manifest names `qrcodegen` again only for the Stremio bridge's PNG.
 plx_ui = { path = "ui" }
 # The plex layer (ci/module-layers.ini `[plex]`): the typed Plex API, the session store, the grant
 # and probe logic and `http`, the one request door. It reports the app version it is handed
@@ -255,6 +255,9 @@ plx_appkit = { path = "appkit" }
 # the registry that names them. It links nothing on the television; its build script is for the host
 # test binary.
 plx_screens = { path = "screens" }
+# The Stremio bridge draws its sign-in QR as a PNG (`src/stremio/qr.rs`); the same pinned
+# encoder the ui layer uses for its offline links.
+qrcodegen = "=1.8.0"
 # safe pure-Rust JPEG/PNG decoders — replaces vendored stb_image.h (~8k lines C)
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 # raw socket/libc FFI for the stream module (correct constants + struct layouts)

@@ -328,7 +328,7 @@
     "description": "browse login slow"
   },
   "browse.login.title": {
-    "value": "Sign in to Plex",
+    "value": "Sign in to Stremio",
     "description": "browse login title"
   },
   "browse.login.instructions": {
