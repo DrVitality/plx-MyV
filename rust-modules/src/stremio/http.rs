@@ -32,8 +32,8 @@ pub struct Request {
 }
 
 impl Request {
-    /// A request built directly, for tests and for the router's own sub-dispatch.
-    #[cfg(test)]
+    /// A request built directly: for tests, and for the phone remote, which asks the bridge as
+    /// the app does (`super::remote`).
     pub fn new(method: &str, target: &str, headers: &[(&str, &str)]) -> Request {
         let (path, query) = split_target(target);
         Request {
