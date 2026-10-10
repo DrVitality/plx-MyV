@@ -73,6 +73,10 @@ pub(super) struct Config {
     pub addons: Vec<AddonPref>,
     #[serde(default)]
     pub shows: HashMap<String, StreamMemory>,
+    /// Streams that did not start, per film or episode (its ratingKey → [`stream_key`]s): ranked
+    /// last for that item from then on, until one of them starts after all.
+    #[serde(default)]
+    pub dead: HashMap<String, Vec<String>>,
     /// The day (`YYYY-MM-DD`) new episodes were last announced, so each is announced once.
     #[serde(default)]
     pub announced_through: String,
@@ -210,6 +214,17 @@ pub(super) fn save(path: Option<&PathBuf>, config: &Config) {
     if !ok {
         plx_base::eventlog::log("stremio: the bridge's settings could not be saved; they hold for this run");
     }
+}
+
+/// Items whose dead streams are remembered at most, and streams per item.
+pub(super) const DEAD_ITEMS: usize = 300;
+pub(super) const DEAD_PER_ITEM: usize = 12;
+
+/// A stream's identity across reads of the list: its addon and its file (else its release line).
+/// Not its URL, which can carry a key and changes between reads.
+pub(super) fn stream_key(addon: &str, filename: Option<&str>, detail: &str) -> String {
+    let file = filename.unwrap_or_else(|| detail.lines().next().unwrap_or(detail));
+    format!("{addon}|{}", file.trim())
 }
 
 /// The release group in a file or release name: the `-GROUP` before the extension

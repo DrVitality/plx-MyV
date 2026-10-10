@@ -72,6 +72,8 @@ pub(super) struct PlayState {
     pub(super) next_candidate: std::sync::atomic::AtomicI64,
     /// Subtitles installed from a search, by item, for the rest of the run.
     pub(super) installed: Mutex<HashMap<String, Vec<ExternalSub>>>,
+    /// Episodes whose successor has been warmed already this run.
+    pub(super) next_warmed: Mutex<std::collections::HashSet<String>>,
 }
 
 impl Default for PlayState {
@@ -87,9 +89,13 @@ impl Default for PlayState {
             candidates: Mutex::default(),
             next_candidate: std::sync::atomic::AtomicI64::new(9_000_000_000),
             installed: Mutex::default(),
+            next_warmed: Mutex::default(),
         }
     }
 }
+
+/// How far into an episode its successor's stream is found ahead of Up Next.
+const NEXT_WARM_AT: f64 = 0.8;
 
 /// Streams tried at most before the first pick stands.
 const FALLBACK_TRIES: usize = 3;
@@ -222,6 +228,22 @@ impl Bridge {
         }
     }
 
+    /// Find the stream of the episode after `rk_s` in the background, once per episode.
+    fn warm_next_episode(&self, token: &str, rk_s: &str) {
+        if !self.play.next_warmed.lock().unwrap_or_else(|e| e.into_inner()).insert(rk_s.to_string()) {
+            return;
+        }
+        let Some(Rk::Episode { stype, id, video }) = Rk::decode(rk_s) else { return };
+        let Ok(addons) = self.addons(token) else { return };
+        let Some(t) = self.title(&addons, &stype, &id) else { return };
+        // the episodes in viewing order: seasons ascending, specials last
+        let order: Vec<&catalog::Episode> = t.seasons().into_iter().flat_map(|s| t.episodes(s)).collect();
+        let Some(at) = order.iter().position(|e| e.video == video) else { return };
+        let Some(next) = order.get(at + 1) else { return };
+        plx_base::eventlog::log("stremio: finding the next episode's stream ahead of Up Next");
+        self.warm(token, Rk::Episode { stype, id, video: next.video.clone() }.encode());
+    }
+
     /// The resolved choice for a film or episode, from the memo when fresh.
     pub(super) fn resolved(&self, token: &str, rk: &Rk, rk_s: &str, minutes: Option<i64>) -> Option<Arc<Resolved>> {
         if matches!(rk, Rk::Season { .. }) || matches!(rk, Rk::Item { kind: catalog::Kind::Show, .. }) {
@@ -249,6 +271,7 @@ impl Bridge {
             let Some(url) = streams[i].0.url.as_deref() else { continue };
             match self.probe_url(url) {
                 Ok(p) => {
+                    self.mark_alive(rk_s, &streams[i].0);
                     if tried > 0 {
                         plx_base::eventlog::log(&format!("stremio: stream {} answered after {tried} that did not", i));
                     }
@@ -256,7 +279,10 @@ impl Bridge {
                     probed = p;
                     break;
                 }
-                Err(()) => plx_base::eventlog::log(&format!("stremio: stream {i} did not answer; trying the next")),
+                Err(()) => {
+                    self.mark_dead(rk_s, &streams[i].0);
+                    plx_base::eventlog::log(&format!("stremio: stream {i} did not answer; trying the next"));
+                }
             }
         }
         if let (Some(i), Rk::Episode { id, .. }) = (chosen, rk) {
@@ -655,6 +681,10 @@ impl Bridge {
             }
             due
         };
+        // past most of an episode: its successor's stream is found now, so Up Next starts at once
+        if state == "playing" && duration > 0 && time as f64 >= duration as f64 * NEXT_WARM_AT {
+            self.warm_next_episode(token, &rk_s);
+        }
         if due {
             if let Some(rk) = Rk::decode(&rk_s) {
                 let finished = state == "stopped" && duration > 0 && time as f64 >= duration as f64 * WATCHED_AT;

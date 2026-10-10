@@ -1131,3 +1131,46 @@ fn turning_subtitles_off_on_one_episode_carries_to_the_next() {
     assert!(streams.iter().filter(|s| s["streamType"] == 3).all(|s| s["selected"] != true),
             "the next episode starts with subtitles off too: {streams:?}");
 }
+
+#[test]
+fn a_release_in_the_viewers_audio_language_ranks_first() {
+    let mut s = content_scripted();
+    s.pages.insert("https://torrentio.example/stream/movie/tt0111161.json".into(), json!({"streams": [
+        {"name": "[RD+] Torrentio\n1080p", "title": "Shawshank.1080p.BluRay.x264-ENG\n🇬🇧", "url": "https://t/en"},
+        {"name": "[RD+] Torrentio\n1080p", "title": "Shawshank.1080p.BluRay.Castellano.x264\n🇪🇸 / 🇬🇧", "url": "https://t/es"},
+    ]}));
+    let b = bridge_with(s);
+    let rk = Rk::item("movie", "tt0111161").unwrap().encode();
+    let english = json_of(&b.handle(&authed("GET", &format!("/stremio/streams/{rk}"))));
+    assert!(english["streams"][0]["detail"].as_str().unwrap().contains("ENG"), "English first for an English viewer");
+    assert_eq!(b.handle(&authed("PUT", "/api/v2/user/profile?defaultAudioLanguage=es")).status, 200);
+    let spanish = json_of(&b.handle(&authed("GET", &format!("/stremio/streams/{rk}"))));
+    assert!(spanish["streams"][0]["detail"].as_str().unwrap().contains("Castellano"), "{spanish}");
+}
+
+#[test]
+fn a_stream_that_did_not_start_ranks_last_for_that_item() {
+    let mut s = content_scripted();
+    s.pages.insert("https://torrentio.example/stream/movie/tt0111161.json".into(), json!({"streams": [
+        {"name": "[RD+] Torrentio\n1080p", "title": "Dead.1080p.WEB.x264-AAA", "url": "https://t/dead"},
+        {"name": "[RD+] Torrentio\n1080p", "title": "Alive.1080p.WEB.x264-BBB", "url": "https://t/alive"},
+    ]}));
+    s.files.insert("https://t/alive".into(), sample_mkv());
+    let b = bridge_with(s);
+    let rk = Rk::item("movie", "tt0111161").unwrap().encode();
+    let before = json_of(&b.handle(&authed("GET", &format!("/stremio/streams/{rk}"))));
+    assert!(before["streams"][0]["detail"].as_str().unwrap().starts_with("Dead"));
+    let _ = b.handle(&authed("GET", &format!("/library/metadata/{rk}")));
+    let after = json_of(&b.handle(&authed("GET", &format!("/stremio/streams/{rk}"))));
+    assert!(after["streams"][0]["detail"].as_str().unwrap().starts_with("Alive"), "{after}");
+    assert!(after["streams"][1]["detail"].as_str().unwrap().starts_with("Dead"));
+}
+
+#[test]
+fn release_text_names_its_languages_and_dubs() {
+    use super::bridge::release_language_for_test as names;
+    assert!(names("Show.S01.1080p.Castellano.WEB", "es"));
+    assert!(names("Film 1080p\n🇫🇷 / 🇬🇧", "fr"));
+    assert!(!names("Spaceballs.1987.1080p", "es"), "a word that merely contains a needle is not a language");
+    assert!(names("[SubsPlease] Show - 02 (1080p) Dual Audio", "") == false);
+}

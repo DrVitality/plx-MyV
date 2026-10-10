@@ -478,3 +478,9 @@ impl Bridge {
 pub fn aniskip_markers_for_test(v: &Value, duration_ms: i64) -> Vec<Value> {
     play::aniskip_markers(v, duration_ms)
 }
+
+/// Does a release's text name language `code`? (The ranking's own reading, for the tests.)
+#[cfg(test)]
+pub fn release_language_for_test(text: &str, code: &str) -> bool {
+    content::names_language(text, code)
+}

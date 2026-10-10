@@ -1081,7 +1081,8 @@ impl Bridge {
                 }) as Box<dyn FnOnce() -> Vec<Stream> + Send + '_>
             })
             .collect();
-        let ranked = rank(parallel(jobs).into_iter().flatten().flatten().collect());
+        let mut ranked = rank(parallel(jobs).into_iter().flatten().flatten().collect());
+        self.adjust_ranking(rk, &mut ranked);
         Ok(super::super::streams::narrow(ranked, super::super::streams::prefs()))
     }
 
@@ -1700,5 +1701,126 @@ impl Bridge {
             .map(|t| catalog::title_row(&t, row_shelf(Lib::of_title(&t.stype, &t.id)), &self.art))
             .collect();
         Response::json(200, &container(json!({"size": rows.len(), "Metadata": rows})))
+    }
+}
+
+/// Score added to a stream in the viewer's audio language (more than an English release earns, so
+/// a Spanish speaker's Spanish release outranks an English one of the same readiness).
+const LANGUAGE_BONUS: i64 = 4_500;
+/// Score added to a dual-audio or dubbed anime release for a show watched in English.
+const DUB_BONUS: i64 = 600;
+/// Score taken from a stream that did not start for this item (below even a camera copy).
+const DEAD_PENALTY: i64 = 40_000;
+
+/// What a release says about its languages, as each language is commonly written in release names
+/// and addon descriptions: flags, names, and scene tags. Two-letter code → lower-case needles.
+fn language_needles(code: &str) -> &'static [&'static str] {
+    match code {
+        "es" => &["🇪🇸", "🇲🇽", "spanish", "español", "espanol", "castellano", "latino", " spa ", ".spa."],
+        "fr" => &["🇫🇷", "french", "truefrench", "vff", "vf2", " vf ", ".vf."],
+        "de" => &["🇩🇪", "german", "deutsch", " ger ", ".ger."],
+        "it" => &["🇮🇹", "italian", "italiano", " ita ", ".ita."],
+        "pt" => &["🇧🇷", "🇵🇹", "portuguese", "português", "dublado", " por ", ".por."],
+        "ru" => &["🇷🇺", "russian", " rus ", ".rus."],
+        "pl" => &["🇵🇱", "polish", " pol ", ".pol."],
+        "nl" => &["🇳🇱", "dutch", " nld ", ".nld."],
+        "tr" => &["🇹🇷", "turkish", " tur ", ".tur."],
+        "ja" => &["🇯🇵", "japanese", " jpn ", ".jpn."],
+        "ko" => &["🇰🇷", "korean", " kor ", ".kor."],
+        "zh" => &["🇨🇳", "🇹🇼", "chinese", "mandarin", "cantonese"],
+        "hi" => &["🇮🇳", "hindi"],
+        "ar" => &["🇸🇦", "arabic"],
+        _ => &[],
+    }
+}
+
+/// Does a release's text name language `code`?
+pub(super) fn names_language(text: &str, code: &str) -> bool {
+    let t = format!(" {} ", text.to_lowercase().replace(['\n', '/', '|', '[', ']', '(', ')', '-'], " "));
+    language_needles(code).iter().any(|n| t.contains(n))
+}
+
+/// Is a release dual-audio or dubbed?
+pub(super) fn is_dub(text: &str) -> bool {
+    let t = text.to_lowercase();
+    ["dual audio", "dual-audio", "dualaudio", "dubbed", "english dub", "eng dub", "[dub]", " dub "].iter().any(|n| t.contains(n))
+}
+
+impl Bridge {
+    /// The viewer's touches on a ranked list, before it is narrowed: releases in their audio
+    /// language up (when that is not English, which the ranking already favours), dual-audio and
+    /// dubbed anime up for a show watched in English, and streams that did not start for this
+    /// item down. The order stays stable among equals.
+    fn adjust_ranking(&self, rk: &Rk, ranked: &mut [(super::super::streams::Stream, super::super::streams::Facts, i64)]) {
+        let rk_s = rk.encode();
+        let wanted = {
+            let profile = self.profile.lock().unwrap_or_else(|e| e.into_inner());
+            profile.get("defaultAudioLanguage").and_then(Value::as_str)
+                .and_then(super::subs::two_letter).unwrap_or_else(|| "en".into())
+        };
+        let (stype, show_id) = rk.show();
+        let anime = stype == "anime" || show_id.starts_with("kitsu:") || show_id.starts_with("mal:");
+        let (dead, watched_in_english) = self.with_config(|c| {
+            let english = c.shows.get(show_id)
+                .and_then(|m| m.audio_lang.as_deref())
+                .and_then(super::subs::two_letter)
+                .is_some_and(|l| l == "en");
+            (c.dead.get(&rk_s).cloned().unwrap_or_default(), english)
+        });
+        let mut changed = false;
+        for (s, _, score) in ranked.iter_mut() {
+            let text = format!("{}\n{}\n{}", s.name, s.detail, s.filename.as_deref().unwrap_or(""));
+            if wanted != "en" && names_language(&text, &wanted) {
+                *score += LANGUAGE_BONUS;
+                changed = true;
+            }
+            if anime && watched_in_english && is_dub(&text) {
+                *score += DUB_BONUS;
+                changed = true;
+            }
+            if dead.contains(&super::config::stream_key(&s.addon, s.filename.as_deref(), &s.detail)) {
+                *score -= DEAD_PENALTY;
+                changed = true;
+            }
+        }
+        if changed {
+            ranked.sort_by(|a, b| b.2.cmp(&a.2));
+        }
+    }
+
+    /// A stream of `rk_s` did not start: rank it last for that item from now on.
+    pub(super) fn mark_dead(&self, rk_s: &str, s: &super::super::streams::Stream) {
+        let key = super::config::stream_key(&s.addon, s.filename.as_deref(), &s.detail);
+        if self.with_config(|c| c.dead.get(rk_s).is_some_and(|v| v.contains(&key))) {
+            return;
+        }
+        self.change_config(|c| {
+            if c.dead.len() >= super::config::DEAD_ITEMS && !c.dead.contains_key(rk_s) {
+                if let Some(k) = c.dead.keys().next().cloned() {
+                    c.dead.remove(&k);
+                }
+            }
+            let list = c.dead.entry(rk_s.to_string()).or_default();
+            if list.len() >= super::config::DEAD_PER_ITEM {
+                list.remove(0);
+            }
+            list.push(key);
+        });
+    }
+
+    /// A stream of `rk_s` started after all: it is no longer dead.
+    pub(super) fn mark_alive(&self, rk_s: &str, s: &super::super::streams::Stream) {
+        let key = super::config::stream_key(&s.addon, s.filename.as_deref(), &s.detail);
+        if !self.with_config(|c| c.dead.get(rk_s).is_some_and(|v| v.contains(&key))) {
+            return;
+        }
+        self.change_config(|c| {
+            if let Some(list) = c.dead.get_mut(rk_s) {
+                list.retain(|k| *k != key);
+                if list.is_empty() {
+                    c.dead.remove(rk_s);
+                }
+            }
+        });
     }
 }
