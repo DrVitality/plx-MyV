@@ -3001,6 +3001,9 @@ impl<'a> HomeCards<'a> {
 }
 
 impl<H: HomeLike> CardSource<H> for HomeCards<'_> {
+    fn peek(&self, i: usize) -> Option<ui_cards::Peek> {
+        self.item(i).and_then(super::registry::card_peek)
+    }
     fn more(&self) -> bool {
         self.paging && self.home.hub(self.view, self.row).is_some_and(|hub| hub.more)
     }

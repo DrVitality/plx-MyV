@@ -338,6 +338,48 @@ pub fn card_press_plays(kind: std::os::raw::c_int) -> bool {
     kind != plx_data::pms::KIND_COLLECTION && plx_media::route::deck_press().press_plays()
 }
 
+/// What a card's details bubble says ([`plx_ui::cards::peek`]): the title, a facts line (year ·
+/// length or seasons · rating), the synopsis, and the foot line saying what OK and a hold do.
+/// `None` for a row that is not a film, show, season or episode (a collection opens its page and
+/// has nothing to summarize here) or has no title.
+pub fn card_peek(m: &plx_data::pms::PmsMovie) -> Option<plx_ui::cards::Peek> {
+    if m.title.is_empty() || m.kind == plx_data::pms::KIND_COLLECTION || !(0..=3).contains(&m.kind) {
+        return None;
+    }
+    let episode = m.kind == 3;
+    let mut facts: Vec<String> = Vec::new();
+    if episode {
+        facts.push(plx_ui::fmt::episode_address(m.season_index as i64, m.ep_index as i64));
+    }
+    if m.year > 0 {
+        facts.push(m.year.to_string());
+    }
+    match m.kind {
+        1 if m.child_count > 0 => facts.push(plx_platform::i18n::msg::browse_detail_seasons(m.child_count)),
+        0 | 3 if m.dur_ns > 0 => facts.push(plx_ui::fmt::dur_short(m.dur_ns / 1_000_000)),
+        _ => {}
+    }
+    if !m.rating.is_empty() {
+        facts.push(m.rating.clone());
+    }
+    let hint = if card_press_plays(m.kind) {
+        plx_platform::i18n::msg::browse_peek_hint_play()
+    } else {
+        plx_platform::i18n::msg::browse_peek_hint_details()
+    };
+    Some(plx_ui::cards::Peek {
+        // an episode's bubble leads with its show; the episode's own name is the summary's lead
+        title: if episode && !m.show_title.is_empty() { m.show_title.clone() } else { m.title.clone() },
+        facts: facts.join("  ·  "),
+        summary: if episode && !m.show_title.is_empty() && m.title != m.show_title {
+            if m.summary.is_empty() { m.title.clone() } else { format!("{} — {}", m.title, m.summary) }
+        } else {
+            m.summary.clone()
+        },
+        hint: hint.to_string(),
+    })
+}
+
 /// Which of the three menus this is, and the data its row set is built from.
 ///
 /// No `Debug`, deliberately: `PmsMovie` is a wire DTO with none, and deriving one for it would put

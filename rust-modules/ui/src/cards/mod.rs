@@ -63,6 +63,7 @@ use crate::{Painter, Rect};
 
 mod avatars;
 mod grid;
+pub mod peek; // the details bubble beside a card focus has rested on
 mod pool;
 mod shelf;
 mod stack;
@@ -80,6 +81,7 @@ pub use crate::poster_grid::{
     STYLE as GRID_STYLE,
 };
 pub use grid::{Grid, GridSpec, ScrollMode};
+pub use peek::Peek;
 pub use shelf::Shelf;
 pub use stack::{Kind, SectionSpec, Stack, StackEvent, StackMemory, StackPage, StackView};
 
@@ -143,6 +145,10 @@ pub trait CardSource<H: Host> {
     /// Whether the store has more cards beyond `len()`; only then are [`CardEvent::Want`]s emitted.
     fn more(&self) -> bool {
         false
+    }
+    /// What card `i`'s details bubble says ([`peek`]), or `None` for no bubble (the default).
+    fn peek(&self, _i: usize) -> Option<Peek> {
+        None
     }
 }
 

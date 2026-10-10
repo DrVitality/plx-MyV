@@ -294,6 +294,7 @@ impl HubSrc<'_> {
 }
 
 impl<H: Host<Elem = u32>> CardSource<H> for HubSrc<'_> {
+    fn peek(&self, i: usize) -> Option<ui_cards::Peek> { self.item(i).and_then(crate::registry::card_peek) }
     fn len(&self) -> usize { self.elems.len() }
     fn elem(&self, i: usize) -> u32 { self.elems.get(i).copied().unwrap_or(0) }
     fn index_of(&self, e: &u32) -> Option<usize> { self.elems.iter().position(|elem| elem == e) }

@@ -121,6 +121,8 @@
     "many": "{count} прац · Спачатку новыя.",
     "other": "{count} працы · Спачатку новыя."
   },
+  "browse.peek.hint_play": "OK — прайграць · утрымлівайце OK — больш",
+  "browse.peek.hint_details": "OK — адкрыць · утрымлівайце OK — больш",
   "browse.detail.seasons": {
     "one": "{count} сезон",
     "few": "{count} сезоны",

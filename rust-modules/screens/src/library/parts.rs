@@ -438,6 +438,7 @@ struct GridSrc<'a, 'v> {
 }
 
 impl<H: Host<Elem = u32>> CardSource<H> for GridSrc<'_, '_> {
+    fn peek(&self, i: usize) -> Option<ui_cards::Peek> { self.view.item(i).and_then(crate::registry::card_peek) }
     fn len(&self) -> usize { self.elems.len() }
     fn elem(&self, i: usize) -> u32 { self.elems.get(i).copied().unwrap_or(0) }
     fn index_of(&self, e: &u32) -> Option<usize> { self.indexes.index_of(*e) }

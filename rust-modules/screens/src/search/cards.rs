@@ -28,6 +28,12 @@ impl RowCards<'_> {
 }
 
 impl<H: SearchLike> CardSource<H> for RowCards<'_> {
+    fn peek(&self, i: usize) -> Option<plx_ui::cards::Peek> {
+        match self.items.get(i) {
+            Some(Item::Media(media)) => crate::registry::card_peek(media),
+            _ => None,
+        }
+    }
     fn len(&self) -> usize { self.elems.len().min(self.items.len()) }
     fn elem(&self, i: usize) -> u32 { self.elems[i] }
     fn index_of(&self, e: &u32) -> Option<usize> {
