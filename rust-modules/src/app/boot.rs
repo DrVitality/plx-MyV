@@ -1006,6 +1006,7 @@ pub(crate) unsafe fn construct(
     plx_media::route::restore_next_episode_mode(session.next_episode_mode());
     plx_media::route::restore_skip_interval(session.skip_interval());
     plx_media::route::restore_deck_press(session.deck_press());
+    apply_appearance(session.appearance());
     // The subtitle tone rides the same file and the same moment: a preference, restored once.
     plx_media::player::restore_subtitle_tone(session.subtitle_tone());
     plx_media::player::restore_audio_enhancements(session.audio_enhancements());
@@ -1755,4 +1756,10 @@ pub(crate) unsafe fn construct(
         }
     }
     Ok(app)
+}
+
+/// Make the stored look (Settings › Appearance) live: the accent, the background, the corners and
+/// the details bubble, all read at the paint door by `plx_ui::theme::appearance`.
+pub(crate) fn apply_appearance(look: plx_plex::plex::session::Appearance) {
+    plx_ui::theme::appearance::apply(look.accent, look.ground, look.corners, look.peek);
 }

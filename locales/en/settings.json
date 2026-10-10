@@ -691,6 +691,130 @@
     "value": "Off",
     "description": "Next episode picker option: nothing is shown during the credits and the next episode does not start by itself."
   },
+  "settings.appearance.section": {
+    "value": "Appearance",
+    "description": "Settings root section header for the app's look."
+  },
+  "settings.appearance.title": {
+    "value": "Appearance",
+    "description": "Settings row and page title: the app's colours, corners and card details bubble."
+  },
+  "settings.appearance.detail": {
+    "value": "Colors, corners and card details",
+    "description": "Detail line under the Appearance row in the Settings root."
+  },
+  "settings.appearance.copy": {
+    "value": "Choose how the app looks. Changes apply right away.",
+    "description": "Explanation under the Appearance page title."
+  },
+  "settings.appearance.accent": {
+    "value": "Accent color",
+    "description": "Appearance field and picker title: the color focused buttons, progress bars and the play mark are drawn in."
+  },
+  "settings.appearance.accent.copy": {
+    "value": "The color of the highlighted button, progress bars and the play mark.",
+    "description": "Explanation under the Accent color picker title."
+  },
+  "settings.appearance.accent.crimson": {
+    "value": "Crimson",
+    "description": "Accent color option (the default)."
+  },
+  "settings.appearance.accent.orange": {
+    "value": "Orange",
+    "description": "Accent color option."
+  },
+  "settings.appearance.accent.gold": {
+    "value": "Gold",
+    "description": "Accent color option."
+  },
+  "settings.appearance.accent.emerald": {
+    "value": "Emerald",
+    "description": "Accent color option."
+  },
+  "settings.appearance.accent.teal": {
+    "value": "Teal",
+    "description": "Accent color option."
+  },
+  "settings.appearance.accent.blue": {
+    "value": "Blue",
+    "description": "Accent color option."
+  },
+  "settings.appearance.accent.violet": {
+    "value": "Violet",
+    "description": "Accent color option."
+  },
+  "settings.appearance.accent.pink": {
+    "value": "Pink",
+    "description": "Accent color option."
+  },
+  "settings.appearance.ground": {
+    "value": "Background",
+    "description": "Appearance field and picker title: the app's background tone."
+  },
+  "settings.appearance.ground.copy": {
+    "value": "The tone of the app's background and panels.",
+    "description": "Explanation under the Background picker title."
+  },
+  "settings.appearance.ground.charcoal": {
+    "value": "Warm charcoal",
+    "description": "Background option (the default): dark gray with a hint of red."
+  },
+  "settings.appearance.ground.graphite": {
+    "value": "Graphite",
+    "description": "Background option: neutral dark gray."
+  },
+  "settings.appearance.ground.midnight": {
+    "value": "Midnight",
+    "description": "Background option: near black, for a dark room."
+  },
+  "settings.appearance.corners": {
+    "value": "Corners",
+    "description": "Appearance field and picker title: how round the corners of cards, buttons and panels are."
+  },
+  "settings.appearance.corners.copy": {
+    "value": "How round the corners of cards, buttons and panels are drawn.",
+    "description": "Explanation under the Corners picker title."
+  },
+  "settings.appearance.corners.crisp": {
+    "value": "Crisp",
+    "description": "Corners option (the default): a slight softening."
+  },
+  "settings.appearance.corners.sharp": {
+    "value": "Sharp",
+    "description": "Corners option: square corners."
+  },
+  "settings.appearance.corners.soft": {
+    "value": "Soft",
+    "description": "Corners option: gently rounded."
+  },
+  "settings.appearance.corners.round": {
+    "value": "Round",
+    "description": "Corners option: fully rounded pills and cards."
+  },
+  "settings.appearance.peek": {
+    "value": "Details popup",
+    "description": "Appearance field and picker title: when the details bubble beside a highlighted card opens."
+  },
+  "settings.appearance.peek.copy": {
+    "value": "Shows a card's details beside it when you rest on it.",
+    "description": "Explanation under the Details popup picker title."
+  },
+  "settings.appearance.peek.normal": {
+    "value": "Normal",
+    "description": "Details popup option (the default)."
+  },
+  "settings.appearance.peek.quick": {
+    "value": "Quick",
+    "description": "Details popup option: opens sooner."
+  },
+  "settings.appearance.peek.slow": {
+    "value": "Slow",
+    "description": "Details popup option: opens later."
+  },
+  "settings.appearance.peek.off": {
+    "value": "Off",
+    "description": "Details popup option: never opens."
+  },
   "settings.playback.deck_press": {
     "value": "OK on a card",
     "description": "Settings row title and picker title: what OK does on a movie, show or episode card on any shelf, grid or search result."

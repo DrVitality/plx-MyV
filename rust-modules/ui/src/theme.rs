@@ -200,17 +200,23 @@ pub mod shape {
     /// and so does anything too small to have a visible corner; every other radius is capped at
     /// [`CORNER`].
     pub fn corner(w: f32, h: f32, rad: f32) -> f32 {
+        corner_under(super::appearance::corner_cap(), w, h, rad)
+    }
+
+    /// [`corner`] under an explicit cap (the viewer's Corners choice; [`CORNER`] by default).
+    pub fn corner_under(cap: f32, w: f32, h: f32, rad: f32) -> f32 {
         let short = w.min(h);
         let circle = (w - h).abs() < 1.0 && rad >= short * 0.5 - 0.5;
-        if circle || short <= 2.0 * CORNER { rad } else { rad.min(CORNER) }
+        if circle || short <= 2.0 * cap { rad } else { rad.min(cap) }
     }
 
     #[cfg(test)]
     mod tests {
-        use super::{corner, CORNER};
+        use super::{corner_under, CORNER};
 
         #[test]
         fn pills_and_cards_are_crisp_but_circles_stay_round() {
+            let corner = |w, h, r| corner_under(CORNER, w, h, r);
             assert_eq!(corner(300.0, 64.0, 32.0), CORNER, "a pill");
             assert_eq!(corner(220.0, 330.0, 14.0), CORNER, "a poster");
             assert_eq!(corner(800.0, 600.0, 32.0), CORNER, "a panel");
@@ -218,6 +224,8 @@ pub mod shape {
             assert_eq!(corner(10.0, 10.0, 5.0), 5.0, "a spinner dot");
             assert_eq!(corner(400.0, 6.0, 3.0), 3.0, "a thin rail keeps its rounded ends");
             assert_eq!(corner(200.0, 100.0, 2.0), 2.0, "a smaller radius is untouched");
+            // Round draws every widget's own radius
+            assert_eq!(corner_under(f32::INFINITY, 300.0, 64.0, 32.0), 32.0);
         }
     }
 }
@@ -1446,3 +1454,210 @@ const PURPLE_700: [f32; 4] = rgb8(0x70, 0x30, 0xa0);
 /// Opaque main-thread checker warning surface (developer builds only).
 #[cfg(feature = "threadcheck")]
 pub const RUNTIME_WARNING: [f32; 4] = PURPLE_700;
+
+/// **Appearance — the viewer's own choices of accent, background, corners and the details bubble**
+/// (Settings › Appearance), applied at the paint door rather than at each call site.
+///
+/// The palette above is the DEFAULT look (crimson on warm charcoal, crisp 3px corners) and every
+/// role token keeps naming it. What a viewer picks is applied where every colour and every radius
+/// already passes: `Painter`'s colour step runs [`remap`] and its radius step runs
+/// [`super::shape::corner`], which reads [`corner_cap`]. So a choice restyles the whole app at once
+/// without a role token turning into a function or a call site learning about preferences, and with
+/// the defaults chosen the paint door does exactly what it did before (one relaxed load, no compare).
+///
+/// [`remap`] matches by exact colour: the accent's two stops (and the spent-fill mix derived from
+/// them), and the ground stops the surfaces are built from. Shades computed at run time from the
+/// accent (a focused face's body) read [`accent`] instead of [`super::ACCENT`]. The choices are
+/// persisted by the application (`Session::appearance`) and handed in with [`apply`]; nothing here
+/// reads storage.
+pub mod appearance {
+    use super::rgb8;
+    use std::sync::atomic::{AtomicU8, Ordering::Relaxed};
+
+    /// The accent: what a focused control, progress and the ▶ mark are lit in.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Accent { Crimson, Orange, Gold, Emerald, Teal, Blue, Violet, Pink }
+    impl Accent {
+        pub const LADDER: [Accent; 8] = [Accent::Crimson, Accent::Orange, Accent::Gold, Accent::Emerald,
+            Accent::Teal, Accent::Blue, Accent::Violet, Accent::Pink];
+        /// `(base, light)`: the focused fill, and the brighter stop thin marks (progress, ▶) use.
+        /// Every base carries white ink at a contrast a television reads from the couch.
+        pub const fn stops(self) -> ([f32; 4], [f32; 4]) {
+            match self {
+                Accent::Crimson => (super::CRIMSON_500, super::CRIMSON_400),
+                Accent::Orange => (rgb8(0xd9, 0x55, 0x10), rgb8(0xf2, 0x7a, 0x30)),
+                Accent::Gold => (rgb8(0xb8, 0x86, 0x0b), rgb8(0xe0, 0xaa, 0x2a)),
+                Accent::Emerald => (rgb8(0x0e, 0x8a, 0x4f), rgb8(0x2c, 0xb8, 0x72)),
+                Accent::Teal => (rgb8(0x0b, 0x80, 0x88), rgb8(0x2a, 0xb0, 0xb8)),
+                Accent::Blue => (rgb8(0x1f, 0x5f, 0xd6), rgb8(0x4a, 0x86, 0xf2)),
+                Accent::Violet => (rgb8(0x74, 0x3c, 0xd0), rgb8(0x9a, 0x6a, 0xf0)),
+                Accent::Pink => (rgb8(0xc8, 0x1e, 0x6e), rgb8(0xee, 0x4c, 0x96)),
+            }
+        }
+    }
+
+    /// The ground: the app's background and the surfaces built on it.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Ground { Charcoal, Graphite, Midnight }
+    impl Ground {
+        pub const LADDER: [Ground; 3] = [Ground::Charcoal, Ground::Graphite, Ground::Midnight];
+        /// Its stops, in [`DEFAULT_GROUND`]'s order.
+        const fn stops(self) -> [[f32; 4]; 8] {
+            match self {
+                Ground::Charcoal => DEFAULT_GROUND,
+                // the neutral gray of the original design, no warmth in it
+                Ground::Graphite => [rgb8(0x24, 0x24, 0x26), rgb8(0x25, 0x25, 0x27), rgb8(0x22, 0x22, 0x24),
+                    rgb8(0x1b, 0x1b, 0x1d), rgb8(0x14, 0x14, 0x16), rgb8(0x08, 0x08, 0x0a),
+                    rgb8(0x1f, 0x21, 0x29), rgb8(0x14, 0x17, 0x1c)],
+                // near-black with a cool cast, for a dark room
+                Ground::Midnight => [rgb8(0x0f, 0x10, 0x14), rgb8(0x17, 0x18, 0x1d), rgb8(0x14, 0x15, 0x1a),
+                    rgb8(0x10, 0x11, 0x15), rgb8(0x0b, 0x0c, 0x0f), rgb8(0x04, 0x04, 0x05),
+                    rgb8(0x16, 0x18, 0x1e), rgb8(0x0e, 0x10, 0x14)],
+            }
+        }
+    }
+    /// How round a corner may be drawn.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Corners { Crisp, Sharp, Soft, Round }
+    impl Corners {
+        pub const LADDER: [Corners; 4] = [Corners::Crisp, Corners::Sharp, Corners::Soft, Corners::Round];
+        /// The largest radius drawn, px at 1080p; `Round` draws every widget's own radius.
+        pub const fn cap(self) -> f32 {
+            match self {
+                Corners::Crisp => super::shape::CORNER,
+                Corners::Sharp => 1.0,
+                Corners::Soft => 8.0,
+                Corners::Round => f32::INFINITY,
+            }
+        }
+    }
+
+    /// When a card's details bubble opens (`cards::peek`).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Peek { Normal, Quick, Slow, Off }
+    impl Peek {
+        pub const LADDER: [Peek; 4] = [Peek::Normal, Peek::Quick, Peek::Slow, Peek::Off];
+        /// How long focus rests before it opens, ms; `None` = never.
+        pub const fn dwell_ms(self) -> Option<f32> {
+            match self {
+                Peek::Normal => Some(650.0),
+                Peek::Quick => Some(350.0),
+                Peek::Slow => Some(1100.0),
+                Peek::Off => None,
+            }
+        }
+    }
+
+    /// The default ground's stops: the app ground, the five neutral surface stops, the two
+    /// unloaded-artwork stops.
+    const DEFAULT_GROUND: [[f32; 4]; 8] = [
+        plx_gfx::gfx::tokens::NEUTRAL_500,
+        super::NEUTRAL_600, super::NEUTRAL_650, super::NEUTRAL_750, super::NEUTRAL_850, super::NEUTRAL_950,
+        super::COOL_850, super::COOL_900,
+    ];
+
+    static ACCENT: AtomicU8 = AtomicU8::new(0);
+    static GROUND: AtomicU8 = AtomicU8::new(0);
+    static CORNERS: AtomicU8 = AtomicU8::new(0);
+    static PEEK: AtomicU8 = AtomicU8::new(0);
+
+    fn pick<T: Copy>(ladder: &[T], i: u8) -> T {
+        ladder.get(i as usize).copied().unwrap_or(ladder[0])
+    }
+    /// Index of `v` in `ladder` (0 when absent), the form the choices are stored in.
+    pub fn index_of<T: PartialEq>(ladder: &[T], v: &T) -> u8 {
+        ladder.iter().position(|x| x == v).unwrap_or(0) as u8
+    }
+
+    /// Make the stored choices live: ladder indexes, out of range meaning the default.
+    pub fn apply(accent: u8, ground: u8, corners: u8, peek: u8) {
+        let changed = ACCENT.swap(accent, Relaxed) != accent
+            | (GROUND.swap(ground, Relaxed) != ground)
+            | (CORNERS.swap(corners, Relaxed) != corners)
+            | (PEEK.swap(peek, Relaxed) != peek);
+        if changed {
+            plx_machine::idle::invalidate();
+        }
+    }
+
+    pub fn accent_choice() -> Accent { pick(&Accent::LADDER, ACCENT.load(Relaxed)) }
+    pub fn ground_choice() -> Ground { pick(&Ground::LADDER, GROUND.load(Relaxed)) }
+    pub fn corners_choice() -> Corners { pick(&Corners::LADDER, CORNERS.load(Relaxed)) }
+    pub fn peek_choice() -> Peek { pick(&Peek::LADDER, PEEK.load(Relaxed)) }
+
+    /// The live accent (the focused fill) — what a shade computed from the accent starts from.
+    pub fn accent() -> [f32; 4] { accent_choice().stops().0 }
+    /// The live corner cap ([`super::shape::corner`]).
+    pub fn corner_cap() -> f32 { corners_choice().cap() }
+    /// The live details-bubble dwell.
+    pub fn peek_dwell_ms() -> Option<f32> { peek_choice().dwell_ms() }
+    /// The live GL clear colour (the app ground).
+    pub fn clear_rgb() -> (f32, f32, f32) {
+        let g = ground_choice().stops()[0];
+        (g[0], g[1], g[2])
+    }
+
+    #[inline]
+    fn same(a: [f32; 4], b: [f32; 4]) -> bool {
+        a[0] == b[0] && a[1] == b[1] && a[2] == b[2]
+    }
+
+    /// The colour to draw for `c` under the live choices (its alpha untouched). With the defaults
+    /// chosen this returns `c` after two relaxed loads.
+    #[inline]
+    pub fn remap(c: [f32; 4]) -> [f32; 4] {
+        let (a, g) = (ACCENT.load(Relaxed), GROUND.load(Relaxed));
+        if a == 0 && g == 0 {
+            return c;
+        }
+        remap_slow(c, pick(&Accent::LADDER, a), pick(&Ground::LADDER, g))
+    }
+
+    fn remap_slow(c: [f32; 4], accent: Accent, ground: Ground) -> [f32; 4] {
+        let with = |to: [f32; 4]| [to[0], to[1], to[2], c[3]];
+        if accent != Accent::Crimson {
+            let (base, light) = accent.stops();
+            if same(c, super::CRIMSON_500) {
+                return with(base);
+            }
+            if same(c, super::CRIMSON_400) {
+                return with(light);
+            }
+            if same(c, super::CONTROL_SPENT_FILL) {
+                let spent = super::mix(base, ground.stops()[0], 1.0 - super::CONTROL_SPENT_FOCUS_W);
+                return with(spent);
+            }
+        }
+        if ground != Ground::Charcoal {
+            let to = ground.stops();
+            for (i, stop) in DEFAULT_GROUND.iter().enumerate() {
+                if same(c, *stop) {
+                    return with(to[i]);
+                }
+            }
+        }
+        c
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// Pure: the live statics are never touched, so no other test can see a remapped colour.
+        #[test]
+        fn the_defaults_draw_exactly_the_palette_and_a_choice_restyles_its_stops() {
+            let crimson = super::super::CRIMSON_500;
+            assert_eq!(remap_slow(crimson, Accent::Crimson, Ground::Charcoal), crimson);
+            let half = [crimson[0], crimson[1], crimson[2], 0.5];
+            let blue = Accent::Blue.stops().0;
+            assert_eq!(remap_slow(half, Accent::Blue, Ground::Midnight), [blue[0], blue[1], blue[2], 0.5], "the alpha is kept");
+            assert_eq!(remap_slow(DEFAULT_GROUND[0], Accent::Blue, Ground::Midnight), Ground::Midnight.stops()[0]);
+            let text = super::super::TEXT_PRIMARY;
+            assert_eq!(remap_slow(text, Accent::Blue, Ground::Midnight), text, "text is untouched");
+            assert_eq!(Corners::Crisp.cap(), super::super::shape::CORNER);
+            assert!(Corners::Round.cap().is_infinite());
+            assert_eq!(Peek::Off.dwell_ms(), None);
+            assert_eq!(pick(&Accent::LADDER, 200), Accent::Crimson, "out of range is the default");
+        }
+    }
+}

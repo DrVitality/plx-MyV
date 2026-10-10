@@ -6936,8 +6936,10 @@ impl ControlPalette {
         // ground keys the idle face (below), and focus is the one place the crimson lives. The
         // body is the same hue one OKLCH lightness step below the lit top, so the face still
         // reads as material catching light rather than a flat chip.
-        let accent = srgb_to_oklab(theme::ACCENT);
-        let focus_top = theme::ACCENT;
+        // the LIVE accent (Settings › Appearance), since the body is computed from it and a
+        // computed shade cannot be matched at the paint door
+        let accent = srgb_to_oklab(theme::appearance::accent());
+        let focus_top = theme::appearance::accent();
         let focus_body = oklab_to_srgb(
             [accent[0] - theme::CONTROL_FOCUS_BODY_STEP, accent[1], accent[2]],
             1.0,

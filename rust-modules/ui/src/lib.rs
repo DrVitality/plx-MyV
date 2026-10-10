@@ -555,6 +555,9 @@ impl Painter {
     }
     #[inline]
     fn c(self, c: [f32; 4]) -> [f32; 4] {
+        // the viewer's accent and ground (`theme::appearance`): the palette's own stops untouched
+        // under the defaults
+        let c = theme::appearance::remap(c);
         [
             c[0] * self.rgb,
             c[1] * self.rgb,

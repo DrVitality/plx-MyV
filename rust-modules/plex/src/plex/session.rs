@@ -636,6 +636,10 @@ pub struct Session {
     /// committed replay fixtures included — serializes exactly as it did before.
     #[serde(default, deserialize_with = "de_soft_deck_press", skip_serializing_if = "is_default_deck_press")]
     pub deck_press: DeckPress,
+    /// **The viewer's look** (Settings › Appearance) — see [`Appearance`]. Install-wide; absent is
+    /// the default look, and it is skipped at the default so older sessions serialize unchanged.
+    #[serde(default, deserialize_with = "de_soft_appearance", skip_serializing_if = "Appearance::is_default")]
+    pub appearance: Appearance,
     /// **Device-wide ambient memory**: the last hero `UltraBlurColors` envelope Home actually
     /// rendered on this television, so a route in the Settings/first-run family that opens
     /// BEFORE Home has fetched anything this boot — first-run consent moved ahead of the
@@ -748,6 +752,8 @@ struct CanonicalSessionPreferences {
     skip_interval: SkipInterval,
     #[serde(default, deserialize_with = "de_soft_deck_press", skip_serializing_if = "is_default_deck_press")]
     deck_press: DeckPress,
+    #[serde(default, deserialize_with = "de_soft_appearance", skip_serializing_if = "Appearance::is_default")]
+    appearance: Appearance,
     #[serde(default, deserialize_with = "de_soft_vec", skip_serializing_if = "Vec::is_empty")]
     plaintext_consent: Vec<PlaintextConsent>,
     #[serde(default, deserialize_with = "de_soft_vec", skip_serializing_if = "Vec::is_empty")]
@@ -786,6 +792,7 @@ impl Default for CanonicalSessionPreferences {
             next_episode_mode: NextEpisodeMode::Countdown,
             skip_interval: SkipInterval::Seconds10,
             deck_press: DeckPress::Play,
+            appearance: Appearance::default(),
             plaintext_consent: Vec::new(),
             server_key_pins: Vec::new(),
             audio_enhancements: crate::plex::AudioEnhancements::NONE,
@@ -838,6 +845,7 @@ fn split_public(session: &Session) -> Result<plx_platform::storage::state::Publi
         next_episode_mode: session.next_episode_mode,
         skip_interval: session.skip_interval,
         deck_press: session.deck_press,
+        appearance: session.appearance,
         plaintext_consent: session.plaintext_consent.clone(),
         server_key_pins: session.server_key_pins.clone(),
         audio_enhancements: session.audio_enhancements,
@@ -912,6 +920,7 @@ pub fn join_canonical(
         next_episode_mode: preferences.next_episode_mode,
         skip_interval: preferences.skip_interval,
         deck_press: preferences.deck_press,
+        appearance: preferences.appearance,
         plaintext_consent: preferences.plaintext_consent,
         server_key_pins: preferences.server_key_pins,
         audio_enhancements: preferences.audio_enhancements,
@@ -945,6 +954,7 @@ fn public_session(public: &plx_platform::storage::state::PublicPayload) -> Sessi
         next_episode_mode: preferences.next_episode_mode,
         skip_interval: preferences.skip_interval,
         deck_press: preferences.deck_press,
+        appearance: preferences.appearance,
         plaintext_consent: preferences.plaintext_consent,
         server_key_pins: preferences.server_key_pins,
         audio_enhancements: preferences.audio_enhancements,
@@ -1387,6 +1397,26 @@ impl SkipInterval {
     /// The hop in nanoseconds, the unit every scrub position is in.
     pub fn ns(self) -> i64 {
         self.seconds() * 1_000_000_000
+    }
+}
+
+/// **The viewer's look** — Settings › Appearance: the accent, the background, how round corners
+/// are drawn and when a card's details bubble opens. Each field is an index into its ladder in
+/// `plx_ui::theme::appearance` (`Accent`, `Ground`, `Corners`, `Peek`), whose first entry is the
+/// default; an index this build does not know reads as the default there, so a newer build's
+/// choice never fails an older one's parse.
+#[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(default)]
+pub struct Appearance {
+    pub accent: u8,
+    pub ground: u8,
+    pub corners: u8,
+    pub peek: u8,
+}
+
+impl Appearance {
+    pub fn is_default(&self) -> bool {
+        *self == Appearance::default()
     }
 }
 
@@ -2383,6 +2413,17 @@ fn is_default_deck_press(mode: &DeckPress) -> bool {
     *mode == DeckPress::default()
 }
 
+/// The appearance is a preference too: a shape this build cannot read degrades to the default look.
+fn de_soft_appearance<'de, D>(d: D) -> Result<Appearance, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Ok(v) = serde_json::Value::deserialize(d) else {
+        return Ok(Appearance::default());
+    };
+    Ok(serde_json::from_value::<Appearance>(v).unwrap_or_default())
+}
+
 /// The audio-enhancement toggle is a preference too: an unknown shape degrades to both flags
 /// off rather than failing the enclosing [`Session`].
 fn de_soft_audio_enhancements<'de, D>(d: D) -> Result<crate::plex::AudioEnhancements, D::Error>
@@ -2615,6 +2656,16 @@ impl Session {
 
     pub fn deck_press(&self) -> DeckPress {
         self.deck_press
+    }
+
+    pub fn appearance(&self) -> Appearance {
+        self.appearance
+    }
+
+    pub fn with_appearance(&self, look: Appearance) -> Self {
+        let mut next = self.clone();
+        next.appearance = look;
+        next
     }
 
     pub fn with_deck_press(&self, mode: DeckPress) -> Self {
@@ -6159,5 +6210,33 @@ mod server_key_pin_tests {
         plx_base::storage_worker::drain_for_test();
         let _ = peek();
         assert_eq!(plx_net::net::keypin::pin_for_test(&key), None, "the late probe did not repopulate it");
+    }
+}
+
+/// `Session::appearance`: omitted at the default, soft-parsed, round-tripped through both formats.
+#[cfg(test)]
+mod appearance_tests {
+    use super::*;
+
+    #[test]
+    fn the_default_look_is_not_written_and_a_bad_shape_reads_as_default() {
+        let session = Session::default();
+        assert!(session.appearance().is_default());
+        assert!(!serde_json::to_string(&session).unwrap().contains("appearance"));
+        for value in [serde_json::json!({"appearance": "blue"}), serde_json::json!({"appearance": [1, 2]})] {
+            let s: Session = serde_json::from_value(value.clone()).unwrap_or_else(|e| panic!("{value}: {e}"));
+            assert!(s.appearance().is_default(), "{value}");
+        }
+    }
+
+    #[test]
+    fn a_look_round_trips_through_both_formats() {
+        let look = Appearance { accent: 5, ground: 2, corners: 3, peek: 1 };
+        let session = Session::default().with_appearance(look);
+        let round: Session = serde_json::from_str(&serde_json::to_string(&session).unwrap()).unwrap();
+        assert_eq!(round.appearance(), look);
+        let (public, protected) = split_canonical(&session).unwrap();
+        assert_eq!(join_canonical(&public, &protected).unwrap().appearance(), look);
+        assert_eq!(public_session(&public).appearance(), look);
     }
 }

@@ -28,8 +28,9 @@ use crate::text_view::TextView;
 use crate::{theme, Painter, Rect, Spring};
 use plx_machine::machine::Measure;
 
-/// How long focus rests on a card before its bubble opens, in ms. Long enough that a shelf walked
-/// at remote speed (a press every 200-400 ms) never opens one; short enough to feel like a hover.
+/// How long focus rests on a card before its bubble opens by default, in ms. Long enough that a
+/// shelf walked at remote speed (a press every 200-400 ms) never opens one; short enough to feel
+/// like a hover. The viewer can make it quicker, slower or off (`theme::appearance::Peek`).
 pub const DWELL_MS: f32 = 650.0;
 /// The bubble's width at 1080p: two posters' worth, enough for a readable synopsis line.
 pub const W: f32 = 460.0;
@@ -37,6 +38,8 @@ pub const W: f32 = 460.0;
 const K_APPEAR: f32 = 260.0;
 /// How far the bubble slides in from the card's side as it appears.
 const RISE: f32 = 14.0;
+/// The panel's radius as laid out (the Corners choice decides how much of it is drawn).
+const PANEL_RAD: f32 = 16.0;
 
 /// What a card's bubble says: plain strings the screen fills from its row.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -66,17 +69,24 @@ impl PeekState {
     /// One frame: `focus` is the section's focused card (None when focus is elsewhere or the
     /// section is dormant).
     pub fn tick(&mut self, focus: Option<usize>, dt: f32) {
+        self.tick_with(focus, theme::appearance::peek_dwell_ms(), dt);
+    }
+
+    /// [`tick`](Self::tick) under an explicit dwell (`None`: the bubble is switched off).
+    pub fn tick_with(&mut self, focus: Option<usize>, dwell: Option<f32>, dt: f32) {
+        let focus = focus.filter(|_| dwell.is_some());
+        let dwell = dwell.unwrap_or(DWELL_MS);
         if focus != self.at {
             self.at = focus;
             self.waited_ms = 0.0;
             self.appear.jump(0.0);
         }
-        if focus.is_some() && self.waited_ms < DWELL_MS {
-            self.waited_ms = (self.waited_ms + dt * 1000.0).min(DWELL_MS);
+        if focus.is_some() && self.waited_ms < dwell {
+            self.waited_ms = (self.waited_ms + dt * 1000.0).min(dwell);
             // the dwell is motion the gate must keep ticking for, as a spring's travel is
-            plx_machine::idle::note_spring(self.waited_ms, DWELL_MS, 0.0);
+            plx_machine::idle::note_spring(self.waited_ms, dwell, 0.0);
         }
-        let target = if focus.is_some() && self.waited_ms >= DWELL_MS { 1.0 } else { 0.0 };
+        let target = if focus.is_some() && self.waited_ms >= dwell { 1.0 } else { 0.0 };
         if self.appear.pos != target || self.appear.vel != 0.0 {
             self.appear.step(target, K_APPEAR, dt);
             if plx_machine::idle::settled(self.appear.pos, target, self.appear.vel) {
@@ -93,8 +103,9 @@ impl PeekState {
     /// Whether nothing here needs another frame.
     #[cfg(any(test, feature = "test-support"))]
     pub fn at_rest(&self) -> bool {
-        let target = if self.at.is_some() && self.waited_ms >= DWELL_MS { 1.0 } else { 0.0 };
-        (self.at.is_none() || self.waited_ms >= DWELL_MS) && self.appear.pos == target && self.appear.vel == 0.0
+        let dwell = theme::appearance::peek_dwell_ms().unwrap_or(DWELL_MS);
+        let target = if self.at.is_some() && self.waited_ms >= dwell { 1.0 } else { 0.0 };
+        (self.at.is_none() || self.waited_ms >= dwell) && self.appear.pos == target && self.appear.vel == 0.0
     }
 }
 
@@ -115,7 +126,8 @@ pub fn draw(p: Painter, card: Rect, peek: &Peek, alpha: f32, measure: &dyn Measu
     let r = rect_for(p, card);
     let side = if r.x > card.x { -1.0 } else { 1.0 };
     let p = p.alpha(alpha).translate(side * RISE * (1.0 - alpha), 0.0);
-    crate::widgets::panel_ground(p, r, theme::shape::CORNER, None);
+    // a panel's own radius: the viewer's Corners choice caps it at the paint door
+    crate::widgets::panel_ground(p, r, PANEL_RAD, None);
     let pad = theme::space::MD;
     let inner = Rect::new(r.x + pad, r.y + pad, r.w - 2.0 * pad, r.h - 2.0 * pad);
     let mut y = inner.y;
@@ -169,26 +181,32 @@ mod tests {
     fn the_bubble_opens_only_after_focus_rests_and_closes_at_once_on_a_move() {
         let mut s = PeekState::new();
         let dt = 1.0 / 60.0;
+        let dwell = Some(DWELL_MS);
         // walking a shelf at remote speed never opens one
         for i in 0..10 {
             for _ in 0..12 {
-                s.tick(Some(i), dt);
+                s.tick_with(Some(i), dwell, dt);
             }
             assert_eq!(s.alpha(), 0.0, "card {i}");
         }
         // resting opens it, and it settles exactly
         for _ in 0..120 {
-            s.tick(Some(10), dt);
+            s.tick_with(Some(10), dwell, dt);
         }
         assert_eq!(s.alpha(), 1.0);
         assert!(s.at_rest(), "an open bubble at rest asks for no frame");
         // a move closes it on the same frame
-        s.tick(Some(11), dt);
+        s.tick_with(Some(11), dwell, dt);
         assert_eq!(s.alpha(), 0.0);
         // focus leaving the section closes it too and rests
-        s.tick(None, dt);
+        s.tick_with(None, dwell, dt);
         assert_eq!(s.alpha(), 0.0);
         assert!(s.at_rest());
+        // switched off: resting never opens it
+        for _ in 0..120 {
+            s.tick_with(Some(3), None, dt);
+        }
+        assert_eq!(s.alpha(), 0.0);
     }
 
     #[test]

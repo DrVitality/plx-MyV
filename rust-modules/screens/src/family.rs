@@ -72,6 +72,8 @@ pub enum SettingsPage {
     Playback,
     /// Plex account audio and subtitle preferences.
     AudioSubtitles,
+    /// The viewer's look: accent, background, corners, the details bubble.
+    Appearance,
     /// Favorite libraries — the onboard screen in Settings mode.
     Favourites,
     /// Privacy & data — the consent screen in Settings mode.
@@ -107,6 +109,14 @@ pub enum PickerKind {
     SubtitleMode,
     SubtitleLanguage,
     ForcedSubtitles,
+    /// Appearance: the accent colour.
+    Accent,
+    /// Appearance: the background.
+    Ground,
+    /// Appearance: how round corners are drawn.
+    Corners,
+    /// Appearance: when a card's details bubble opens.
+    Peek,
 }
 
 impl SettingsPage {
@@ -127,6 +137,7 @@ impl PickerKind {
         match self {
             PickerKind::Quality | PickerKind::DirectPlay | PickerKind::SubtitleSize | PickerKind::SubtitlePosition | PickerKind::NextEpisode | PickerKind::DeckPress | PickerKind::SkipInterval => SettingsPage::Playback,
             PickerKind::AudioLanguage | PickerKind::SubtitleMode | PickerKind::SubtitleLanguage | PickerKind::ForcedSubtitles => SettingsPage::AudioSubtitles,
+            PickerKind::Accent | PickerKind::Ground | PickerKind::Corners | PickerKind::Peek => SettingsPage::Appearance,
         }
     }
 }
@@ -150,6 +161,7 @@ impl ScreenArg for SettingsPage {
             SettingsPage::Preview(_) => 106,
             SettingsPage::ConsentStage(_) => 107,
             SettingsPage::Picker(_) => 112,
+            SettingsPage::Appearance => 113,
         })
     }
     fn title(&self) -> Option<&str> {
@@ -182,6 +194,7 @@ impl LogicalState for SettingsPage {
             | SettingsPage::Contribute
             | SettingsPage::Playback
             | SettingsPage::AudioSubtitles
+            | SettingsPage::Appearance
             | SettingsPage::Favourites
             | SettingsPage::Privacy
             | SettingsPage::Legal
@@ -197,6 +210,7 @@ impl LogicalState for SettingsPage {
             SettingsPage::Contribute => "contribute",
             SettingsPage::Playback => "playback",
             SettingsPage::AudioSubtitles => "audio-subtitles",
+            SettingsPage::Appearance => "appearance",
             SettingsPage::Favourites => "favourites",
             SettingsPage::Privacy => "privacy",
             SettingsPage::Legal => "legal",
@@ -355,6 +369,7 @@ mod tests {
             SettingsPage::Contribute,
             SettingsPage::Playback,
             SettingsPage::AudioSubtitles,
+            SettingsPage::Appearance,
             SettingsPage::Favourites,
             SettingsPage::Privacy,
             SettingsPage::Legal,

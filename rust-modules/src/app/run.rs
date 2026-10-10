@@ -2483,7 +2483,8 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                             if page_owned {
                                 app.pages.draw_with_glass_below(&mut app.bridge, &mut app.glass, true, ceiling);
                             } else {
-                                plx_gfx::gfx::frame_clear(plx_ui::theme::CLEAR_RGB.0, plx_ui::theme::CLEAR_RGB.1, plx_ui::theme::CLEAR_RGB.2);
+                                let ground = plx_ui::theme::appearance::clear_rgb();
+                                plx_gfx::gfx::frame_clear(ground.0, ground.1, ground.2);
                             }
                             if plan != super::bridge::PagePlan::SurfacesOnly && Z::OPENER < ceiling {
                                 let _opener = plx_ui::frame::backdrop::layer(Z::OPENER, false);
