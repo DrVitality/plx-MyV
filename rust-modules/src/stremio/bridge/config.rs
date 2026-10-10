@@ -188,7 +188,7 @@ pub(super) fn save(path: Option<&PathBuf>, config: &Config) {
     let Some(path) = path else { return };
     let Ok(body) = serde_json::to_vec_pretty(config) else { return };
     let tmp = path.with_extension("json.tmp");
-    let ok = path.parent().map_or(true, |d| std::fs::create_dir_all(d).is_ok())
+    let ok = path.parent().is_none_or(|d| std::fs::create_dir_all(d).is_ok())
         && std::fs::write(&tmp, &body).is_ok()
         && std::fs::rename(&tmp, path).is_ok();
     if !ok {

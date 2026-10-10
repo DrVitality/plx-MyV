@@ -110,8 +110,8 @@ pub struct PmsMovie {
     pub blur: [[f32; 3]; 4],
     pub has_blur: bool,
     /// Saved in the account's Stremio library (an episode: its show) — the card menu's Library
-    /// row reads it.
-    #[serde(default)]
+    /// row reads it. Not recorded: it is the bridge's live answer, re-read on every fetch.
+    #[serde(skip)]
     pub in_library: bool,
     pub kind: c_int, // 0 = movie, 1 = show, 2 = season, 3 = episode, 4 = collection
     pub resume_ms: i64,  // viewOffset — drives the Continue Watching resume bar

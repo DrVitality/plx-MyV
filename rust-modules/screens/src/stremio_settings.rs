@@ -279,7 +279,6 @@ fn build(state: &State) -> (Form<Id, Act, SettingsPage>, String, String) {
         return (form, title, copy.to_string());
     };
     let on_home = |shown: bool| if shown { msg::settings_stremio_shown() } else { msg::settings_stremio_hidden() };
-    let on_off = |on: bool| if on { msg::settings_stremio_on() } else { msg::settings_stremio_off() };
     match state.mode {
         Mode::List => {
             let mut rows = FormSection::new(msg::settings_stremio_rows_section());
