@@ -402,14 +402,16 @@ impl Title {
             Some(Value::Array(a)) => a.iter().filter_map(Episode::read).collect(),
             _ => Vec::new(),
         };
+        let poster = text(v, "poster").or_else(|| metahub("poster", &id));
+        // a backdrop is what the Home hero stands on: IMDb titles always have one at metahub
+        let background = text(v, "background").or_else(|| metahub("background", &id));
         Some(Title {
             rk,
             stype,
             id,
             name,
-            poster: text(v, "poster").or_else(|| metahub("poster", &id)),
-            // a backdrop is what the Home hero stands on: IMDb titles always have one at metahub
-            background: text(v, "background").or_else(|| metahub("background", &id)),
+            poster,
+            background,
             description: text(v, "description"),
             year,
             released,
