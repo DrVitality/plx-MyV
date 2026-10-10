@@ -692,7 +692,7 @@
     "description": "Next episode picker option: nothing is shown during the credits and the next episode does not start by itself."
   },
   "settings.playback.deck_press": {
-    "value": "Pressing OK on a card",
+    "value": "OK on a card",
     "description": "Settings row title and picker title: what OK does on a movie, show or episode card on any shelf, grid or search result."
   },
   "settings.playback.deck_press.details": {
