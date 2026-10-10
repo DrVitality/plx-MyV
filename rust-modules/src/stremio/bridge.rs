@@ -155,6 +155,7 @@ impl Bridge {
             ["library", "metadata", rk, "children"] => self.children(token, rk),
             ["library", "metadata", rk, "allLeaves"] => self.all_leaves(token, rk),
             ["stremio", "art", key] => self.art(key),
+            ["stremio", "streams", rk] => self.streams_route(token, rk),
             ["photo", ":", "transcode"] => self.photo(req),
             // Everything not translated is a valid, empty answer rather than an error, so a screen
             // asking for something Stremio has no equivalent of shows nothing instead of failing.

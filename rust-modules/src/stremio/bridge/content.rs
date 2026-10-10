@@ -564,3 +564,60 @@ impl Bridge {
         }
     }
 }
+
+// ---------------------------------------------------------------- streams
+
+impl Bridge {
+    /// Every stream provider's answers for the film or episode `rk` names, ranked best first.
+    pub(super) fn ranked_streams(&self, token: &str, rk: &Rk)
+        -> Result<Vec<(super::super::streams::Stream, super::super::streams::Facts, i64)>, Response> {
+        use super::super::streams::{rank, Stream};
+        let (stype, id) = match rk {
+            Rk::Item { stype, id, .. } => (stype.as_str(), id.as_str()),
+            Rk::Episode { stype, video, .. } => (stype.as_str(), video.as_str()),
+            Rk::Season { .. } => return Err(Response::empty(404)),
+        };
+        let addons = self.addons(token).map_err(api_failure)?;
+        let providers: Vec<&Addon> = library::stream_providers(&addons, stype, id).collect();
+        let jobs: Vec<Box<dyn FnOnce() -> Vec<Stream> + Send + '_>> = providers
+            .iter()
+            .map(|&addon| {
+                Box::new(move || {
+                    let url = format!("{}/stream/{}/{}.json", addon.base_url(), segment(stype), segment(id));
+                    let name = addon.manifest.name.clone();
+                    match self.fetch_json(&url) {
+                        Ok(v) => match v.get("streams") {
+                            Some(Value::Array(a)) => a.iter().filter_map(|s| Stream::read(&name, s)).collect(),
+                            _ => Vec::new(),
+                        },
+                        Err(_) => Vec::new(),
+                    }
+                }) as Box<dyn FnOnce() -> Vec<Stream> + Send + '_>
+            })
+            .collect();
+        Ok(rank(parallel(jobs).into_iter().flatten().flatten().collect()))
+    }
+
+    /// `/stremio/streams/{rk}`: the ranked list, as a viewer would read it, and which one would
+    /// start. The URLs are left out: a debrid link carries the service's key.
+    pub(super) fn streams_route(&self, token: &str, rk_s: &str) -> Response {
+        use super::super::streams::best;
+        let Some(rk) = Rk::decode(rk_s) else { return Response::empty(404) };
+        let ranked = match self.ranked_streams(token, &rk) {
+            Ok(r) => r,
+            Err(r) => return r,
+        };
+        let pick = best(&ranked);
+        let rows: Vec<Value> = ranked
+            .iter()
+            .enumerate()
+            .map(|(i, (s, f, score))| json!({
+                "addon": s.addon, "name": s.name, "detail": s.detail, "filename": s.filename,
+                "size": s.size, "playable": s.url.is_some(), "ready": format!("{:?}", f.ready),
+                "english": format!("{:?}", f.english), "resolution": f.resolution,
+                "score": score, "best": pick == Some(i),
+            }))
+            .collect();
+        Response::json(200, &json!({"streams": rows}))
+    }
+}

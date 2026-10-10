@@ -322,6 +322,11 @@ fn content_bridge() -> Bridge {
     s.pages.insert("https://v3-cinemeta.example/catalog/movie/top/search=alien.json".into(), metas(json!([
         {"id": "tt0078748", "type": "movie", "name": "Alien"}])));
     s.pages.insert("https://v3-cinemeta.example/catalog/series/top/search=alien.json".into(), metas(json!([])));
+    s.pages.insert("https://torrentio.example/stream/movie/tt0111161.json".into(), json!({"streams": [
+        {"name": "[RD download] Torrentio\n4k", "title": "Shawshank.2160p.WEB-DL.DDP5.1.x265", "url": "https://t/r/1"},
+        {"name": "[RD+] Torrentio\n1080p", "title": "Shawshank.1080p.BluRay.DD5.1.x264\n👤 40 💾 9.1 GB", "url": "https://t/r/2"},
+        {"name": "Torrentio\n4k", "title": "bare torrent", "infoHash": "abcdef"},
+    ]}));
     s.library = vec![
         json!({"_id": "tt0944947", "type": "series", "name": "Game of Thrones", "removed": false, "temp": false,
                "state": {"timeOffset": 600000, "duration": 3600000, "video_id": "tt0944947:1:2",
@@ -445,4 +450,17 @@ fn an_untranslated_read_is_an_empty_container_and_a_write_is_accepted() {
     assert_eq!(other.status, 200);
     assert_eq!(json_of(&other)["MediaContainer"]["size"], 0);
     assert_eq!(b.handle(&authed("PUT", "/:/timeline")).status, 200);
+}
+
+#[test]
+fn a_films_streams_are_ranked_and_the_cached_one_is_picked() {
+    let b = content_bridge();
+    let rk = Rk::item("movie", "tt0111161").unwrap().encode();
+    let got = json_of(&b.handle(&authed("GET", &format!("/stremio/streams/{rk}"))));
+    let rows = got["streams"].as_array().expect("streams");
+    assert_eq!(rows.len(), 2, "the bare torrent is never offered");
+    assert_eq!(rows[0]["ready"], "Cached");
+    assert_eq!(rows[0]["best"], true);
+    assert_eq!(rows[1]["ready"], "Uncached");
+    assert!(rows.iter().all(|r| r.get("url").is_none()), "no debrid link leaves the bridge");
 }
