@@ -920,7 +920,7 @@ mod tests {
         let mut form = FormTable::new(plx_ui::table_screen::BAND_BASE);
         form.table.compact = true;
         form.set_or_open(root_form(&ps, &rows, forced, current), None);
-        MoreMenuState { form, rows, forced, current, pages: PageStack::new(), motion: PanelMotion::new() }
+        MoreMenuState { form, rows, forced, current, streams_rev: 0, pages: PageStack::new(), motion: PanelMotion::new() }
     }
 
     /// The same menu with the Quality page pushed (and its slide skipped).
@@ -1091,6 +1091,7 @@ mod tests {
             rows: rows.clone(),
             forced: false,
             current: Quality::Auto,
+            streams_rev: 0,
             pages: PageStack::new(),
             motion: PanelMotion::new(),
         };
