@@ -48,11 +48,11 @@ pub struct User {
     pub email: String,
 }
 
-/// One installed addon. Only its manifest is read so far: the catalogs it declares are what the
-/// libraries are made of. (Its `transportUrl`, where its catalogs and streams are fetched from,
-/// joins this struct with the first route that fetches one.)
+/// One installed addon: where it lives, and its manifest.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Addon {
+    #[serde(rename = "transportUrl", default)]
+    pub transport_url: String,
     pub manifest: Manifest,
 }
 
@@ -64,6 +64,91 @@ pub struct Manifest {
     pub name: String,
     #[serde(default)]
     pub catalogs: Vec<Catalog>,
+    /// What the addon answers: `catalog`, `meta`, `stream`, `subtitles`, … Each entry is a bare
+    /// name or an object narrowing that resource to some types and id prefixes.
+    #[serde(default)]
+    pub resources: Vec<serde_json::Value>,
+    /// The content types the addon serves, when a resource does not narrow them itself.
+    #[serde(default)]
+    pub types: Vec<String>,
+    /// The id prefixes the addon understands (`tt`, `kitsu:`), when a resource does not narrow
+    /// them itself. Absent means every id.
+    #[serde(rename = "idPrefixes", default)]
+    pub id_prefixes: Option<Vec<String>>,
+}
+
+/// What an addon is for, as the app tells them apart. One addon can be several: Cinemeta is a
+/// catalog and a metadata provider; Torrentio is a stream provider (and lists Real-Debrid
+/// downloads as a catalog of its own).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resource {
+    /// Lists of titles to browse.
+    Catalog,
+    /// A title's details: description, cast, seasons and episodes.
+    Meta,
+    /// Where a title can be played from.
+    Stream,
+    /// Subtitle files for a title.
+    Subtitles,
+}
+
+impl Resource {
+    fn wire(self) -> &'static str {
+        match self {
+            Resource::Catalog => "catalog",
+            Resource::Meta => "meta",
+            Resource::Stream => "stream",
+            Resource::Subtitles => "subtitles",
+        }
+    }
+}
+
+impl Addon {
+    /// The addon's base URL: its manifest URL without `/manifest.json`. Every resource lives under
+    /// it as `/{resource}/{type}/{id}.json`.
+    pub fn base_url(&self) -> &str {
+        let url = self.transport_url.as_str();
+        url.strip_suffix("/manifest.json").unwrap_or(url).trim_end_matches('/')
+    }
+
+    /// Does this addon answer `resource` for an item of `kind` whose id is `id`? The resource's
+    /// own `types`/`idPrefixes` win over the manifest's, as Stremio itself reads them.
+    pub fn provides(&self, resource: Resource, kind: &str, id: &str) -> bool {
+        let m = &self.manifest;
+        self.resource_entries(resource).any(|entry| {
+            let types: Vec<&str> = entry
+                .and_then(|e| e.get("types"))
+                .and_then(|t| t.as_array())
+                .map(|t| t.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_else(|| m.types.iter().map(String::as_str).collect());
+            let prefixes: Option<Vec<&str>> = entry
+                .and_then(|e| e.get("idPrefixes"))
+                .and_then(|p| p.as_array())
+                .map(|p| p.iter().filter_map(|v| v.as_str()).collect())
+                .or_else(|| m.id_prefixes.as_ref().map(|p| p.iter().map(String::as_str).collect()));
+            // A catalog is named by its own id, never a title id, so prefixes do not apply to it.
+            types.contains(&kind)
+                && (resource == Resource::Catalog
+                    || prefixes.map_or(true, |p| p.is_empty() || p.iter().any(|x| id.starts_with(x))))
+        })
+    }
+
+    /// Does this addon declare `resource` at all, for any type?
+    pub fn has(&self, resource: Resource) -> bool {
+        self.resource_entries(resource).next().is_some()
+    }
+
+    /// Each manifest entry naming `resource`: `None` for the bare-string form (which inherits the
+    /// manifest's types and prefixes), `Some(object)` for the narrowed form.
+    fn resource_entries(&self, resource: Resource)
+        -> impl Iterator<Item = Option<&serde_json::Value>> + '_ {
+        let name = resource.wire();
+        self.manifest.resources.iter().filter_map(move |r| match r {
+            serde_json::Value::String(s) if s == name => Some(None),
+            serde_json::Value::Object(o) if o.get("name").and_then(|n| n.as_str()) == Some(name) => Some(Some(r)),
+            _ => None,
+        })
+    }
 }
 
 /// One catalog an addon declares: a browsable list of one content type.
@@ -84,6 +169,8 @@ pub struct Catalog {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ExtraProp {
+    #[serde(default)]
+    pub name: String,
     #[serde(rename = "isRequired", default)]
     pub is_required: bool,
 }
@@ -93,6 +180,17 @@ impl Catalog {
     /// a genre chosen first) is not a library: there is nothing to show until someone asks.
     pub fn browsable(&self) -> bool {
         self.extra_required.is_empty() && !self.extra.iter().any(|e| e.is_required)
+    }
+
+    /// Does this catalog take a search query (`extra` named `search`)?
+    pub fn searchable(&self) -> bool {
+        self.extra.iter().any(|e| e.name == "search")
+            || self.extra_required.iter().any(|e| e == "search")
+    }
+
+    /// The name to show for this catalog: its own, else its id.
+    pub fn title(&self) -> &str {
+        self.name.as_deref().map(str::trim).filter(|n| !n.is_empty()).unwrap_or(&self.id)
     }
 }
 
@@ -125,6 +223,11 @@ pub trait Stremio: Send + Sync {
     fn user(&self, auth_key: &str) -> Result<User, ApiError>;
     /// The addons installed on the account behind `auth_key`, in the account's own order.
     fn addons(&self, auth_key: &str) -> Result<Vec<Addon>, ApiError>;
+    /// The account's library items (`libraryItem` collection) as Stremio stores them: what is
+    /// saved, and how far each was watched.
+    fn library(&self, auth_key: &str) -> Result<Vec<serde_json::Value>, ApiError>;
+    /// A public resource: an addon's catalog, meta, stream or subtitles JSON, or an image.
+    fn fetch(&self, url: &str) -> Result<Vec<u8>, ApiError>;
 }
 
 /// The network implementation.
@@ -133,7 +236,9 @@ pub struct Live;
 impl Live {
     fn get(url: &str) -> Result<Vec<u8>, ApiError> {
         let headers = ["Accept: application/json".to_string()];
-        let resp = plx_net::net::request(url, &headers, "GET", None, plx_net::net::API, false,
+        // Addons and image hosts sit behind redirects often enough (a moved host, a CDN) that a
+        // public read follows them; nothing here carries a credential.
+        let resp = plx_net::net::request(url, &headers, "GET", None, plx_net::net::API, true,
             Some(MAX_BODY), None).ok_or(ApiError::Unavailable)?;
         if !resp.ok() {
             return Err(ApiError::Unavailable);
@@ -187,5 +292,15 @@ impl Stremio for Live {
         let body = Self::post("addonCollectionGet",
             &serde_json::json!({"type": "AddonCollectionGet", "authKey": auth_key, "update": true}))?;
         Ok(result_of::<AddonCollection>(&body)?.ok_or(ApiError::Unauthorized)?.addons)
+    }
+
+    fn library(&self, auth_key: &str) -> Result<Vec<serde_json::Value>, ApiError> {
+        let body = Self::post("datastoreGet", &serde_json::json!({
+            "authKey": auth_key, "collection": "libraryItem", "ids": [], "all": true}))?;
+        result_of::<Vec<serde_json::Value>>(&body)?.ok_or(ApiError::Unauthorized)
+    }
+
+    fn fetch(&self, url: &str) -> Result<Vec<u8>, ApiError> {
+        Self::get(url)
     }
 }

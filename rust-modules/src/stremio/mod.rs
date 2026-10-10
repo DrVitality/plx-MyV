@@ -13,15 +13,18 @@
 //!   link: the code and QR on the sign-in screen are a `link.stremio.com` code, and the account
 //!   token the app stores is the Stremio auth key ([`bridge`]).
 //! - Discovery finds one server, this one, at `http://127.0.0.1:<STREMIO_BRIDGE_PORT>`; the
-//!   credential policy admits loopback origins (`plx_plex::plex::origin`), the one place a token
-//!   may ride plaintext in every build, because it never leaves the device.
+//!   credential policy admits that exact origin (`plx_plex::plex::origin::is_stremio_bridge`), the
+//!   one place a token may ride plaintext in every build, because it never leaves the device.
 //!
-//! Files: [`http`] the wire, [`api`] Stremio's services, [`bridge`] the router, [`qr`] the sign-in
-//! code's image.
+//! Files: [`http`] the wire, [`api`] Stremio's services and what each addon is for, [`library`] how
+//! addon catalogs become the Movies / TV Shows / Anime libraries, [`catalog`] Stremio titles in the
+//! media server's shapes, [`bridge`] the router, [`qr`] the sign-in code's image.
 
 mod api;
 mod bridge;
+mod catalog;
 mod http;
+mod library;
 mod qr;
 #[cfg(test)]
 mod tests;

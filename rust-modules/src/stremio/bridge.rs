@@ -7,16 +7,21 @@
 //!   Stremio's own approval page and the "account token" plex.tv would hand back is the Stremio
 //!   `authKey`. The roster is one profile, the account; the server list is one server, this bridge.
 //! - **the media server** (everything else): its identity and, built from the account's installed
-//!   addons, one library per browsable catalog.
+//!   addons, the Movies / TV Shows / Anime libraries, Home, search, title pages and artwork
+//!   ([`content`]; the arrangement is `super::library`'s).
 //!
 //! The app keeps the token it was given and sends it on every later request, so the bridge holds
 //! no account state of its own: each request carries the key it is answered with. What it does
-//! hold is short-lived — the pending sign-in codes, and a minutes-long memo of the addon list so
-//! a burst of library requests costs one Stremio call.
+//! hold is short-lived — the pending sign-in codes, and minutes-long memos of the addon list, the
+//! account's library and each addon answer, so a burst of requests costs one Stremio call.
+
+mod content;
 
 use super::api::{Addon, ApiError, Stremio};
+use super::catalog::ArtMap;
 use super::http::{Request, Response};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -34,39 +39,6 @@ const ADDONS_TTL: Duration = Duration::from_secs(300);
 /// The one profile's numeric id. plex.tv ids are numbers and Stremio's are strings; the app
 /// compares this number with the one the roster gave it, so it only has to be the same everywhere.
 const USER_ID: i64 = 1;
-
-/// One library: an addon catalog of a type the app can show.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Section {
-    /// `"1"`, `"2"`, … in the account's addon order.
-    pub key: String,
-    /// `movie` or `show`, the media server's names for Stremio's `movie` and `series`.
-    pub kind: &'static str,
-    pub title: String,
-}
-
-/// The libraries `addons` make: every browsable catalog of films or series, in order. A catalog
-/// of another type (channels, live TV) has no screen to go to yet, so it is not a library.
-pub fn sections(addons: &[Addon]) -> Vec<Section> {
-    let mut out = Vec::new();
-    for addon in addons {
-        for catalog in addon.manifest.catalogs.iter().filter(|c| c.browsable()) {
-            let kind = match catalog.kind.as_str() {
-                "movie" => "movie",
-                "series" => "show",
-                _ => continue,
-            };
-            let name = catalog.name.as_deref().filter(|n| !n.trim().is_empty()).unwrap_or(&catalog.id);
-            let title = if addon.manifest.name.trim().is_empty() {
-                name.to_string()
-            } else {
-                format!("{name} · {}", addon.manifest.name.trim())
-            };
-            out.push(Section { key: (out.len() + 1).to_string(), kind, title });
-        }
-    }
-    out
-}
 
 struct PendingLink {
     id: i64,
@@ -91,6 +63,12 @@ pub struct Bridge {
     /// The account's playback preferences as the app last set them. plex.tv keeps these per
     /// account; Stremio has no equivalent, so they live as long as the process does.
     profile: Mutex<serde_json::Map<String, Value>>,
+    /// Addon answers by URL, with when they were fetched.
+    json: Mutex<HashMap<String, (Instant, Arc<Value>)>>,
+    /// The account's library items, for the key that read them.
+    library: Mutex<Option<(String, Instant, Arc<Vec<Value>>)>>,
+    /// Artwork stand-ins.
+    art: ArtMap,
 }
 
 fn container(fields: Value) -> Value {
@@ -117,7 +95,8 @@ impl Bridge {
         profile.insert("autoSelectAudio".into(), json!(true));
         profile.insert("defaultAudioLanguage".into(), json!("en"));
         profile.insert("defaultSubtitleLanguage".into(), json!("en"));
-        profile.insert("autoSelectSubtitle".into(), json!(0));
+        // English subtitles whenever there are some (Plex's "always"), as this fork's owner asked.
+        profile.insert("autoSelectSubtitle".into(), json!(2));
         profile.insert("defaultSubtitleForced".into(), json!(0));
         Bridge {
             stremio,
@@ -129,6 +108,9 @@ impl Bridge {
             next_link_id: Mutex::new(std::process::id() as i64 * 1000),
             addons: Mutex::new(None),
             profile: Mutex::new(profile),
+            json: Mutex::new(HashMap::new()),
+            library: Mutex::new(None),
+            art: ArtMap::default(),
         }
     }
 
@@ -150,16 +132,33 @@ impl Bridge {
             (_, ["api", ..]) => Response::empty(404),
             // ---- the media server ----
             ("GET" | "HEAD", [] | ["identity"]) => self.identity(),
-            ("GET" | "HEAD", ["library", "sections"]) => self.library_sections(req),
-            // Everything not yet translated is a valid, empty answer rather than an error, so a
-            // screen asking for something Stremio has no equivalent of shows nothing instead of
-            // failing. A request without the account key is still refused.
             ("GET" | "HEAD", _) => match req.token() {
-                Some(_) => Response::json(200, &container(json!({}))),
+                Some(token) => self.read(req, token, &segs),
                 None => Response::empty(401),
             },
             ("POST" | "PUT" | "DELETE", _) => Response::empty(200),
             _ => Response::empty(405),
+        }
+    }
+
+    /// The media server's reads, all of which need the account key.
+    fn read(&self, req: &Request, token: &str, segs: &[&str]) -> Response {
+        match segs {
+            ["library", "sections"] => self.library_sections(token),
+            ["library", "sections", key, "all"] => self.section_all(req, token, key),
+            ["hubs", "sections", key] => self.section_hubs(token, key),
+            ["hubs", "stremio", n] => self.shelf_page(req, token, n),
+            ["hubs"] | ["hubs", "promoted"] => self.home_hubs(req, token),
+            ["hubs", "continueWatching"] => self.continue_watching(req, token),
+            ["hubs", "search"] => self.search(req, token),
+            ["library", "metadata", rk] => self.metadata(token, rk),
+            ["library", "metadata", rk, "children"] => self.children(token, rk),
+            ["library", "metadata", rk, "allLeaves"] => self.all_leaves(token, rk),
+            ["stremio", "art", key] => self.art(key),
+            ["photo", ":", "transcode"] => self.photo(req),
+            // Everything not translated is a valid, empty answer rather than an error, so a screen
+            // asking for something Stremio has no equivalent of shows nothing instead of failing.
+            _ => Response::json(200, &container(json!({}))),
         }
     }
 
@@ -316,23 +315,9 @@ impl Bridge {
             }
         }
         let addons = Arc::new(self.stremio.addons(token)?);
+        plx_base::eventlog::log(&format!("stremio: {}", super::library::summary(&addons)));
         *self.addons.lock().unwrap_or_else(|e| e.into_inner()) =
             Some(AddonMemo { token: token.to_string(), at: Instant::now(), addons: addons.clone() });
         Ok(addons)
-    }
-
-    fn library_sections(&self, req: &Request) -> Response {
-        let Some(token) = req.token() else { return Response::empty(401) };
-        let addons = match self.addons(token) {
-            Ok(addons) => addons,
-            Err(e) => return api_failure(e),
-        };
-        let rows: Vec<Value> = sections(&addons)
-            .into_iter()
-            .map(|s| json!({"key": s.key, "type": s.kind, "title": s.title,
-                            "agent": "tv.plex.agents.movie", "scanner": "Plex Movie",
-                            "language": "en-US", "refreshing": false, "allowSync": false}))
-            .collect();
-        Response::json(200, &container(json!({"size": rows.len(), "Directory": rows})))
     }
 }
