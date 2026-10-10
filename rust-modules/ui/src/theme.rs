@@ -962,20 +962,37 @@ pub const DIAG_NETWORK_MEAN: [f32; 4] = AMBER_300;
 /// The fixed-slot plot's overwrite cursor. Near-white survives every state colour and a phone
 /// camera's chroma subsampling, which is the output format of this surface.
 pub const DIAG_SWEEP_CURSOR: [f32; 4] = COOL_0;
-/// A shelf TRAY's body (`widgets::shelf_tray`): the faint lift a row of cards sits on so each
-/// titled shelf reads as one container. White at a whisper, so it takes the page's own colour (the
+/// A shelf TRAY's body (`widgets::shelf_tray`): the faint full-width band a row of cards sits on
+/// so each titled shelf reads as one container. White at a whisper, so it takes the page's own colour (the
 /// ground's gradient, an item-keyed wash) rather than adding one; brighter at the top, the way the
 /// app's light falls.
-pub const SHELF_TRAY_TOP: [f32; 4] = with_a(WHITE, 0.045);
+pub const SHELF_TRAY_TOP: [f32; 4] = with_a(WHITE, 0.055);
 /// …and its foot, fading toward the page.
-pub const SHELF_TRAY_BOT: [f32; 4] = with_a(WHITE, 0.015);
+pub const SHELF_TRAY_BOT: [f32; 4] = with_a(WHITE, 0.008);
 /// A shelf tray's perimeter: quieter than [`HAIRLINE`], with the brighter top line carried by the
 /// rim's `rim_top` weight ([`SHELF_TRAY_RIM_TOP`]) — the divider the eye reads between two shelves.
-pub const SHELF_TRAY_RIM: [f32; 4] = with_a(WHITE, 0.07);
+pub const SHELF_TRAY_RIM: [f32; 4] = with_a(WHITE, 0.045);
 /// Extra rim weight on a shelf tray's top edge.
-pub const SHELF_TRAY_RIM_TOP: f32 = 0.08;
-/// A shelf tray's corner radius (capped by the viewer's Corners choice like every shape).
-pub const SHELF_TRAY_RAD: f32 = 18.0;
+pub const SHELF_TRAY_RIM_TOP: f32 = 0.10;
+/// The short accent mark on a shelf tray's top edge, under the start of its heading: its length
+/// and thickness, px at 1080p.
+pub const SHELF_TRAY_MARK_W: f32 = 72.0;
+pub const SHELF_TRAY_MARK_H: f32 = 3.0;
+/// The details bubble's body (`cards::peek`): the panel's own dark, its top leaning toward the
+/// live accent by [`PEEK_ACCENT_W`] (mixed at draw time, so it follows the Accent choice).
+pub const PEEK_TOP: [f32; 4] = with_a(NEUTRAL_650, 0.97);
+/// …and its foot, the panel's deeper stop.
+pub const PEEK_BOT: [f32; 4] = with_a(NEUTRAL_850, 0.97);
+/// How far the bubble's top leans toward the accent.
+pub const PEEK_ACCENT_W: f32 = 0.24;
+/// The accent light pooled along the bubble's top edge, at its brightest.
+pub const PEEK_GLOW_A: f32 = 0.30;
+/// The bubble's perimeter, with a brighter top line ([`PEEK_RIM_TOP`]).
+pub const PEEK_RIM: [f32; 4] = with_a(WHITE, 0.12);
+/// Extra rim weight on the bubble's top edge.
+pub const PEEK_RIM_TOP: f32 = 0.12;
+/// The shadow the bubble casts on the shelf it stands over.
+pub const PEEK_SHADOW: [f32; 4] = with_a(BLACK, 0.55);
 /// Section divider hairline.
 pub const HAIRLINE: [f32; 4] = with_a(WHITE, 0.10);
 /// A glass container's **perimeter line** — the design system's `--glass-rim`, one notch under the
@@ -1632,11 +1649,12 @@ pub mod appearance {
     }
 
     /// The page gradient the Ember ground lays under a browsing screen, corner-major in the
-    /// wash's order (top-left, top-right, bottom-right, bottom-left): a dim ember glow in the top
-    /// left that cools to a neutral slate in the bottom right, all of it within a few codes of the
-    /// ground so it reads as light, not as colour.
-    const EMBER_WASH: [[f32; 4]; 4] = [rgb8(0x3a, 0x25, 0x1a), rgb8(0x2f, 0x24, 0x1f),
-        rgb8(0x21, 0x20, 0x21), rgb8(0x2a, 0x21, 0x1d)];
+    /// wash's order (top-left, top-right, bottom-right, bottom-left): an ember glow in the top left
+    /// — rust, warm enough to sit with the red accent — that cools through a muted plum across the
+    /// top to a blue-slate in the bottom right, all dark enough that the fine print keeps its
+    /// contrast and the posters stay the brightest thing on screen.
+    const EMBER_WASH: [[f32; 4]; 4] = [rgb8(0x4d, 0x27, 0x17), rgb8(0x35, 0x22, 0x20),
+        rgb8(0x1a, 0x1b, 0x21), rgb8(0x2e, 0x1f, 0x1b)];
 
     /// Does the live ground draw a gradient of its own, so a page wash that has settled on the
     /// flat surface must still be painted (`widgets::AmbientWash::is_flat`)?

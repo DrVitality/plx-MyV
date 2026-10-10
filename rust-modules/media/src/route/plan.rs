@@ -1374,6 +1374,20 @@ pub(super) fn build_stream(off: &plx_base::task::OffFrame, rk: &str, part: &str,
         .cached_item
         .clone()
         .or_else(|| plx_data::metadata::fetch_playing_item(env.sid, rk));
+    // The item's OWN video codec outranks the row's: a catalog row can carry a stand-in (the Stremio
+    // bridge lists every title as `h264` until a stream is chosen), and a Load declaring H.264 for
+    // an HEVC stream decodes nothing — a black picture on the set and in the simulator alike.
+    let item_vcodec = plan
+        .playing
+        .as_ref()
+        .map(|p| p.vcodec.to_ascii_lowercase())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| vcodec.to_string());
+    if item_vcodec != vcodec {
+        crate::player::log(&format!("resolve: video codec {item_vcodec} from the item (the row said {vcodec})"));
+        plan.src_vcodec = item_vcodec.clone();
+    }
+    let vcodec: &str = &item_vcodec;
     if let (Some(id), Some(item)) = (env.subtitle_override, plan.playing.as_mut()) {
         // The retry's explicit selection owns both embedded and sidecar restoration; a stale
         // server-side selection must not turn subtitles back on after the viewer chose Off.

@@ -46,12 +46,12 @@ pub const W: f32 = 460.0;
 const K_APPEAR: f32 = 260.0;
 /// How far the bubble slides in from the card's side as it appears.
 const RISE: f32 = 14.0;
-/// The panel's radius as laid out (the Corners choice decides how much of it is drawn).
-const PANEL_RAD: f32 = 16.0;
+/// The panel's radius: drawn in full (the bubble's painter is [`Painter::rounded`]).
+const PANEL_RAD: f32 = 24.0;
 
 /// The height of the bubble's two buttons.
 const BTN_H: f32 = 52.0;
-/// The buttons' radius as laid out (a pill at the default Corners cap's own judgement).
+/// The buttons' radius: half their height, a capsule (drawn in full, like the panel).
 const BTN_RAD: f32 = 26.0;
 /// The size of the glyph inside a button.
 const BTN_ICON: f32 = 22.0;
@@ -218,14 +218,16 @@ pub fn draw(p: Painter, card: Rect, peek: &Peek, alpha: f32, measure: &dyn Measu
     }
     let r = rect_for(p, card);
     let side = if r.x > card.x { -1.0 } else { 1.0 };
-    let p = p.alpha(alpha).translate(side * RISE * (1.0 - alpha), 0.0);
-    // a panel's own radius: the viewer's Corners choice caps it at the paint door
-    crate::widgets::panel_ground(p, r, PANEL_RAD, None);
-    // the accent's edge on the side facing the card, so the bubble reads as the card's own
-    let edge_w = 4.0;
-    let edge_x = if side < 0.0 { r.x } else { r.x + r.w - edge_w };
-    p.rect(Rect::new(edge_x, r.y + PANEL_RAD, edge_w, r.h - 2.0 * PANEL_RAD), edge_w * 0.5,
-        theme::ACCENT, theme::ACCENT, 0.0);
+    // round by design, whatever the viewer's Corners cap: the bubble is a soft object over the shelf
+    let p = p.alpha(alpha).translate(side * RISE * (1.0 - alpha), 0.0).rounded();
+    let accent = theme::appearance::accent();
+    p.shadow(r, PANEL_RAD, 30.0, 12.0, theme::PEEK_SHADOW);
+    // the panel's dark, its top leaning toward the accent, so the bubble carries the app's colour
+    let top = theme::mix(theme::appearance::remap(theme::PEEK_TOP), accent, theme::PEEK_ACCENT_W);
+    p.rect_rimmed(r, PANEL_RAD, top, theme::PEEK_BOT, theme::PEEK_RIM, theme::PEEK_RIM_TOP);
+    // and a pool of accent light along the top edge, fading out a third of the way down
+    let glow = Rect::new(r.x, r.y, r.w, r.h * 0.38);
+    p.rect(glow, PANEL_RAD, theme::with_a(accent, theme::PEEK_GLOW_A), theme::with_a(accent, 0.0), 0.0);
     let pad = theme::space::MD;
     let inner = Rect::new(r.x + pad, r.y + pad, r.w - 2.0 * pad, r.h - 2.0 * pad);
     let mut y = inner.y;

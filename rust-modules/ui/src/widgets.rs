@@ -3517,38 +3517,50 @@ pub fn art_wash_split(r: Rect, art: Rect) -> Option<(Rect, [Option<Rect>; 4])> {
 
 // ---- shelf_tray: the container a titled shelf of cards sits in. ----
 
-/// How far a shelf tray reaches past the cards it holds, px at 1080p: left and right of the
-/// shelf's margin, and above the tiles' top edge. A focused tile's pop grows past it on purpose —
+/// How far a shelf tray reaches past the cards it holds, px at 1080p, above the tiles' top edge
+/// and below their bottom (or their label block). A focused tile's pop grows past it on purpose —
 /// the card lifting OUT of its tray is the focus.
 pub const SHELF_TRAY_PAD: f32 = 14.0;
 
-/// **The tray one titled shelf of cards sits in** — a faint, rimmed sheet behind the row, so each
-/// filter (Popular, Trending, a genre) reads as one container and two shelves are visibly apart.
-/// The heading stays ABOVE it as the tray's title: a shelf's pitch keeps only a region gap
-/// between one row's cards and the next row's heading, and a tray that also wrapped the heading
-/// would have left no air between two trays.
+/// **The tray one titled shelf of cards sits in** — a faint band behind the row, edge to edge, so
+/// each filter (Popular, Trending, a genre) reads as one container and two shelves are visibly
+/// apart. It runs the full width of the screen because the row does: the cards scroll off both
+/// edges, and a panel that stopped at the margins left them hanging past its end. A brighter
+/// hairline along its top, a fainter one along its foot, and a short accent mark on the top edge
+/// under the start of the heading tie the title above to the tray below.
+///
+/// The heading stays ABOVE it as the tray's title: a shelf's pitch keeps only a region gap between
+/// one row's cards and the next row's heading, and a tray that also wrapped the heading would have
+/// left no air between two trays.
 ///
 /// `cards_top` is the top of the tiles (screen space, as the screen lays the row out), `cards_h`
 /// the tile height, `band` the label band the shelf reserves right now (`Shelf::under_band`) and
-/// `margin_x` the shelf's left margin; the tray is symmetric about the screen. Drawn BEFORE the
-/// row, under its cards.
+/// `margin_x` the shelf's left margin (where the mark starts). Drawn BEFORE the row, under its
+/// cards.
 pub fn shelf_tray(p: Painter, margin_x: f32, cards_top: f32, cards_h: f32, band: f32) {
     let collapsed = crate::card_row::LABEL_BAND_COLLAPSED;
     let open = ((band - collapsed) / (crate::card_row::UNDER_LABEL_H - collapsed)).clamp(0.0, 1.0);
     // collapsed: one pad of sheet under the posters; open: the whole label block plus a little
     let foot = SHELF_TRAY_PAD + (crate::card_row::UNDER_LABEL_H + 4.0 - SHELF_TRAY_PAD) * open;
-    let x = margin_x - SHELF_TRAY_PAD;
-    let w = crate::consts::SCR_W - 2.0 * x;
     let top = cards_top - SHELF_TRAY_PAD;
-    let r = Rect::new(x, top, w, cards_h + SHELF_TRAY_PAD + foot);
+    // past both screen edges, so its side rims (and corners) are never on the panel
+    let bleed = 4.0;
+    let r = Rect::new(-bleed, top, crate::consts::SCR_W + 2.0 * bleed, cards_h + SHELF_TRAY_PAD + foot);
     p.rect_rimmed(
         r,
-        theme::SHELF_TRAY_RAD,
+        1.0,
         theme::SHELF_TRAY_TOP,
         theme::SHELF_TRAY_BOT,
         theme::SHELF_TRAY_RIM,
         theme::SHELF_TRAY_RIM_TOP,
     );
+    let mark = Rect::new(
+        margin_x,
+        top - theme::SHELF_TRAY_MARK_H * 0.5,
+        theme::SHELF_TRAY_MARK_W,
+        theme::SHELF_TRAY_MARK_H,
+    );
+    p.rect(mark, theme::SHELF_TRAY_MARK_H * 0.5, theme::ACCENT, theme::ACCENT, 0.0);
 }
 
 // ---- PageGround: the item-keyed ground a BROWSING screen stands on. ----

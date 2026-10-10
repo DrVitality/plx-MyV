@@ -12,6 +12,7 @@ use super::super::http::{Request, Response};
 use super::super::library::{self, Lib, Shelf};
 use super::{api_failure, container, Bridge};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -1029,15 +1030,59 @@ impl Bridge {
     /// the app decodes, and anything else would be a broken tile rather than an empty one.
     pub(super) fn art(&self, key: &str) -> Response {
         let Some(url) = self.art.url(key) else { return Response::empty(404) };
-        let Ok(bytes) = self.stremio.fetch(&url) else { return Response::empty(502) };
-        let kind = if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-            "image/jpeg"
-        } else if bytes.starts_with(b"\x89PNG") {
-            "image/png"
-        } else {
-            return Response::empty(404);
+        let bytes = match self.art_cache.lock().unwrap_or_else(|e| e.into_inner()).get(key) {
+            Some(b) => b,
+            None => {
+                let Ok(bytes) = self.stremio.fetch(&url) else { return Response::empty(502) };
+                if image_kind(&bytes).is_none() {
+                    return Response::empty(404);
+                }
+                let bytes = Arc::new(bytes);
+                self.art_cache.lock().unwrap_or_else(|e| e.into_inner()).put(key, bytes.clone());
+                bytes
+            }
         };
-        Response { status: 200, content_type: kind, body: bytes, location: None }
+        let Some(kind) = image_kind(&bytes) else { return Response::empty(404) };
+        Response { status: 200, content_type: kind, body: bytes.to_vec(), location: None }
+    }
+
+    /// Fetch, in the background, the posters a listing just named (`body` is its JSON), so the
+    /// app's requests for them a moment later are answered from memory instead of each waiting on
+    /// a remote image host.
+    pub(super) fn warm_art(&self, body: &[u8]) {
+        let keys: Vec<String> = {
+            let cache = self.art_cache.lock().unwrap_or_else(|e| e.into_inner());
+            let mut warming = self.art_warming.lock().unwrap_or_else(|e| e.into_inner());
+            art_keys(body)
+                .filter(|k| !cache.has(k))
+                .filter(|k| warming.insert(k.clone()))
+                .take(ART_WARM_MAX)
+                .collect()
+        };
+        if keys.is_empty() {
+            return;
+        }
+        let Some(me) = self.me.get().and_then(std::sync::Weak::upgrade) else {
+            self.art_warming.lock().unwrap_or_else(|e| e.into_inner()).clear();
+            return;
+        };
+        let spawned = plx_base::task::spawn("stremio-art", move || {
+            let bridge: &Bridge = &me;
+            for chunk in keys.chunks(ART_WARM_WIDTH) {
+                let jobs: Vec<Box<dyn FnOnce() + Send + '_>> = chunk
+                    .iter()
+                    .map(|k| Box::new(move || { let _ = bridge.art(k); }) as Box<dyn FnOnce() + Send + '_>)
+                    .collect();
+                parallel(jobs);
+                let mut warming = bridge.art_warming.lock().unwrap_or_else(|e| e.into_inner());
+                for k in chunk {
+                    warming.remove(k);
+                }
+            }
+        });
+        if spawned.is_none() {
+            self.art_warming.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        }
     }
 
     /// `/photo/:/transcode?url=/stremio/art/{key}&…`: the app's sized-artwork request.
@@ -1046,6 +1091,102 @@ impl Bridge {
             Some(key) => self.art(key),
             None => Response::empty(404),
         }
+    }
+}
+
+/// Posters fetched ahead per listing, at most: a screenful of shelves.
+const ART_WARM_MAX: usize = 60;
+/// Posters fetched ahead at once.
+const ART_WARM_WIDTH: usize = 6;
+/// The fetched-artwork memory's budget, bytes: a few hundred posters, small beside the app's own.
+const ART_CACHE_BYTES: usize = 24 * 1024 * 1024;
+
+/// The image type `bytes` start with, as an HTTP content type; `None` for anything else.
+fn image_kind(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"\x89PNG") {
+        Some("image/png")
+    } else {
+        None
+    }
+}
+
+/// The art keys a JSON listing names (`/stremio/art/{key}`), in order, each once.
+fn art_keys(body: &[u8]) -> impl Iterator<Item = String> + '_ {
+    const MARK: &[u8] = b"/stremio/art/";
+    let mut seen = std::collections::HashSet::new();
+    let mut at = 0;
+    std::iter::from_fn(move || loop {
+        let start = at + body.get(at..)?.windows(MARK.len()).position(|w| w == MARK)? + MARK.len();
+        let len = body[start..].iter().take_while(|b| b.is_ascii_alphanumeric() || b"-_~".contains(b)).count();
+        at = start + len;
+        if len == 0 {
+            continue;
+        }
+        let key = String::from_utf8_lossy(&body[start..start + len]).into_owned();
+        if seen.insert(key.clone()) {
+            return Some(key);
+        }
+    })
+}
+
+/// Fetched artwork by key, oldest dropped first past [`ART_CACHE_BYTES`].
+#[derive(Default)]
+pub(super) struct ArtCache {
+    map: HashMap<String, Arc<Vec<u8>>>,
+    order: std::collections::VecDeque<String>,
+    bytes: usize,
+}
+
+impl ArtCache {
+    fn get(&self, key: &str) -> Option<Arc<Vec<u8>>> {
+        self.map.get(key).cloned()
+    }
+
+    fn has(&self, key: &str) -> bool {
+        self.map.contains_key(key)
+    }
+
+    fn put(&mut self, key: &str, bytes: Arc<Vec<u8>>) {
+        if bytes.len() > ART_CACHE_BYTES / 4 || self.map.contains_key(key) {
+            return;
+        }
+        self.bytes += bytes.len();
+        self.map.insert(key.to_string(), bytes);
+        self.order.push_back(key.to_string());
+        while self.bytes > ART_CACHE_BYTES {
+            let Some(old) = self.order.pop_front() else { break };
+            if let Some(b) = self.map.remove(&old) {
+                self.bytes -= b.len();
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod art_cache_tests {
+    use super::*;
+
+    #[test]
+    fn a_listing_names_its_posters_once_each_in_order() {
+        let body = br#"{"a":"/stremio/art/~abc","b":"/photo/:/transcode?url=/stremio/art/0123456789abcdef&w=1","c":"/stremio/art/~abc","d":"/stremio/art/"}"#;
+        let keys: Vec<String> = art_keys(body).collect();
+        assert_eq!(keys, vec!["~abc".to_string(), "0123456789abcdef".to_string()]);
+    }
+
+    #[test]
+    fn the_artwork_memory_stays_within_its_budget_dropping_the_oldest() {
+        let mut c = ArtCache::default();
+        let big = Arc::new(vec![0u8; ART_CACHE_BYTES / 5]);
+        for i in 0..7 {
+            c.put(&format!("k{i}"), big.clone());
+        }
+        assert!(c.bytes <= ART_CACHE_BYTES);
+        assert!(!c.has("k0"), "the oldest went first");
+        assert!(c.has("k6"));
+        c.put("huge", Arc::new(vec![0u8; ART_CACHE_BYTES / 2]));
+        assert!(!c.has("huge"), "one image may not take the whole memory");
     }
 }
 

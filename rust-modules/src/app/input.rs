@@ -950,8 +950,12 @@ pub(super) fn player_streams_fetch(ps: &plx_media::route::PlaybackSession) {
                         index: u16::try_from(c.index).ok()?, label: c.label, detail: c.detail }))
                     .collect();
                 plx_appkit::more_menu::set_streams(&worker_rk, Some(rows), playing);
+                log("player streams: listed for More > Change stream");
             }
-            _ => plx_appkit::more_menu::set_streams(&worker_rk, None, None),
+            _ => {
+                log("player streams: none offered for this item");
+                plx_appkit::more_menu::set_streams(&worker_rk, None, None);
+            }
         }
         plx_machine::present::wake_from_worker();
     });

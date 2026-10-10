@@ -343,6 +343,9 @@ pub struct Painter {
     /// later `translate` moves it with the content. Set only through the scoped
     /// [`text_lift::draw`]; `Zoom::NONE` for every ordinary painter.
     zoom: Zoom,
+    /// Draw every radius as asked, past the viewer's Corners cap ([`rounded`](Self::rounded)): for
+    /// the few surfaces the design keeps round whatever the cap (the details bubble).
+    round: bool,
 }
 thread_local! {
     static RECORD_WALK: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
@@ -451,6 +454,7 @@ impl Painter {
             clip: Rect::FULL,
             text_recorder: false,
             zoom: Zoom::NONE,
+            round: false,
         }
     }
     pub const fn recording() -> Self {
@@ -594,7 +598,16 @@ impl Painter {
     /// True circles (avatars, discs, dots) keep their shape.
     #[inline]
     fn corner(self, r: Rect, rad: f32) -> f32 {
+        if self.round {
+            return rad.min(r.w.min(r.h) * 0.5).max(0.0);
+        }
         theme::shape::corner(r.w, r.h, rad)
+    }
+    /// This painter with every radius drawn as asked, past the viewer's Corners cap — for a
+    /// surface that is round by design (the details bubble), not a way around the choice for
+    /// ordinary chrome.
+    pub fn rounded(self) -> Self {
+        Self { round: true, ..self }
     }
     pub fn rect(self, r: Rect, rad: f32, top: [f32; 4], bot: [f32; 4], focus: f32) {
         let rad = self.corner(r, rad);
@@ -890,7 +903,10 @@ impl Painter {
         rim_w: f32,
         glow: Option<[f32; 4]>,
     ) {
-        let rad = self.corner(r, rad);
+        // A capsule is drawn to its own outline (`sdPill`), never to the capped corner — and the
+        // shader's interior early-out insets by `rad`: a radius capped to the Corners choice there
+        // painted the box's corners solid OUTSIDE the outline, the "spikes" on every focused pill.
+        let rad = if pill.is_some() { rad.max(r.h.min(r.w) * 0.5) } else { self.corner(r, rad) };
         if self.declare(r, 10, |data| {
             use frame::backdrop::Value;
             rad.record(data);

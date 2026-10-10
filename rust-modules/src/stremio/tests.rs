@@ -418,7 +418,7 @@ fn a_library_grid_lists_its_first_catalog_and_ends_where_the_catalog_does() {
     let part = first["Media"][0]["Part"][0]["key"].as_str().unwrap();
     assert!(part.starts_with("/library/parts/") && part.ends_with(".mkv"), "{part}");
     let thumb = first["thumb"].as_str().unwrap();
-    assert!(thumb.starts_with("/stremio/art/") && thumb.len() < 40, "a short art stand-in: {thumb}");
+    assert!(thumb.starts_with("/stremio/art/") && thumb.len() <= 13 + 90, "an art key that fits the app's request key: {thumb}");
     assert_eq!(mc["Meta"]["Type"][0]["active"], true);
 }
 

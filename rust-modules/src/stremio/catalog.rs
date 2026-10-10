@@ -14,8 +14,8 @@
 //!
 //! **Artwork.** A poster is a long absolute URL, and the app's artwork store keys every image by a
 //! request path of at most 255 bytes that already carries the account key. So a row names its art
-//! as `/stremio/art/{hash}`, a short stand-in [`ArtMap`] resolves back to the URL when the image
-//! is fetched.
+//! as `/stremio/art/{key}`: the address itself, compactly encoded, when it fits, else a short
+//! hashed stand-in ([`ArtMap`]).
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -156,8 +156,15 @@ pub fn is_anime(stype: &str, id: &str) -> bool {
     stype == "anime" || ["kitsu:", "mal:", "anilist:", "anidb:"].iter().any(|p| id.starts_with(p))
 }
 
-/// Short stand-ins for artwork URLs. Bounded: past [`ArtMap::LIMIT`] it starts over, and a stand-in
-/// it forgot is a missing image until the row naming it is fetched again.
+/// Artwork stand-ins: the app asks the media server for `/stremio/art/{key}` and the bridge fetches
+/// the remote image the key names.
+///
+/// **The key IS the address** whenever it fits: `~` and the URL in base64url (`https://` left
+/// implied). A table this process keeps did not survive a restart, while the app's saved Home and
+/// its on-disk image cache did: every card painted from them asked for a key the new process had
+/// never seen, got a 404 — which the poster store treats as final — and stayed black until the
+/// shelf was fetched again. An address too long for the app's 255-byte request key (an RPDB poster
+/// carrying its own API key, say) still gets a short hashed stand-in from the table, as before.
 #[derive(Default)]
 pub struct ArtMap {
     urls: Mutex<HashMap<String, String>>,
@@ -165,9 +172,19 @@ pub struct ArtMap {
 
 impl ArtMap {
     const LIMIT: usize = 20_000;
+    /// The longest self-describing key: what leaves room in the app's request key for the
+    /// transcoder's own fields and the account key.
+    const SELF_MAX: usize = 90;
 
-    /// The app-facing path for `url`, remembered so [`ArtMap::url`] can resolve it.
+    /// The app-facing path for `url`.
     pub fn path(&self, url: &str) -> String {
+        let key = match url.strip_prefix("https://") {
+            Some(rest) => format!("~{}", b64url(rest.as_bytes())),
+            None => format!("~~{}", b64url(url.as_bytes())),
+        };
+        if key.len() <= Self::SELF_MAX {
+            return format!("/stremio/art/{key}");
+        }
         // FNV-1a: stable across launches, so the app's on-disk image cache keeps hitting.
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
         for b in url.bytes() {
@@ -183,8 +200,73 @@ impl ArtMap {
         format!("/stremio/art/{key}")
     }
 
+    /// The image address a key names: only `http`/`https` addresses are fetched.
     pub fn url(&self, key: &str) -> Option<String> {
-        self.urls.lock().unwrap_or_else(|e| e.into_inner()).get(key).cloned()
+        let url = if let Some(full) = key.strip_prefix("~~") {
+            String::from_utf8(unb64url(full)?).ok()?
+        } else if let Some(rest) = key.strip_prefix('~') {
+            format!("https://{}", String::from_utf8(unb64url(rest)?).ok()?)
+        } else {
+            self.urls.lock().unwrap_or_else(|e| e.into_inner()).get(key).cloned()?
+        };
+        (url.starts_with("https://") || url.starts_with("http://")).then_some(url)
+    }
+}
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+/// Unpadded base64url — path-safe, so a key needs no escaping in a URL or a query.
+fn b64url(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 4 / 3 + 2);
+    for chunk in bytes.chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
+        for i in 0..=chunk.len() {
+            out.push(B64[(n >> (18 - 6 * i) & 63) as usize] as char);
+        }
+    }
+    out
+}
+
+/// The bytes back from [`b64url`]; `None` for anything it could not have written.
+fn unb64url(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 4 == 1 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    for chunk in s.as_bytes().chunks(4) {
+        let mut n = 0u32;
+        for (i, c) in chunk.iter().enumerate() {
+            let v = B64.iter().position(|b| b == c)? as u32;
+            n |= v << (18 - 6 * i);
+        }
+        for i in 0..chunk.len() - 1 {
+            out.push((n >> (16 - 8 * i)) as u8);
+        }
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod art_tests {
+    use super::*;
+
+    #[test]
+    fn an_art_key_names_its_address_and_survives_a_restart() {
+        for url in ["https://images.metahub.space/poster/medium/tt0111161/img", "http://a.b/c?d=1&e=ü", "https://x/y.jpg"] {
+            let path = ArtMap::default().path(url);
+            let key = path.strip_prefix("/stremio/art/").unwrap();
+            assert!(key.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_~".contains(&b)), "{key}");
+            // a fresh map (a new process) still resolves it
+            assert_eq!(ArtMap::default().url(key).as_deref(), Some(url));
+        }
+        let long = format!("https://api.ratingposterdb.com/{}/imdb/poster-default/tt0111161.jpg", "k".repeat(90));
+        let map = ArtMap::default();
+        let path = map.path(&long);
+        assert!(path.len() < 40, "a long address gets a short stand-in: {path}");
+        assert_eq!(map.url(path.strip_prefix("/stremio/art/").unwrap()).as_deref(), Some(long.as_str()));
+        assert_eq!(map.url(&format!("~~{}", b64url(b"file:///etc/passwd"))), None, "only web addresses are fetched");
+        assert_eq!(map.url("~!!"), None);
+        assert_eq!(map.url("0123456789abcdef"), None, "a stand-in this process never made");
     }
 }
 

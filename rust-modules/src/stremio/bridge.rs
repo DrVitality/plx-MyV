@@ -74,6 +74,11 @@ pub struct Bridge {
     library: Mutex<Option<(String, Instant, Arc<Vec<Value>>)>>,
     /// Artwork stand-ins.
     art: ArtMap,
+    /// Artwork already fetched, so a card scrolled back to (or warmed ahead, [`Bridge::warm_art`])
+    /// answers at once.
+    art_cache: Mutex<content::ArtCache>,
+    /// Art keys being fetched ahead, so two listings naming one poster fetch it once.
+    art_warming: Mutex<std::collections::HashSet<String>>,
     /// Chosen streams, track choices, subtitles and progress bookkeeping.
     play: play::PlayState,
     /// The viewer's Home rows, addon switches and per-show stream memory ([`config`]).
@@ -139,6 +144,8 @@ impl Bridge {
             json: Mutex::new(HashMap::new()),
             library: Mutex::new(None),
             art: ArtMap::default(),
+            art_cache: Mutex::new(content::ArtCache::default()),
+            art_warming: Mutex::new(std::collections::HashSet::new()),
             play: play::PlayState::default(),
             config: Mutex::new(config::load(config::path().as_ref())),
             config_path: config::path(),
@@ -246,7 +253,12 @@ impl Bridge {
             ("GET" | "HEAD", _) => match req.token() {
                 Some(token) => {
                     self.note_token(token);
-                    self.read(req, token, &segs)
+                    let answer = self.read(req, token, &segs);
+                    // a listing names the posters the app is about to ask for: fetch them now
+                    if answer.status == 200 && answer.content_type == "application/json" {
+                        self.warm_art(&answer.body);
+                    }
+                    answer
                 }
                 None => Response::empty(401),
             },
