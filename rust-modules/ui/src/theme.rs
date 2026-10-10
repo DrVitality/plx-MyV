@@ -1550,10 +1550,11 @@ pub mod appearance {
 
     /// The default ground's stops: the app ground, the five neutral surface stops, the two
     /// unloaded-artwork stops.
+    // placeholder-exempt: a palette TABLE the paint door matches colours against, not a placeholder draw; the skeletons that use these stops are counted where they are drawn
     const DEFAULT_GROUND: [[f32; 4]; 8] = [
         plx_gfx::gfx::tokens::NEUTRAL_500,
         super::NEUTRAL_600, super::NEUTRAL_650, super::NEUTRAL_750, super::NEUTRAL_850, super::NEUTRAL_950,
-        super::COOL_850, super::COOL_900,
+        super::COOL_850, super::COOL_900, // placeholder-exempt: a match table for the paint door, not a draw
     ];
 
     static ACCENT: AtomicU8 = AtomicU8::new(0);
@@ -1571,7 +1572,7 @@ pub mod appearance {
 
     /// Make the stored choices live: ladder indexes, out of range meaning the default.
     pub fn apply(accent: u8, ground: u8, corners: u8, peek: u8) {
-        let changed = ACCENT.swap(accent, Relaxed) != accent
+        let changed = (ACCENT.swap(accent, Relaxed) != accent)
             | (GROUND.swap(ground, Relaxed) != ground)
             | (CORNERS.swap(corners, Relaxed) != corners)
             | (PEEK.swap(peek, Relaxed) != peek);
