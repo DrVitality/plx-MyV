@@ -28,15 +28,16 @@ pub const fn rgb8(r: u8, g: u8, b: u8) -> [f32; 4] {
 // Neutral — achromatic. These two stops are the ones the renderer paints with directly; the rest of
 // the palette is `ui::theme`'s private primitive layer, which imports these so a code is still
 // written down in exactly one place.
-/// The app ground, Apple TV's shelf gray `#2c2c2e` (`theme::SURFACE_APP`'s stop).
-pub const NEUTRAL_500: [f32; 4] = rgb8(0x2c, 0x2c, 0x2e);
+/// The app ground, a warm charcoal `#1c1819` (`theme::SURFACE_APP`'s stop) — the dark, faintly
+/// red-warm base the crimson accent sits on. It was Apple TV's shelf gray `#2c2c2e`.
+pub const NEUTRAL_500: [f32; 4] = rgb8(0x1c, 0x18, 0x19);
 /// The scrim ink, near-black `#050508` (`theme::scrim`'s stop).
 pub const NEUTRAL_1000: [f32; 4] = rgb8(0x05, 0x05, 0x08);
 
 /// GL clear color — 3-float (`frame_clear` takes r,g,b, no alpha). The app's DEFAULT base, and
 /// `theme::SURFACE_APP` itself rather than a second copy of its code (both are [`NEUTRAL_500`]):
-/// browsing screens clear to the Apple-TV gray, which is what makes a route change read as a
-/// seamless dip. Home overdraws it with `SURFACE_APP` (the identical gray). Two punches through to
+/// browsing screens clear to the charcoal ground, which is what makes a route change read as a
+/// seamless dip. Home overdraws it with `SURFACE_APP` (the identical charcoal). Two punches through to
 /// the hardware video plane use transparent black instead: the player route, and the detail page
 /// while a trailer preview has presented a frame (`gfx::frame_clear_through`).
 pub const CLEAR_RGB: (f32, f32, f32) = (NEUTRAL_500[0], NEUTRAL_500[1], NEUTRAL_500[2]);

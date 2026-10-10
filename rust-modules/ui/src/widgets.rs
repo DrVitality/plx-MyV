@@ -6932,14 +6932,14 @@ impl ControlPalette {
         let keyed = |l: f32, scale: f32, alpha: f32| {
             oklab_to_srgb([l, ha * chroma * scale, hb * chroma * scale], alpha)
         };
-        let focus_top = keyed(
-            theme::CONTROL_FOCUS_FACE_L,
-            theme::CONTROL_FOCUS_AMBIENT_C,
-            1.0,
-        );
-        let focus_body = keyed(
-            theme::CONTROL_FOCUS_FACE_L - theme::CONTROL_FOCUS_BODY_STEP,
-            theme::CONTROL_FOCUS_AMBIENT_C,
+        // The FOCUSED face is the brand accent on every page, whatever the artwork's hue: the
+        // ground keys the idle face (below), and focus is the one place the crimson lives. The
+        // body is the same hue one OKLCH lightness step below the lit top, so the face still
+        // reads as material catching light rather than a flat chip.
+        let accent = srgb_to_oklab(theme::ACCENT);
+        let focus_top = theme::ACCENT;
+        let focus_body = oklab_to_srgb(
+            [accent[0] - theme::CONTROL_FOCUS_BODY_STEP, accent[1], accent[2]],
             1.0,
         );
         let idle = keyed(

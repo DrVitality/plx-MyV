@@ -4,12 +4,11 @@ use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
 
-/// A keyed control carries the HERO's colour without borrowing its darkness. Blue artwork and
-/// amber artwork must therefore produce different hues at the SAME authored face lightness,
-/// while the body stays the same hue one lightness step below the lit top. This is the part of
-/// `components/core/control-focus.card.html` the old static `ACCENT` face could not express.
+/// A FOCUSED keyed control is the brand accent whatever the artwork: blue and amber heroes give the
+/// same crimson lit top, with the body the same hue one lightness step below it. The artwork still
+/// keys the IDLE face — that is where a page's own colour shows.
 #[test]
-fn an_ambient_key_tints_both_levels_of_the_focused_face() {
+fn the_focused_face_is_the_accent_on_any_artwork() {
     let blue = ControlPalette::ambient([
         0x0a as f32 / 255.0,
         0x63 as f32 / 255.0,
@@ -23,18 +22,13 @@ fn an_ambient_key_tints_both_levels_of_the_focused_face() {
     let (blue_top, blue_body) = blue.focus_face();
     let (amber_top, amber_body) = amber.focus_face();
 
-    let bt = srgb_to_oklab(blue_top);
-    let bb = srgb_to_oklab(blue_body);
-    let at = srgb_to_oklab(amber_top);
-    let ab = srgb_to_oklab(amber_body);
-    assert!((bt[0] - theme::CONTROL_FOCUS_FACE_L).abs() < 0.002);
-    assert!((at[0] - theme::CONTROL_FOCUS_FACE_L).abs() < 0.002);
-    assert!((bt[0] - bb[0] - theme::CONTROL_FOCUS_BODY_STEP).abs() < 0.003);
-    assert!((at[0] - ab[0] - theme::CONTROL_FOCUS_BODY_STEP).abs() < 0.003);
-    assert!(
-        bt[2] < 0.0 && at[2] > 0.0,
-        "blue and amber keys must remain opposite hues"
-    );
+    assert_eq!(blue_top, theme::ACCENT);
+    assert_eq!(amber_top, theme::ACCENT);
+    assert_eq!(blue_body, amber_body);
+    let (top, body) = (srgb_to_oklab(blue_top), srgb_to_oklab(blue_body));
+    assert!((top[0] - body[0] - theme::CONTROL_FOCUS_BODY_STEP).abs() < 0.003);
+    // …and the idle faces still follow their artwork.
+    assert_ne!(blue.idle, amber.idle);
 }
 
 /// Video is the explicit exception: its pixels live on another plane, so even a supplied key

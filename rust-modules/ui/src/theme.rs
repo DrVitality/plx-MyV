@@ -41,15 +41,22 @@ const COOL_150: [f32; 4] = rgb8(0xdb, 0xe0, 0xeb);
 const COOL_200: [f32; 4] = rgb8(0xcd, 0xd3, 0xdd);
 const COOL_300: [f32; 4] = rgb8(0xb8, 0xbf, 0xcc);
 const COOL_400: [f32; 4] = rgb8(0x94, 0x99, 0xa3);
-const COOL_850: [f32; 4] = rgb8(0x1f, 0x21, 0x29);
-const COOL_900: [f32; 4] = rgb8(0x14, 0x17, 0x1c);
+// Artwork that has not loaded sits a step above the charcoal ground, on its warm side.
+const COOL_850: [f32; 4] = rgb8(0x2a, 0x23, 0x25);
+const COOL_900: [f32; 4] = rgb8(0x1f, 0x1a, 0x1c);
 
-// Neutral — achromatic: the shelf, panels, control plates, inks.
-const NEUTRAL_600: [f32; 4] = rgb8(0x25, 0x25, 0x27);
-const NEUTRAL_650: [f32; 4] = rgb8(0x22, 0x22, 0x24);
-const NEUTRAL_750: [f32; 4] = rgb8(0x1b, 0x1b, 0x1d);
-const NEUTRAL_850: [f32; 4] = rgb8(0x14, 0x14, 0x16);
-const NEUTRAL_950: [f32; 4] = rgb8(0x08, 0x08, 0x0a);
+// Neutral — warm charcoal: the shelf, panels, control plates, inks. A hair of red in every stop,
+// so the surfaces belong to the crimson accent instead of fighting it as a cold grey.
+const NEUTRAL_600: [f32; 4] = rgb8(0x2d, 0x26, 0x27);
+const NEUTRAL_650: [f32; 4] = rgb8(0x27, 0x21, 0x23);
+const NEUTRAL_750: [f32; 4] = rgb8(0x1f, 0x1a, 0x1b);
+const NEUTRAL_850: [f32; 4] = rgb8(0x15, 0x11, 0x12);
+const NEUTRAL_950: [f32; 4] = rgb8(0x0a, 0x07, 0x08);
+
+// Crimson — the brand accent. Used where the eye should go and nowhere else: the focused control,
+// progress, and the play mark. Never a surface.
+const CRIMSON_400: [f32; 4] = rgb8(0xe8, 0x3a, 0x48);
+const CRIMSON_500: [f32; 4] = rgb8(0xd0, 0x1c, 0x2c);
 const WHITE: [f32; 4] = rgb8(0xff, 0xff, 0xff);
 const BLACK: [f32; 4] = rgb8(0x00, 0x00, 0x00);
 
@@ -178,6 +185,43 @@ pub mod space {
     pub const XL: f32 = 64.0;
 }
 
+/// The **shape axis** — how round a corner is drawn, beside [`size`] (type) and [`space`] (gaps).
+///
+/// The app's shape language is crisp rectangles with a hairline of softening: a card, a control,
+/// a pill, a panel all draw with at most [`CORNER`] of rounding, whatever radius their widget was
+/// laid out with. [`corner`] is the rule and `Painter` applies it to every radius it draws (its
+/// private `corner`), so the widgets keep their geometry and the look is decided in one place.
+pub mod shape {
+    /// The largest corner radius any shape is drawn with, in px at 1080p. Enough that an edge does
+    /// not read as a jagged stair on a television, small enough that nothing reads as a bubble.
+    pub const CORNER: f32 = 3.0;
+    /// The radius to draw a `w`×`h` shape whose widget asked for `rad`. A true CIRCLE (a square
+    /// box asked for half its side or more — an avatar, a disc, a spinner dot) keeps its shape,
+    /// and so does anything too small to have a visible corner; every other radius is capped at
+    /// [`CORNER`].
+    pub fn corner(w: f32, h: f32, rad: f32) -> f32 {
+        let short = w.min(h);
+        let circle = (w - h).abs() < 1.0 && rad >= short * 0.5 - 0.5;
+        if circle || short <= 2.0 * CORNER { rad } else { rad.min(CORNER) }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{corner, CORNER};
+
+        #[test]
+        fn pills_and_cards_are_crisp_but_circles_stay_round() {
+            assert_eq!(corner(300.0, 64.0, 32.0), CORNER, "a pill");
+            assert_eq!(corner(220.0, 330.0, 14.0), CORNER, "a poster");
+            assert_eq!(corner(800.0, 600.0, 32.0), CORNER, "a panel");
+            assert_eq!(corner(120.0, 120.0, 60.0), 60.0, "an avatar");
+            assert_eq!(corner(10.0, 10.0, 5.0), 5.0, "a spinner dot");
+            assert_eq!(corner(400.0, 6.0, 3.0), 3.0, "a thin rail keeps its rounded ends");
+            assert_eq!(corner(200.0, 100.0, 2.0), 2.0, "a smaller radius is untouched");
+        }
+    }
+}
+
 /// **Panel geometry tokens** — widths a whole class of popover shares, so no panel carries a width
 /// literal of its own.
 pub mod layout {
@@ -255,20 +299,17 @@ pub mod logo {
 /// pair collapsed onto this one. Both survivors of that collapse are elsewhere and neither is a
 /// control: the warm off-white is [`WASH_WARM`], a page ground; the cool plate is
 /// [`SURFACE_QR_PLATE`], a scan surface.
-pub const ACCENT: [f32; 4] = COOL_0;
-/// Near-black ink/glyphs drawn over [`ACCENT`].
-pub const ACCENT_INK: [f32; 4] = NEUTRAL_950;
+///
+/// **Crimson since the red theme**: the focus fill is the brand accent, and every focused control —
+/// on a page and over the video — lights up in it, with white ink.
+pub const ACCENT: [f32; 4] = CRIMSON_500;
+/// White ink/glyphs drawn over [`ACCENT`].
+pub const ACCENT_INK: [f32; 4] = WHITE;
 /// Alias for [`ACCENT_INK`] read from the "ink over accent" intent. The one legitimate alias in this
 /// file: it is the same ROLE under a second name, not a second role that happens to share a stop.
 pub const INK_ON_ACCENT: [f32; 4] = ACCENT_INK;
-/// Fixed OKLCH lightness of a keyed focused control's lit top. The rendered ground contributes hue
-/// and a measured fraction of chroma only; it may never make the focus face darker.
-pub const CONTROL_FOCUS_FACE_L: f32 = 0.972;
-/// Fraction of the ambient key's OKLCH chroma carried by a focused face. Above roughly .45 the
-/// control reads as a coloured button instead of white material catching the page's light.
-pub const CONTROL_FOCUS_AMBIENT_C: f32 = 0.36;
-/// Pure OKLCH-lightness step from the focused face's lit top to its body. Both stops keep the same
-/// hue and chroma, so the gradient reads as glare rather than grey laid over the tint.
+/// Pure OKLCH-lightness step from a focused face's lit top ([`ACCENT`]) to its body. Both stops keep
+/// the same hue and chroma, so the gradient reads as glare rather than a darker red laid over it.
 pub const CONTROL_FOCUS_BODY_STEP: f32 = 0.06;
 /// Fixed OKLCH lightness of an idle control face on a keyed page.
 pub const CONTROL_IDLE_FACE_L: f32 = 0.215;
@@ -285,7 +326,7 @@ pub const CONTROL_SPENT_FOCUS_W: f32 = 0.76;
 /// focus state changing. Deliberately close enough to `ACCENT` that [`ACCENT_INK`] stays legible on
 /// BOTH sides — the first version flipped the ink at the sweep line and cut the label in half
 /// mid-word.
-pub const CONTROL_SPENT_FILL: [f32; 4] = mix(COOL_0, NEUTRAL_500, 1.0 - CONTROL_SPENT_FOCUS_W);
+pub const CONTROL_SPENT_FILL: [f32; 4] = mix(CRIMSON_500, NEUTRAL_500, 1.0 - CONTROL_SPENT_FOCUS_W);
 
 /// The Search query field's **editing** ink — the bright endpoint of the `hot` cross-fade in
 /// `search::field::draw` (idle end: `TEXT_SECONDARY`) while the television's keyboard is up. Its own
@@ -772,8 +813,9 @@ pub const fn dim(c: [f32; 4], k: f32) -> [f32; 4] {
 pub const RAIL_TRACK: [f32; 4] = with_a(WHITE, 0.20);
 /// Buffered-ahead / resume-track band.
 pub const RAIL_BUFFERED: [f32; 4] = with_a(WHITE, 0.28);
-/// Played/filled portion of a rail.
-pub const RAIL_FILL: [f32; 4] = with_a(WHITE, 0.95);
+/// Played/filled portion of a rail — the scrubber's elapsed run. Crimson, the accent's progress
+/// role, like [`RESUME_FILL`].
+pub const RAIL_FILL: [f32; 4] = with_a(CRIMSON_400, 0.95);
 /// An intro/credits SEGMENT on the player scrubber — a band lit a step above the track, drawn
 /// between the track and the fill so the played part of a segment reads as played. Stays inside the
 /// rail's monochrome language on purpose: a hue here would compete with the amber resume fill for
@@ -795,7 +837,10 @@ pub const WASH_WARM: [f32; 4] = SAND_100;
 pub const ROUTE_GROUND_FALLBACK: [[f32; 4]; 4] =
     [ATMOS_WARM_GREY, ATMOS_CHARCOAL, ATMOS_UMBER, ATMOS_ASH];
 /// Warm amber Continue-Watching progress fill (Plex-specific; no player equivalent). `#fab82e`.
-pub const RESUME_FILL: [f32; 4] = with_a(AMBER_300, 0.95);
+///
+/// Crimson since the red theme — the same accent as focus, a step brighter so a thin bar carries
+/// on dark artwork. It is also the ▶ "this press plays" mark ([`crate::widgets::still_glyph`]).
+pub const RESUME_FILL: [f32; 4] = with_a(CRIMSON_400, 0.95);
 /// Plex's own "Plex Pass" gold, `#e5a00d` — a BRAND REFERENCE, not a palette member
 /// (`Plex Pass Awareness.dc.html`, "the amber decision"). Two ambers exist ON PURPOSE and stay
 /// two tokens: [`RESUME_FILL`] is ours and tunable; this one names somebody else's colour and
@@ -823,19 +868,18 @@ pub const RESUME_TRACK: [f32; 4] = with_a(WHITE, 0.22);
 /// **No consumer today** — its one user was the amber watched DISC, which the 2026-08-13 evening
 /// sync replaced with a bare tick over a veil ([`TILE_MARK_INK`]). Kept because the design system
 /// still carries the role, and because the next amber surface needs exactly this ink.
-pub const INK_ON_RESUME: [f32; 4] = NEUTRAL_850;
+pub const INK_ON_RESUME: [f32; 4] = WHITE;
 
 // ── A list row's trailing VALUE read-out ─────────────────────────────────────
 /// The word at a row's trailing edge that says what it is SET to (`On`/`Off`, "English"), over the
-/// FOCUSED row's near-white pill. One step behind the label so the label is what you read and the
-/// value is what you check — and an ALPHA of the pill's own ink rather than a grey, because a grey
-/// over near-white goes muddy where black at a weight stays clean. Unfocused rows use
+/// FOCUSED row's crimson pill. One step behind the label so the label is what you read and the
+/// value is what you check — and an ALPHA of the pill's own white ink rather than a grey, because a
+/// grey over the accent goes muddy where white at a weight stays clean. Unfocused rows use
 /// [`TEXT_SECONDARY`] (and [`TEXT_TERTIARY`] when quietened), which need no token of their own,
 /// and [`ROW_VALUE_INK_DIM`] on a dim row.
-pub const ROW_VALUE_INK_ON: [f32; 4] = with_a(BLACK, 0.60);
+pub const ROW_VALUE_INK_ON: [f32; 4] = with_a(WHITE, 0.72);
 /// The same read-out a further step back — see [`ROW_VALUE_INK_ON`]. Derived from [`ACCENT_INK`]
-/// rather than black: at .38 the ink is thin enough that its HUE starts to show, and the pill's own
-/// near-black is the one this must not look tinted against.
+/// so it is the pill's own ink at a lighter weight.
 pub const ROW_VALUE_INK_ON_DIM: [f32; 4] = with_a(ACCENT_INK, 0.38);
 /// An unfocused **dim** row's read-out (`table::Row::dim` — an unavailable step, a limit reached).
 /// The dim row's label is already [`TEXT_TERTIARY`], and the value keeps its one step behind the
