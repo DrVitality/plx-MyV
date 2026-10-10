@@ -575,7 +575,7 @@ impl<H: PlayerLike + crate::registry::MetadataLike> Machine<H> for PlayerScreen 
                         self.handle_key(ps, consts::classify_input(*key, *sym, *wcode), *edge, input.at.ms, fx, H::metadata(cx))
                     }
                     InputKind::Click { hit, x, .. } => {
-                        self.handle_click(ps, *hit, *x, input.at.ms, fx)
+                        self.handle_click(ps, *hit, *x, input.at.ms, fx, H::metadata(cx))
                     }
                     // §7.5: a drag drives its CONTROL. Only the scrubber has one here, and only
                     // once a click has seated the gesture on it — a drag that began anywhere else
@@ -666,6 +666,7 @@ impl PlayerScreen {
         x: f32,
         now: u32,
         fx: &mut Effects<'_, H>,
+        meta: plx_data::metadata::MetadataView<'_>,
     ) -> Handled {
         use player_hud::{ELEM_FAILURE_BASE, ELEM_FAILURE_END, ELEM_ROW_BASE, ELEM_SCRUB, ELEM_TAB_BASE};
         let failed = plx_appkit::player_hud::transport_hidden(ps);
@@ -721,12 +722,9 @@ impl PlayerScreen {
                 let tab = e - ELEM_TAB_BASE;
                 self.hud.nav.focus = 2;
                 self.hud.nav.tab = tab as i32;
-                let kind = if tab == 0 {
-                    overlay::OverlayKind::Info
-                } else {
-                    overlay::OverlayKind::Chapters
-                };
-                Self::ask(fx, PlayerReq::OpenOverlay(kind));
+                if let Some(kind) = tab_overlay(&player_hud::hud_tabs(meta, ps), tab as i32) {
+                    Self::ask(fx, PlayerReq::OpenOverlay(kind));
+                }
                 Handled::Yes
             }
             _ => Handled::No,
@@ -863,7 +861,7 @@ impl PlayerScreen {
             }
             Key::Ok => {
                 match edge {
-                    Edge::Down => self.key_ok(now, fx),
+                    Edge::Down => self.key_ok(ps, now, fx, meta),
                     // …and the pointer button's own release, which the loop spells as this edge.
                     Edge::Up => self.handle_release(now, fx),
                     Edge::Repeat => {}
@@ -878,19 +876,18 @@ impl PlayerScreen {
     /// which the loop's existing commit-frame dispatch resolves through `activate_player_row`), the
     /// immediate tabs-row overlay open, or — everywhere else, exactly as the old ladder's `else`
     /// arm — a plain play/pause toggle. Port of `key_ok`'s `Route::Player` arm.
-    fn key_ok<H: AppLike>(&mut self, now: u32, fx: &mut Effects<'_, H>) {
+    fn key_ok<H: AppLike>(
+        &mut self,
+        ps: &plx_media::route::PlaybackSession,
+        now: u32,
+        fx: &mut Effects<'_, H>,
+        meta: plx_data::metadata::MetadataView<'_>,
+    ) {
         let vis = self.hud.visible_at_press;
         if vis && self.hud.nav.focus == 1 {
             Self::ask(fx, PlayerReq::ArmControlRow);
         } else if vis && self.hud.nav.focus == 2 {
-            let kind = if self.hud.nav.tab == 0 {
-                Some(overlay::OverlayKind::Info)
-            } else if self.hud.nav.tab == 1 {
-                Some(overlay::OverlayKind::Chapters)
-            } else {
-                None
-            };
-            if let Some(kind) = kind {
+            if let Some(kind) = tab_overlay(&player_hud::hud_tabs(meta, ps), self.hud.nav.tab) {
                 Self::ask(fx, PlayerReq::OpenOverlay(kind));
             }
         } else {
@@ -969,7 +966,7 @@ impl PlayerScreen {
                     (self.hud.nav.btn + if fwd { 1 } else { -1 }).clamp(0, self.slot.items() - 1);
             }
             input::ScrubPress::Tabs => {
-                let max_tab = if plx_appkit::chapters_panel::has_chapters(meta) { 1 } else { 0 };
+                let max_tab = player_hud::hud_tabs(meta, ps).len() as i32 - 1;
                 self.hud.nav.tab =
                     (self.hud.nav.tab + if fwd { 1 } else { -1 }).clamp(0, max_tab);
             }
@@ -1173,15 +1170,15 @@ impl<H: PlayerLike + crate::registry::MetadataLike> Focusable<H> for PlayerScree
             len: row_len,
             elem: plx_ui::screen::ElemKind::Control,
         });
-        let has_ch = plx_appkit::chapters_panel::has_chapters(H::metadata(cx));
+        let tabs = player_hud::hud_tabs(H::metadata(cx), H::session(cx));
         out.push(GroupSpec {
             id: GROUP_TABS,
             kind: GroupKind::Row { wrap: false },
             seat: Seat::First,
             reachable: AxisMask::BOTH,
             edge: [EdgeRule::Screen; 4],
-            extent: player_hud::tab_hit_rect(0, has_ch, cx.measure).unwrap_or(Rect::FULL),
-            len: if has_ch { 2 } else { 1 },
+            extent: player_hud::tab_hit_rect(0, &tabs, cx.measure).unwrap_or(Rect::FULL),
+            len: tabs.len(),
             elem: plx_ui::screen::ElemKind::Control,
         });
         if matches!(
@@ -1241,7 +1238,7 @@ impl<H: PlayerLike + crate::registry::MetadataLike> Focusable<H> for PlayerScree
             }
             e if (ELEM_TAB_BASE..ELEM_FAILURE_BASE).contains(&e) => player_hud::tab_hit_rect(
                 (e - ELEM_TAB_BASE) as i32,
-                plx_appkit::chapters_panel::has_chapters(H::metadata(cx)),
+                &player_hud::hud_tabs(H::metadata(cx), H::session(cx)),
                 cx.measure,
             )?,
             e if (ELEM_FAILURE_BASE..ELEM_FAILURE_END).contains(&e) => {
@@ -2710,5 +2707,31 @@ mod repair_confirmation_tests {
             assert_eq!(deliver(&mut page, &ps, None, key_event(consts::SDLK_RETURN, 0)), vec![PlayerReq::Exit]);
             assert!(!page.repair_alert.is_open());
         }
+    }
+}
+
+/// The overlay a bottom tab opens, by its position in this frame's [`player_hud::hud_tabs`].
+fn tab_overlay(tabs: &[player_hud::HudTab], idx: i32) -> Option<overlay::OverlayKind> {
+    Some(match tabs.get(usize::try_from(idx).ok()?)? {
+        player_hud::HudTab::Info => overlay::OverlayKind::Info,
+        player_hud::HudTab::Chapters => overlay::OverlayKind::Chapters,
+        player_hud::HudTab::Episodes => overlay::OverlayKind::Episodes,
+    })
+}
+
+#[cfg(test)]
+mod tab_overlay_tests {
+    use super::*;
+    use player_hud::HudTab;
+
+    #[test]
+    fn a_tab_opens_the_panel_at_its_own_position_in_this_frames_list() {
+        let without_chapters = [HudTab::Info, HudTab::Episodes];
+        assert_eq!(tab_overlay(&without_chapters, 1), Some(overlay::OverlayKind::Episodes));
+        let all = [HudTab::Info, HudTab::Chapters, HudTab::Episodes];
+        assert_eq!(tab_overlay(&all, 1), Some(overlay::OverlayKind::Chapters));
+        assert_eq!(tab_overlay(&all, 2), Some(overlay::OverlayKind::Episodes));
+        assert_eq!(tab_overlay(&all, 3), None);
+        assert_eq!(tab_overlay(&all, -1), None);
     }
 }

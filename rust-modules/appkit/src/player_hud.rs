@@ -1293,21 +1293,50 @@ pub fn ctrl_row_hit_rect() -> Rect {
     Rect::new(CTRL_RIGHT - CTRL_ROW_W, CTRL_Y, CTRL_ROW_W, CTRL_H)
 }
 
+/// One of the HUD's bottom tabs. Info is always there; Chapters only when the item has chapters,
+/// Episodes only when the play queue holds more than one episode to switch between.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HudTab {
+    Info,
+    Chapters,
+    Episodes,
+}
+
+impl HudTab {
+    pub fn label(self) -> &'static str {
+        match self {
+            HudTab::Info => plx_platform::i18n::msg::widgets_player_info(),
+            HudTab::Chapters => plx_platform::i18n::msg::widgets_player_chapters(),
+            HudTab::Episodes => plx_platform::i18n::msg::widgets_player_episodes(),
+        }
+    }
+}
+
+/// The bottom tabs this frame, left to right — the ONE list the draw, the hit rects and the
+/// player screen's key handling all index, so a tab's position can never mean two things.
+pub fn hud_tabs(meta: plx_data::metadata::MetadataView<'_>, ps: &plx_media::route::PlaybackSession) -> Vec<HudTab> {
+    let mut tabs = vec![HudTab::Info];
+    if crate::chapters_panel::has_chapters(meta) {
+        tabs.push(HudTab::Chapters);
+    }
+    if crate::episodes_panel::has_episodes(ps) {
+        tabs.push(HudTab::Episodes);
+    }
+    tabs
+}
+
 /// One bottom tab's rect, matching the left-to-right layout [`draw_hud`] lays the pills out with.
-pub fn tab_hit_rect(idx: i32, has_chapters: bool, measure: &dyn plx_machine::machine::Measure) -> Option<Rect> {
-    let tabs: &[&str] = if has_chapters { &[plx_platform::i18n::msg::widgets_player_info(), plx_platform::i18n::msg::widgets_player_chapters()] } else { &[plx_platform::i18n::msg::widgets_player_info()] };
-    let label = *tabs.get(idx as usize)?;
+pub fn tab_hit_rect(idx: i32, tabs: &[HudTab], measure: &dyn plx_machine::machine::Measure) -> Option<Rect> {
     let ph = BTN_S;
     let py = (SB_Y + SCR_H) * 0.5 - ph * 0.5;
     let mut px = SB_X;
-    for (i, l) in tabs.iter().enumerate() {
-        let pw = TabPill::width_measured(l, theme::size::BODY, measure);
+    for (i, t) in tabs.iter().enumerate() {
+        let pw = TabPill::width_measured(t.label(), theme::size::BODY, measure);
         if i as i32 == idx {
             return Some(Rect::new(px, py, pw, ph));
         }
         px += pw + 16.0;
     }
-    let _ = label;
     None
 }
 
@@ -1896,21 +1925,18 @@ pub fn draw_hud(
         draw_playbar(p, Playbar::live(ps, busy, focus, row.since_play_ms(now), now), measure);
     } // end `if transport`
 
-    // bottom tabs as pills — Chapters only appears when the item actually has chapters
-    let tabs: &[&str] = if crate::chapters_panel::has_chapters(meta) {
-        &[plx_platform::i18n::msg::widgets_player_info(), plx_platform::i18n::msg::widgets_player_chapters()]
-    } else {
-        &[plx_platform::i18n::msg::widgets_player_info()]
-    };
+    // bottom tabs as pills — Chapters / Episodes only when the item has them ([`hud_tabs`])
+    let tabs = hud_tabs(meta, ps);
     // tabs match the transport control buttons' height (BTN_S), centred vertically between the
     // play bar (scrubber, at SB_Y) and the bottom edge of the screen
     let ph = BTN_S; // = 64, same as the Subtitles/Audio buttons
     let py = (SB_Y + SCR_H) * 0.5 - ph * 0.5;
     let mut px = SB_X;
-    for (i, label) in tabs.iter().enumerate() {
+    for (i, t) in tabs.iter().enumerate() {
+        let label = t.label();
         let (focused, selected) = hud_tab_state(transport, focus, tab, i as i32);
         let pw = TabPill::width_measured(label, theme::size::BODY, measure);
-        if let Ok(cs) = CString::new(*label) {
+        if let Ok(cs) = CString::new(label) {
             TabPill::new(cs.as_ptr(), theme::size::BODY, Rect::new(px, py, pw, ph))
                 .focused(focused)
                 .selected(selected)

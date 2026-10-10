@@ -38,8 +38,9 @@ const PROBE_MORE: u64 = 8 * 1024 * 1024;
 const PROGRESS_EVERY: Duration = Duration::from_secs(60);
 /// The share of a title past which it counts as watched.
 const WATCHED_AT: f64 = 0.9;
-/// Up Next: how many following episodes a play queue carries.
-const QUEUE_AHEAD: usize = 20;
+/// How many episodes either side of the one playing a play queue carries — the whole show for
+/// almost every series, and a bounded window for a long-running anime.
+const QUEUE_AROUND: usize = 150;
 
 /// One item's chosen stream and the version built from it.
 pub(super) struct Resolved {
@@ -337,10 +338,14 @@ impl Bridge {
     pub(super) fn play_queue(&self, req: &Request, token: &str) -> Response {
         let Some(rk_s) = req.query("uri").and_then(rk_in).map(str::to_string) else { return Response::empty(400) };
         let Some(rk) = Rk::decode(&rk_s) else { return Response::empty(404) };
-        let mut rows = match self.metadata_row(token, &rk, &rk_s) {
-            Ok(row) => vec![row],
+        let row = match self.metadata_row(token, &rk, &rk_s) {
+            Ok(row) => row,
             Err(r) => return r,
         };
+        // A continuous queue for an episode is the SHOW, around the one playing: Up Next reads the
+        // row after it, and the player's Episodes strip lists them all to switch episode or season.
+        let mut rows = Vec::new();
+        let mut selected = 0;
         if let (Rk::Episode { video, .. }, true) = (&rk, req.query("continuous") == Some("1")) {
             if let Ok(t) = self.rk_title_for(token, &rk) {
                 let order: Vec<&catalog::Episode> = t.seasons().into_iter()
@@ -348,18 +353,28 @@ impl Bridge {
                     .flat_map(|s| t.episodes(s))
                     .collect();
                 if let Some(at) = order.iter().position(|e| &e.video == video) {
-                    let shelf = catalog::Shelf { section: Lib::of_title(&t.stype, &t.id).key(),
-                                                 section_title: Lib::of_title(&t.stype, &t.id).title() };
-                    rows.extend(order.iter().skip(at + 1).take(QUEUE_AHEAD)
-                        .map(|e| catalog::episode_row(&t, e, shelf, &self.art, true)));
+                    let lib = Lib::of_title(&t.stype, &t.id);
+                    let shelf = catalog::Shelf { section: lib.key(), section_title: lib.title() };
+                    let from = at.saturating_sub(QUEUE_AROUND);
+                    for (i, e) in order.iter().enumerate().skip(from).take(at - from + 1 + QUEUE_AROUND) {
+                        if i == at {
+                            selected = rows.len();
+                            rows.push(row.clone());
+                        } else {
+                            rows.push(catalog::episode_row(&t, e, shelf, &self.art, true));
+                        }
+                    }
                 }
             }
+        }
+        if rows.is_empty() {
+            rows.push(row);
         }
         for (n, row) in rows.iter_mut().enumerate() {
             row["playQueueItemID"] = json!(n + 1);
         }
         let body = container(json!({
-            "playQueueID": 1, "playQueueSelectedItemID": 1, "playQueueSelectedItemOffset": 0,
+            "playQueueID": 1, "playQueueSelectedItemID": selected + 1, "playQueueSelectedItemOffset": selected,
             "playQueueTotalCount": rows.len(), "playQueueVersion": 1, "size": rows.len(), "Metadata": rows,
         }));
         *self.play.queue.lock().unwrap_or_else(|e| e.into_inner()) = Some(body.clone());

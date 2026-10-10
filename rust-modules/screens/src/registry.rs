@@ -175,6 +175,9 @@ pub enum PlayerReq {
     Info(plx_appkit::info_panel::InfoAction),
     /// The panel took a DOWN past its own bottom: drop the HUD's ring onto the tabs row.
     FocusTabs,
+    /// The Episodes strip's OK: play this episode of the queue in place of the one playing
+    /// (`app::playback::play_successor`, the ritual Up Next uses).
+    PlayEpisode(plx_media::route::UpNext),
     /// Keep the transport alive while a panel is being read (`HUD_MENU_MS`), or hand it the
     /// ordinary linger as a panel closes (`HUD_LINGER_MS`).
     ExtendHud(u32),

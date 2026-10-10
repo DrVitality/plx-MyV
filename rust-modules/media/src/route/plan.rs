@@ -1000,7 +1000,7 @@ pub(super) fn new_sess(rk: &str) -> String {
 ///
 /// It comes free with the `continuous=1` PlayQueue every playback already creates (see
 /// [`plx_plex::plex::Client::create_play_queue`]); nothing here asks the server "what's next".
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub struct UpNext {
     pub rk: String,
     pub part: String,
@@ -1015,6 +1015,15 @@ pub struct UpNext {
     pub resume_ms: i64,
 }
 
+
+/// Names the episode by its rating key and position only: the titles are viewing information
+/// this app never writes to a log (`app::playback::play_up_next`), and a `PlayerReq` carrying one
+/// may be printed.
+impl std::fmt::Debug for UpNext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "UpNext {{ rk: {:?}, S{}E{} }}", self.rk, self.season, self.index)
+    }
+}
 
 /// Build the Up Next descriptor from a queue row. Episodes only: `continuous=1` on a movie
 /// returns just the movie itself (verified live — total count 1), and "up next" is a show idea.

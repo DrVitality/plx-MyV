@@ -596,17 +596,24 @@ fn nothing_cached_is_a_refusal_the_player_can_read_out() {
 }
 
 #[test]
-fn an_episode_queue_continues_through_the_following_episodes() {
+fn an_episode_queue_holds_the_whole_show_with_the_playing_episode_selected() {
     let b = content_bridge();
     let ep = Rk::Episode { stype: "series".into(), id: "tt0944947".into(), video: "tt0944947:1:2".into() }.encode();
     let uri = format!("server%3A%2F%2Fstremio-bridge%2Fcom.plexapp.plugins.library%2Flibrary%2Fmetadata%2F{ep}");
     let q = json_of(&b.handle(&authed("POST", &format!("/playQueues?type=video&uri={uri}&continuous=1"))));
-    let rows = q["MediaContainer"]["Metadata"].as_array().unwrap();
+    let mc = &q["MediaContainer"];
+    let rows = mc["Metadata"].as_array().unwrap();
     let titles: Vec<&str> = rows.iter().map(|r| r["title"].as_str().unwrap()).collect();
-    assert_eq!(titles, vec!["The Kingsroad", "The North Remembers"]);
-    assert_eq!(rows[1]["playQueueItemID"], 2);
+    // Every episode, in order, so the player's Episodes strip can switch to any of them…
+    assert_eq!(titles, vec!["Winter Is Coming", "The Kingsroad", "The North Remembers"]);
+    assert_eq!(rows[2]["playQueueItemID"], 3);
+    assert_eq!(rows[2]["parentIndex"], 2);
+    // …with the one playing selected, which is what Up Next counts on to find the next one.
+    assert_eq!(mc["playQueueSelectedItemID"], 2);
+    assert_eq!(mc["playQueueSelectedItemOffset"], 1);
     // Resume where the account stopped.
-    assert_eq!(rows[0]["viewOffset"], 600000);
+    assert_eq!(rows[1]["viewOffset"], 600000);
+    assert!(rows[1]["Media"].is_array());
 }
 
 #[test]

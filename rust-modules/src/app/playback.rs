@@ -578,6 +578,9 @@ pub(crate) fn player_requests(
                     player.publish();
                 }
             }
+            PlayerReq::PlayEpisode(u) => {
+                play_successor(ps, pa, u, HUD_LINGER_MS, pages, bridge);
+            }
             PlayerReq::FocusTabs => {
                 if let Some(player) = super::bridge::player_mut(pages) {
                     player.hud.nav.focus = 2;
@@ -821,6 +824,20 @@ pub(crate) fn play_up_next(
     let Some(u) = super::bridge::player_mut(pages).and_then(|player| player.up_next.take(ps)) else {
         return false;
     };
+    play_successor(ps, pa, u, hud_ms, pages, bridge)
+}
+
+/// Start `u` in place of the episode now playing — the one ritual behind Up Next and the
+/// Episodes strip's pick (`PlayerReq::PlayEpisode`); [`play_up_next`]'s doc says why the stop
+/// comes first. Returns false when the play could not be requested.
+pub(crate) fn play_successor(
+    ps: &mut plx_media::route::PlaybackSession,
+    pa: &mut plx_media::player::adapter::PlayerAdapter,
+    u: plx_media::route::UpNext,
+    hud_ms: u32,
+    pages: &mut plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,
+    bridge: &mut super::bridge::Bridge,
+) -> bool {
     // The ratingKey, not the episode title: `rk` is the handle every other line and every harness
     // assertion already uses, and the title is LG's "Content Viewing Information" — the one
     // category this app's Data Safety declaration answers "Not collected" to. `eventlog::scrub` is a

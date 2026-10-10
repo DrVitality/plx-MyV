@@ -214,6 +214,22 @@
     "value": "Chapters",
     "description": "Bottom navigation tab in the player."
   },
+  "widgets.player.episodes": {
+    "value": "Episodes",
+    "description": "Bottom navigation tab in the player that opens a strip of the show's episodes."
+  },
+  "widgets.player.specials": {
+    "value": "Specials",
+    "description": "Heading over the player's episode strip when the highlighted episode is a special (season 0)."
+  },
+  "widgets.player.season_hint": {
+    "value": "Up / Down to change season",
+    "description": "Key hint beside the player's episode strip: the up and down keys change season."
+  },
+  "widgets.player.now_playing": {
+    "value": "Now playing",
+    "description": "Caption under the episode in the player's episode strip that is currently playing."
+  },
   "widgets.card.new_episode": {
     "value": "New episode",
     "description": "Secondary caption beneath a focused media card."
