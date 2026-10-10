@@ -50,7 +50,7 @@ pub struct Peek {
 }
 
 /// The dwell and the appearance of the one bubble a section can show.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Default)]
 pub struct PeekState {
     /// The card index the dwell is counting for.
     at: Option<usize>,
