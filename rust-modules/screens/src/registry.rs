@@ -121,6 +121,12 @@ pub struct StremioAddon {
 pub struct StremioConfig {
     pub rows: Vec<StremioRow>,
     pub addons: Vec<StremioAddon>,
+    /// The phone remote's address and PIN, when it is listening.
+    pub phone: Option<(String, String)>,
+    /// Whether a newer build than this one is published (`None`: the check failed).
+    pub update: Option<bool>,
+    /// Hours left in the set's Developer Mode session, when it could be read.
+    pub devmode_hours: Option<i64>,
 }
 
 impl StremioConfig {
@@ -137,7 +143,16 @@ impl StremioConfig {
             streams: a.get("streams").and_then(|x| x.as_bool()),
             catalogs: a.get("catalogs").and_then(|x| x.as_bool()),
         }).collect();
-        Some(StremioConfig { rows, addons })
+        let tv = v.get("tv");
+        let phone = tv.and_then(|t| t.get("phone")).filter(|p| p.is_object())
+            .map(|p| (field(p, "url"), field(p, "pin")));
+        let update = match tv.and_then(|t| t.get("update")).and_then(|u| u.as_str()) {
+            Some("available") => Some(true),
+            Some("current") => Some(false),
+            _ => None,
+        };
+        let devmode_hours = tv.and_then(|t| t.get("devmode_hours")).and_then(|h| h.as_i64());
+        Some(StremioConfig { rows, addons, phone, update, devmode_hours })
     }
 }
 

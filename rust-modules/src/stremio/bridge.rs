@@ -19,6 +19,7 @@ mod config;
 mod content;
 mod play;
 mod subs;
+mod tvinfo;
 mod watched;
 
 use super::api::{Addon, ApiError, Stremio};
@@ -86,6 +87,13 @@ pub struct Bridge {
     warming: Mutex<std::collections::HashSet<String>>,
     /// Whether this run has served Home from the saved copy yet.
     home_cache_served: std::sync::atomic::AtomicBool,
+    /// The update and Developer Mode answers ([`tvinfo`]), with when they were read.
+    tv_info: Mutex<Option<(Instant, Value)>>,
+    /// Whether this run has checked Developer Mode's time left for the Home reminder.
+    devmode_warned: std::sync::atomic::AtomicBool,
+    /// The account key the app last read with, for the phone remote's searches ([`super::remote`]).
+    /// Memory only, never logged.
+    last_token: Mutex<Option<String>>,
 }
 
 fn container(fields: Value) -> Value {
@@ -135,7 +143,22 @@ impl Bridge {
             me: std::sync::OnceLock::new(),
             warming: Mutex::new(std::collections::HashSet::new()),
             home_cache_served: std::sync::atomic::AtomicBool::new(false),
+            tv_info: Mutex::new(None),
+            devmode_warned: std::sync::atomic::AtomicBool::new(false),
+            last_token: Mutex::new(None),
         }
+    }
+
+    fn note_token(&self, token: &str) {
+        let mut last = self.last_token.lock().unwrap_or_else(|e| e.into_inner());
+        if last.as_deref() != Some(token) {
+            *last = Some(token.to_string());
+        }
+    }
+
+    /// The account key the app last read with, if any (the phone remote acts as the app).
+    pub fn remote_token(&self) -> Option<String> {
+        self.last_token.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Lets the bridge start background work on itself (the server calls it once).
@@ -217,7 +240,10 @@ impl Bridge {
             // ---- the media server ----
             ("GET" | "HEAD", [] | ["identity"]) => self.identity(),
             ("GET" | "HEAD", _) => match req.token() {
-                Some(token) => self.read(req, token, &segs),
+                Some(token) => {
+                    self.note_token(token);
+                    self.read(req, token, &segs)
+                }
                 None => Response::empty(401),
             },
             ("POST" | "PUT" | "DELETE", _) => match req.token() {

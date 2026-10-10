@@ -30,6 +30,7 @@ mod library;
 mod media;
 mod probe;
 mod qr;
+mod remote;
 mod streams;
 #[cfg(test)]
 mod tests;
@@ -61,9 +62,15 @@ pub(crate) fn note_home_changed() {
 pub const STREAM_RES_LADDER: [u32; 3] = [0, 1080, 720];
 use std::sync::Arc;
 
-/// Starts the bridge on its loopback port. Called once at boot, after libcurl is initialised and
-/// before anything can ask plex.tv a question. A failure (the port is taken, threads refused) is
-/// logged and leaves the app running: sign-in then reports plex.tv unreachable, which is what it is.
+/// The oldest title a phone sent to the television ([`remote`]), as an item address to open.
+pub fn take_remote_request() -> Option<String> {
+    remote::take_request()
+}
+
+/// Starts the bridge on its loopback port (and the phone remote beside it, [`remote`]). Called
+/// once at boot, after libcurl is initialised and before anything can ask plex.tv a question. A
+/// failure (the port is taken, threads refused) is logged and leaves the app running: sign-in then
+/// reports plex.tv unreachable, which is what it is.
 pub fn start() {
     let port = plx_plex::plex::account::STREMIO_BRIDGE_PORT;
     let listener = match TcpListener::bind(("127.0.0.1", port)) {
@@ -75,6 +82,7 @@ pub fn start() {
     };
     let bridge = Arc::new(bridge::Bridge::new(Box::new(api::Live), port));
     bridge.share();
+    remote::start(bridge.clone());
     let started = plx_base::task::spawn("stremio-bridge", move || {
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };

@@ -1371,6 +1371,64 @@
     "value": "Black",
     "description": "Background option: true black"
   },
+  "settings.stremio.tv_section": {
+    "value": "This TV",
+    "description": "Addons & Home: section about this television"
+  },
+  "settings.stremio.phone": {
+    "value": "Phone remote",
+    "description": "Addons & Home row: search on a phone and send titles to the TV"
+  },
+  "settings.stremio.phone_detail": {
+    "value": "Open {url} on your phone · PIN {pin}",
+    "description": "Addons & Home: where the phone remote is and its PIN",
+    "args": {
+      "url": "str",
+      "pin": "str"
+    }
+  },
+  "settings.stremio.phone_off": {
+    "value": "Not available on this TV",
+    "description": "Addons & Home: the phone remote could not start"
+  },
+  "settings.stremio.updates": {
+    "value": "App updates",
+    "description": "Addons & Home row: whether a newer build is published"
+  },
+  "settings.stremio.update_current": {
+    "value": "Up to date",
+    "description": "Addons & Home: this is the newest build"
+  },
+  "settings.stremio.update_available": {
+    "value": "Update ready",
+    "description": "Addons & Home: a newer build is published"
+  },
+  "settings.stremio.update_unknown": {
+    "value": "Unknown",
+    "description": "Addons & Home: the update check failed"
+  },
+  "settings.stremio.devmode": {
+    "value": "Developer Mode",
+    "description": "Addons & Home row: the TV's Developer Mode session"
+  },
+  "settings.stremio.devmode_left": {
+    "value": "{hours} h left",
+    "description": "Addons & Home: hours left in Developer Mode",
+    "args": {
+      "hours": "str"
+    }
+  },
+  "settings.stremio.devmode_unknown": {
+    "value": "Unknown",
+    "description": "Addons & Home: Developer Mode's time left could not be read"
+  },
+  "settings.stremio.devmode_toast": {
+    "value": "Developer Mode ends in {hours} h. Open the Developer Mode app to extend it.",
+    "description": "Toast when Developer Mode is about to end",
+    "args": {
+      "hours": "str"
+    }
+  },
   "settings.stremio.title": {
     "value": "Addons & Home",
     "description": "Settings row and page title: Stremio addons and Home rows"

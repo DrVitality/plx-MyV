@@ -1615,6 +1615,15 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
         if crate::stremio::take_home_changed() {
             app.refresh_hubs_at = fr.now | 1;
         }
+        // a title sent from the phone remote: its page opens (never playback); while the player
+        // is up it waits, so a phone cannot cut into what is playing
+        if !fr.player {
+            if let Some(rk) = crate::stremio::take_remote_request() {
+                log("phone remote: opening a title");
+                super::bridge::open_detail(&mut app.pages, &mut app.bridge,
+                    plx_plex::plex::current_server(), &rk, None, None);
+            }
+        }
         // post-playback home refresh (armed by every exit_player): refetch the hubs so
         // Continue Watching shows the new resume point / next episode; the small delay lets
         // the final timeline PUT land server-side first. The request is worker-only; the

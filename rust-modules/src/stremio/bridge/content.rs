@@ -503,6 +503,7 @@ impl Bridge {
             for rk in self.continue_targets(token, WARM_CONTINUE) {
                 self.warm(token, rk);
             }
+            self.devmode_reminder();
         }
         response
     }
@@ -1256,7 +1257,12 @@ impl Bridge {
                 }))
             })
             .collect();
-        Response::json(200, &json!({"rows": rows, "addons": list}))
+        let mut tv = self.tv_info();
+        tv["phone"] = match super::super::remote::info() {
+            Some((url, pin)) => json!({"url": url, "pin": pin}),
+            None => Value::Null,
+        };
+        Response::json(200, &json!({"rows": rows, "addons": list, "tv": tv}))
     }
 }
 

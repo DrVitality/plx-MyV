@@ -55,6 +55,9 @@ enum Id {
     Streams,
     Catalogs,
     Retry,
+    Phone,
+    Updates,
+    DevMode,
 }
 
 impl FormId for Id {
@@ -68,6 +71,9 @@ impl FormId for Id {
             Id::Streams => 6,
             Id::Catalogs => 7,
             Id::Retry => 8,
+            Id::Phone => 9,
+            Id::Updates => 10,
+            Id::DevMode => 11,
             Id::HomeRow(i) => 100 + u32::from(*i),
             Id::Addon(i) => 2000 + u32::from(*i),
         })
@@ -311,7 +317,28 @@ fn build(state: &State) -> (Form<Id, Act, SettingsPage>, String, String) {
                     addons.item(Id::Addon(i), RowKind::Button, Act::Open, row)
                 };
             }
-            let mut form = Form::new().section(rows).section(addons);
+            // this television: the phone remote, updates, Developer Mode's time left
+            let phone = match &config.phone {
+                Some((url, pin)) => msg::settings_stremio_phone_detail(pin, url),
+                None => msg::settings_stremio_phone_off().to_string(),
+            };
+            let update = match config.update {
+                Some(false) => msg::settings_stremio_update_current(),
+                Some(true) => msg::settings_stremio_update_available(),
+                None => msg::settings_stremio_update_unknown(),
+            };
+            let devmode = match config.devmode_hours {
+                Some(h) => msg::settings_stremio_devmode_left(&h.to_string()),
+                None => msg::settings_stremio_devmode_unknown().to_string(),
+            };
+            let tv = FormSection::new(msg::settings_stremio_tv_section())
+                .item(Id::Phone, RowKind::Button, Act::Open,
+                    Row::new(msg::settings_stremio_phone()).detail(phone).server_detail())
+                .item(Id::Updates, RowKind::Button, Act::Open,
+                    Row::new(msg::settings_stremio_updates()).value(update))
+                .item(Id::DevMode, RowKind::Button, Act::Open,
+                    Row::new(msg::settings_stremio_devmode()).value(devmode));
+            let mut form = Form::new().section(rows).section(addons).section(tv);
             if state.failed {
                 form = form.section(retry());
             }
@@ -453,6 +480,9 @@ mod tests {
             rows: vec![row("continue", true), row("library", true), row("x|movie|top", false)],
             addons: vec![StremioAddon { id: "t".into(), name: "Torrentio".into(), detail: "streams".into(),
                 streams: Some(true), catalogs: None }],
+            phone: Some(("http://192.0.2.10:32499".into(), "1234".into())),
+            update: Some(false),
+            devmode_hours: Some(900),
         }
     }
 
@@ -493,6 +523,8 @@ mod tests {
         let mut t: FormTable<Id, Act, SettingsPage> = FormTable::new(BAND);
         t.set(form, None);
         assert!(t.index_of(&Id::HomeRow(2)).is_some() && t.index_of(&Id::Addon(0)).is_some());
+        assert!(t.index_of(&Id::Phone).is_some() && t.index_of(&Id::DevMode).is_some());
+        assert_eq!(op_for(&s, &Act::Open), None, "the TV rows change nothing");
         let failed = State { config: None, failed: true, ..state(Mode::List, None) };
         let (form, _, _) = build(&failed);
         t.set(form, None);
