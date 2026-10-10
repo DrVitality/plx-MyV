@@ -68,6 +68,13 @@ pub(super) struct PlayState {
     queue: Mutex<Option<Value>>,
 }
 
+/// The stand-in final credits marker for an episode `duration_ms` long: its last 3 %, at least
+/// 45 seconds and at most two and a half minutes.
+pub(super) fn credits_marker(duration_ms: i64) -> Value {
+    let span = (duration_ms * 3 / 100).clamp(45_000, 150_000).min(duration_ms / 2);
+    json!({"type": "credits", "startTimeOffset": duration_ms - span, "endTimeOffset": duration_ms, "final": true})
+}
+
 /// "Now", in the ISO form Stremio's library stores.
 fn now_iso() -> String {
     let secs = std::time::SystemTime::now()
@@ -308,6 +315,13 @@ impl Bridge {
         }
         if let (Some(off), Some(obj)) = (self.resume_offset(token, rk), row.as_object_mut()) {
             obj.insert("viewOffset".into(), json!(off));
+        }
+        // Stremio has no credits markers. An episode's last stretch stands in for them, so the
+        // player's Up Next card (which waits for a FINAL credits marker) offers the next episode.
+        if matches!(rk, Rk::Episode { .. }) {
+            if let Some(d) = row.get("duration").and_then(Value::as_i64).filter(|d| *d > 0) {
+                row["Marker"] = json!([credits_marker(d)]);
+            }
         }
         Ok(row)
     }

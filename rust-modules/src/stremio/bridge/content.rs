@@ -63,6 +63,15 @@ pub(super) fn parallel<'a, T: Send + 'a>(jobs: Vec<Box<dyn FnOnce() -> T + Send 
     })
 }
 
+/// The season and episode a video id names: `tt0944947:1:2` is season 1, episode 2; a Kitsu
+/// `kitsu:1376:5` is episode 5 of its one season.
+pub(super) fn season_episode(video: &str) -> Option<(i64, i64)> {
+    let mut parts = video.rsplit(':');
+    let episode = parts.next()?.parse().ok()?;
+    let season = if video.starts_with("kitsu:") { 1 } else { parts.next()?.parse().ok()? };
+    Some((season, episode))
+}
+
 /// Percent-encodes an addon path segment: an id or an `extra` value.
 fn segment(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -356,7 +365,10 @@ impl Bridge {
             .collect()
     }
 
-    /// One Continue Watching row: the film, or the episode the account stopped in.
+    /// One Continue Watching row: the film, or — for a series — the SHOW, so opening it lands on
+    /// the show's page with every season and episode, its Resume button already on the episode
+    /// the account stopped in (the show page's `OnDeck`, [`Bridge::on_deck`]). That is how
+    /// Stremio's own apps treat a series in Continue Watching.
     fn continue_row(&self, it: &Value, order: i64) -> Option<Value> {
         let id = it.get("_id")?.as_str()?;
         let stype = it.get("type")?.as_str()?;
@@ -367,54 +379,47 @@ impl Bridge {
             .map(|p| self.art.path(p));
         let lib = Lib::of_title(stype, id);
         let video = it.pointer("/state/video_id").and_then(Value::as_str).filter(|v| !v.is_empty());
-        let rk = match video {
-            Some(video) if stype != "movie" => {
-                Rk::Episode { stype: stype.to_string(), id: id.to_string(), video: video.to_string() }
-            }
-            _ => Rk::item(stype, id)?,
-        };
+        let rk = Rk::item(stype, id)?;
         let rk_s = rk.encode();
         let mut row = json!({
-            "ratingKey": rk_s, "key": format!("/library/metadata/{rk_s}"),
-            "viewOffset": offset, "duration": duration,
+            "ratingKey": rk_s, "key": format!("/library/metadata/{rk_s}"), "title": name,
             // A stand-in clock: newest first is the order the account gave.
             "lastViewedAt": 1_700_000_000 + order,
             "librarySectionID": lib.key(), "librarySectionTitle": lib.title(),
-            "Media": catalog::placeholder_media(&rk_s, (duration > 0).then_some(duration / 60_000)),
         });
         let obj = row.as_object_mut()?;
-        match &rk {
-            Rk::Episode { video, .. } => {
-                // `tt0944947:1:2` names season 1, episode 2; a Kitsu `kitsu:1376:5` episode 5.
-                let parts: Vec<&str> = video.rsplit(':').take(2).collect();
-                let (episode, season) = match parts.as_slice() {
-                    [e, s] => (e.parse::<i64>().ok(), if video.starts_with("kitsu:") { Some(1) } else { s.parse().ok() }),
-                    _ => (None, None),
-                };
-                let show = Rk::item(stype, id).map(|r| r.encode()).unwrap_or_default();
-                obj.insert("type".into(), json!("episode"));
-                obj.insert("title".into(), json!(episode.map_or(name.to_string(), |e| format!("Episode {e}"))));
-                obj.insert("grandparentTitle".into(), json!(name));
-                obj.insert("grandparentRatingKey".into(), json!(show));
-                obj.insert("grandparentKey".into(), json!(format!("/library/metadata/{show}")));
-                if let (Some(s), Some(e)) = (season, episode) {
-                    obj.insert("parentIndex".into(), json!(s));
-                    obj.insert("index".into(), json!(e));
-                }
-                if let Some(p) = &poster {
-                    obj.insert("grandparentThumb".into(), json!(p));
-                    obj.insert("thumb".into(), json!(p));
-                }
-            }
-            _ => {
-                obj.insert("type".into(), json!("movie"));
-                obj.insert("title".into(), json!(name));
-                if let Some(p) = &poster {
-                    obj.insert("thumb".into(), json!(p));
-                }
+        if let Some(p) = &poster {
+            obj.insert("thumb".into(), json!(p));
+        }
+        if matches!(rk, Rk::Item { kind: catalog::Kind::Movie, .. }) {
+            obj.insert("type".into(), json!("movie"));
+            obj.insert("viewOffset".into(), json!(offset));
+            obj.insert("duration".into(), json!(duration));
+            obj.insert("Media".into(),
+                catalog::placeholder_media(&rk_s, (duration > 0).then_some(duration / 60_000)));
+        } else {
+            obj.insert("type".into(), json!("show"));
+            // Where it stopped, as a line under the title: "S1 · E2".
+            if let Some((s, e)) = video.and_then(season_episode) {
+                obj.insert("summary".into(), json!(format!("Continue S{s} · E{e}")));
             }
         }
         Some(row)
+    }
+
+    /// A show page's `OnDeck`: the episode the account stopped in, with where. The page's Play
+    /// becomes Resume on it.
+    fn on_deck(&self, token: &str, t: &Title, shelf: RowShelf<'_>) -> Option<Value> {
+        let items = self.library_items(token);
+        let it = items.iter().find(|it| it.get("_id").and_then(Value::as_str) == Some(t.id.as_str()))?;
+        let video = it.pointer("/state/video_id").and_then(Value::as_str)?;
+        let offset = it.pointer("/state/timeOffset").and_then(Value::as_i64).unwrap_or(0);
+        let e = t.videos.iter().find(|e| e.video == video)?;
+        let mut row = catalog::episode_row(t, e, shelf, &self.art, true);
+        if offset > 0 {
+            row["viewOffset"] = json!(offset);
+        }
+        Some(json!({"Metadata": row}))
     }
 
     // ---------------------------------------------------------------- search
@@ -493,7 +498,13 @@ impl Bridge {
         };
         let shelf = row_shelf(Lib::of_title(&t.stype, &t.id));
         let row = match &rk {
-            Rk::Item { .. } => catalog::detail_row(&t, shelf, &self.art),
+            Rk::Item { .. } => {
+                let mut row = catalog::detail_row(&t, shelf, &self.art);
+                if let Some(deck) = self.on_deck(token, &t, shelf) {
+                    row["OnDeck"] = deck;
+                }
+                row
+            }
             Rk::Season { season, .. } => {
                 match catalog::season_rows(&t, shelf, &self.art).into_iter()
                     .find(|r| r.get("index").and_then(Value::as_i64) == Some(*season)) {

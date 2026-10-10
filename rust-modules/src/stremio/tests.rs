@@ -332,6 +332,7 @@ fn content_scripted() -> Scripted {
     s.pages.insert("https://kitsu.example/catalog/anime/kitsu-anime-trending/skip=1.json".into(), metas(json!([])));
     s.pages.insert("https://v3-cinemeta.example/meta/series/tt0944947.json".into(), json!({"meta": {
         "id": "tt0944947", "type": "series", "name": "Game of Thrones", "poster": "https://img.example/got.jpg",
+        "runtime": "57 min",
         "videos": [
             {"id": "tt0944947:1:1", "season": 1, "episode": 1, "name": "Winter Is Coming"},
             {"id": "tt0944947:1:2", "season": 1, "episode": 2, "name": "The Kingsroad"},
@@ -402,14 +403,13 @@ fn a_library_shelf_is_each_of_its_catalogs_and_home_leads_with_continue_watching
     let home = json_of(&b.handle(&authed("GET", "/hubs")));
     let hubs = home["MediaContainer"]["Hub"].as_array().unwrap();
     assert_eq!(hubs[0]["hubIdentifier"], "home.continue");
-    // Removed and unstarted items are not in it; the series resumes at its episode.
+    // Removed and unstarted items are not in it; a series is its show, saying where it stopped.
     let cw = hubs[0]["Metadata"].as_array().unwrap();
     assert_eq!(cw.len(), 1);
-    assert_eq!(cw[0]["type"], "episode");
-    assert_eq!(cw[0]["grandparentTitle"], "Game of Thrones");
-    assert_eq!(cw[0]["parentIndex"], 1);
-    assert_eq!(cw[0]["index"], 2);
-    assert_eq!(cw[0]["viewOffset"], 600000);
+    assert_eq!(cw[0]["type"], "show");
+    assert_eq!(cw[0]["title"], "Game of Thrones");
+    assert_eq!(cw[0]["summary"], "Continue S1 · E2");
+    assert_eq!(cw[0]["ratingKey"], Rk::item("series", "tt0944947").unwrap().encode());
     assert_eq!(hubs.len(), 4, "Continue Watching plus a shelf from each library: {hubs:?}");
 }
 
@@ -419,6 +419,11 @@ fn a_show_page_has_its_seasons_and_episodes_from_the_metadata_provider() {
     let show = Rk::item("series", "tt0944947").unwrap().encode();
     let detail = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{show}"))));
     assert_eq!(detail["MediaContainer"]["Metadata"][0]["childCount"], 2);
+    // The show page resumes the episode the account stopped in.
+    let deck = &detail["MediaContainer"]["Metadata"][0]["OnDeck"]["Metadata"];
+    assert_eq!(deck["index"], 2);
+    assert_eq!(deck["parentIndex"], 1);
+    assert_eq!(deck["viewOffset"], 600000);
     let seasons = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{show}/children"))));
     let seasons = seasons["MediaContainer"]["Metadata"].as_array().unwrap();
     assert_eq!(seasons.len(), 2);
@@ -436,6 +441,12 @@ fn a_show_page_has_its_seasons_and_episodes_from_the_metadata_provider() {
     let ep = eps[1]["ratingKey"].as_str().unwrap();
     let one = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{ep}"))));
     assert_eq!(one["MediaContainer"]["Metadata"][0]["index"], 2);
+    // The last 3 % stands in for the credits, so Up Next offers the next episode there.
+    let marker = &one["MediaContainer"]["Metadata"][0]["Marker"][0];
+    assert_eq!(marker["type"], "credits");
+    assert_eq!(marker["final"], true);
+    assert_eq!(marker["endTimeOffset"], 57 * 60_000);
+    assert_eq!(marker["startTimeOffset"], 57 * 60_000 - 102_600);
 }
 
 #[test]
