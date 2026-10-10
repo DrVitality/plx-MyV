@@ -1608,8 +1608,14 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
                 if let Some(player) = super::bridge::player_mut(&mut app.pages) {
                     player.up_next.cancel(); // nothing queued after all — don't re-fire
                 }
+            } else {
+                super::playback::note_auto_advance();
             }
         }
+        // "Are you still watching?": a press resets the run of automatic episodes, and the
+        // episode past it pauses on its first picture
+        super::playback::still_watching_tick(&mut app.adapters.player, app.last_input,
+            super::bridge::player(&app.pages).is_some());
         // the Stremio bridge changed something Home shows (a library save, a Home-row or addon
         // setting): the same refetch, at once
         if crate::stremio::take_home_changed() {

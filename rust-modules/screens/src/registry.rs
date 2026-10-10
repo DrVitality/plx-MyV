@@ -127,6 +127,8 @@ pub struct StremioConfig {
     pub update: Option<bool>,
     /// Hours left in the set's Developer Mode session, when it could be read.
     pub devmode_hours: Option<i64>,
+    /// Days of Real-Debrid premium left, when the account's stream addon carries a key.
+    pub debrid_days: Option<i64>,
 }
 
 impl StremioConfig {
@@ -152,7 +154,8 @@ impl StremioConfig {
             _ => None,
         };
         let devmode_hours = tv.and_then(|t| t.get("devmode_hours")).and_then(|h| h.as_i64());
-        Some(StremioConfig { rows, addons, phone, update, devmode_hours })
+        let debrid_days = tv.and_then(|t| t.get("debrid_days")).and_then(|d| d.as_i64());
+        Some(StremioConfig { rows, addons, phone, update, devmode_hours, debrid_days })
     }
 }
 
@@ -524,6 +527,8 @@ pub enum ItemMenuKind {
     Streams {
         row: Box<plx_data::pms::PmsMovie>,
         choices: std::sync::Arc<[StreamChoice]>,
+        /// The list shows only streams that start at once (the menu's own Instant only switch).
+        instant: bool,
     },
 }
 
@@ -564,8 +569,8 @@ impl PartialEq for ItemMenuKind {
                 da == db && a.sid == b.sid && a.rk == b.rk && a.kind == b.kind,
             (Self::Episode { mark: a }, Self::Episode { mark: b }) => a == b,
             (Self::Season { mark: a }, Self::Season { mark: b }) => a == b,
-            (Self::Streams { row: a, choices: ca }, Self::Streams { row: b, choices: cb }) =>
-                a.sid == b.sid && a.rk == b.rk && ca == cb,
+            (Self::Streams { row: a, choices: ca, instant: ia }, Self::Streams { row: b, choices: cb, instant: ib }) =>
+                a.sid == b.sid && a.rk == b.rk && ca == cb && ia == ib,
             _ => false,
         }
     }
@@ -589,8 +594,8 @@ impl plx_machine::machine::LogicalState for ItemMenuArg {
             ItemMenuKind::Card { row, from_deck } => { c.u32(0).bool(*from_deck).u32(row.kind as u32); }
             ItemMenuKind::Episode { mark } => { c.u32(1).u32(*mark as u32); }
             ItemMenuKind::Season { mark } => { c.u32(2).u32(*mark as u32); }
-            ItemMenuKind::Streams { choices, .. } => {
-                c.u32(3).u32(choices.len() as u32);
+            ItemMenuKind::Streams { choices, instant, .. } => {
+                c.u32(3).u32(choices.len() as u32).bool(*instant);
                 for ch in choices.iter() { c.u32(ch.index as u32).bool(ch.playing); }
             }
         }

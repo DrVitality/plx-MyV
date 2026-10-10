@@ -375,8 +375,23 @@ pub struct Shelf<'a> {
     pub section_title: &'a str,
 }
 
+/// A person's id on the bridge: a stable number from their name (the app opens a person page by
+/// it, `/library/people/{id}/media`). Positive and within a JavaScript-safe integer.
+///
+/// Deliberately NO `tagKey`: the app sends a person's `tagKey` to plex.tv's metadata provider for
+/// a biography, with the account key it holds — which here is the Stremio key, and must never
+/// leave for plex.tv.
+pub fn person_id(name: &str) -> i64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in name.trim().to_lowercase().bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    ((h >> 16) & 0x3fff_ffff_ffff) as i64 | 1
+}
+
 fn tags(names: &[String]) -> Value {
-    Value::Array(names.iter().take(20).map(|n| json!({"tag": n})).collect())
+    Value::Array(names.iter().take(20).map(|n| json!({"tag": n, "id": person_id(n)})).collect())
 }
 
 fn insert(row: &mut Value, key: &str, value: Option<Value>) {

@@ -137,6 +137,32 @@ fn rk_in(path: &str) -> Option<&str> {
     path.rsplit_once("/library/metadata/").map(|(_, rk)| rk.split(['/', '?', '&']).next().unwrap_or(rk))
 }
 
+/// The `languageCode` of stream `id` of `stream_type` (2 audio, 3 subtitle) in a version.
+fn stream_language(media: &Value, stream_type: i64, id: i64) -> Option<String> {
+    media.pointer("/0/Part/0/Stream")?.as_array()?.iter()
+        .find(|s| s.get("id").and_then(Value::as_i64) == Some(id) && s.get("streamType").and_then(Value::as_i64) == Some(stream_type))
+        .and_then(|s| s.get("languageCode").and_then(Value::as_str))
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+}
+
+/// The audio and subtitle stream ids for remembered languages: the first stream of each in that
+/// language (`None` leaves the version's own pick); a remembered `""` subtitle is "off" (id 0).
+fn tracks_for_languages(media: &Value, audio: Option<&str>, sub: Option<&str>) -> (Option<i64>, Option<i64>) {
+    let streams = media.pointer("/0/Part/0/Stream").and_then(Value::as_array);
+    let first = |kind: i64, lang: &str| streams.into_iter().flatten()
+        .find(|s| s.get("streamType").and_then(Value::as_i64) == Some(kind)
+            && s.get("languageCode").and_then(Value::as_str).is_some_and(|l| l.eq_ignore_ascii_case(lang)))
+        .and_then(|s| s.get("id").and_then(Value::as_i64));
+    let a = audio.and_then(|l| first(2, l));
+    let s = match sub {
+        Some("") => Some(0),
+        Some(l) => first(3, l),
+        None => None,
+    };
+    (a, s)
+}
+
 /// Applies a stored track choice to a version's streams.
 fn apply_tracks(media: &mut Value, audio: Option<i64>, sub: Option<i64>) {
     let Some(streams) = media.pointer_mut("/0/Part/0/Stream").and_then(Value::as_array_mut) else { return };
@@ -279,8 +305,16 @@ impl Bridge {
         for sub in &installed {
             media::add_external(&mut media, sub);
         }
-        if let Some((a, sub)) = self.play.tracks.lock().unwrap_or_else(|e| e.into_inner()).get(&part).copied() {
+        let picked = self.play.tracks.lock().unwrap_or_else(|e| e.into_inner()).get(&part).copied();
+        if let Some((a, sub)) = picked {
             apply_tracks(&mut media, a, sub);
+        } else if let Rk::Episode { id, .. } = rk {
+            // nothing picked for this episode: the languages the show was last watched in
+            let memory = self.with_config(|c| c.shows.get(id).cloned());
+            if let Some(m) = memory {
+                let (a, s) = tracks_for_languages(&media, m.audio_lang.as_deref(), m.sub_lang.as_deref());
+                apply_tracks(&mut media, a, s);
+            }
         }
         self.play.parts.lock().unwrap_or_else(|e| e.into_inner()).insert(part, rk_s.to_string());
         let r = Arc::new(Resolved { streams, chosen, media, at: Instant::now() });
@@ -315,10 +349,15 @@ impl Bridge {
     /// Keep what a show's episode is playing from, for the next one (written only on a change).
     fn remember_stream(&self, show_id: &str, s: &Stream, f: &Facts) {
         let name = s.filename.as_deref().unwrap_or(s.detail.as_str());
+        // the show's remembered languages stay; only the kind of stream is replaced
+        let kept = self.with_config(|c| c.shows.get(show_id).map(|m| (m.audio_lang.clone(), m.sub_lang.clone())));
+        let (audio_lang, sub_lang) = kept.unwrap_or((None, None));
         let memory = super::config::StreamMemory {
             group: super::config::release_group(name),
             resolution: f.resolution,
             addon: s.addon.clone(),
+            audio_lang,
+            sub_lang,
         };
         if self.with_config(|c| c.shows.get(show_id) == Some(&memory)) {
             return;
@@ -425,6 +464,7 @@ impl Bridge {
             },
             Rk::Season { .. } => return Err(Response::empty(404)),
         };
+        self.note_people(&t);
         match rk {
             Rk::Episode { .. } => self.mark_watched_rows(token, &t, std::slice::from_mut(&mut row)),
             _ => {
@@ -561,6 +601,18 @@ impl Bridge {
             if let Some(r) = memo.get(&rk_s).cloned() {
                 let mut media = r.media.clone();
                 apply_tracks(&mut media, a, s);
+                // an episode's pick is the show's language from now on
+                if let Some(Rk::Episode { id, .. }) = Rk::decode(&rk_s) {
+                    let (audio_lang, sub_lang) = (audio.and_then(|a| stream_language(&media, 2, a)),
+                                                  sub.map(|s| if s == 0 { String::new() } else { stream_language(&media, 3, s).unwrap_or_default() }));
+                    if audio_lang.is_some() || sub_lang.is_some() {
+                        self.change_config(|c| {
+                            let m = c.shows.entry(id.clone()).or_default();
+                            if audio_lang.is_some() { m.audio_lang = audio_lang.clone(); }
+                            if sub_lang.is_some() { m.sub_lang = sub_lang.clone(); }
+                        });
+                    }
+                }
                 memo.insert(rk_s, Arc::new(Resolved { streams: r.streams.clone(), chosen: r.chosen, media, at: r.at }));
             }
         }

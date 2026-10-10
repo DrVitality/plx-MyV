@@ -84,6 +84,11 @@ fn iso_day(days_ago: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
+/// [`iso_day`], for the bridge's other modules.
+pub(super) fn iso_day_pub(days_ago: i64) -> String {
+    iso_day(days_ago)
+}
+
 /// `2026-10-14` as `Oct 14`.
 fn pretty_day(day: &str) -> String {
     const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -519,7 +524,7 @@ impl Bridge {
             for rk in self.continue_targets(token, WARM_CONTINUE) {
                 self.warm(token, rk);
             }
-            self.devmode_reminder();
+            self.start_reminders(token);
         }
         response
     }
@@ -952,6 +957,7 @@ impl Bridge {
         let row = match &rk {
             Rk::Item { .. } => {
                 let mut row = catalog::detail_row(&t, shelf, &self.art);
+                self.note_people(&t);
                 if let Some(deck) = self.on_deck(token, &t, shelf) {
                     row["OnDeck"] = deck;
                 }
@@ -1108,7 +1114,8 @@ impl Bridge {
     /// shows ("2160p · HDR · Cached · 18.2 GB"), `summary` the addon and file name. The container's
     /// `offset` is the index that plays now (the viewer's choice, else the best), -1 for none.
     /// No URL leaves the bridge: a debrid link carries the service's key.
-    pub(super) fn choices(&self, token: &str, rk_s: &str) -> Response {
+    pub(super) fn choices(&self, req: &Request, token: &str, rk_s: &str) -> Response {
+        let instant = req.query("instant") == Some("1");
         let Some(rk) = Rk::decode(rk_s) else { return Response::empty(404) };
         let ranked = match self.ranked_streams(token, &rk) {
             Ok(r) => r,
@@ -1118,7 +1125,8 @@ impl Bridge {
         let rows: Vec<Value> = ranked
             .iter()
             .enumerate()
-            .filter(|(_, (s, _, _))| s.url.is_some())
+            .filter(|(_, (s, f, _))| s.url.is_some()
+                && !(instant && f.ready == super::super::streams::Ready::Uncached))
             .map(|(i, (s, f, _))| {
                 // the file's name, else the release name the addon wrote first
                 let file = s.filename.as_deref()
@@ -1296,7 +1304,7 @@ impl Bridge {
                 }))
             })
             .collect();
-        let mut tv = self.tv_info();
+        let mut tv = self.tv_info(token);
         tv["phone"] = match super::super::remote::info() {
             Some((url, pin)) => json!({"url": url, "pin": pin}),
             None => Value::Null,
@@ -1566,5 +1574,130 @@ impl Bridge {
         let page: Vec<Value> = rows.iter().skip(start).take(size).cloned().collect();
         Response::json(200, &container(json!({"size": page.len(), "totalSize": rows.len(), "offset": start,
                                               "Metadata": page})))
+    }
+}
+
+/// More Like This tiles at most.
+const RELATED_ROWS: usize = 20;
+/// Search results a person page reads the cast of, per kind.
+const PERSON_CANDIDATES: usize = 16;
+
+impl Bridge {
+    /// Remember the names behind a title's people ids, so their pages can be opened.
+    pub(super) fn note_people(&self, t: &Title) {
+        let mut people = self.people.lock().unwrap_or_else(|e| e.into_inner());
+        if people.len() > 4000 {
+            people.clear();
+        }
+        for name in t.cast.iter().chain(&t.directors).chain(&t.writers) {
+            people.insert(catalog::person_id(name), name.clone());
+        }
+    }
+
+    /// `GET /library/metadata/{rk},{rk},…`: several titles' rows at once (a person page reads its
+    /// shelves' rows this way). Plain rows, no streams resolved.
+    pub(super) fn metadata_many(&self, token: &str, list: &str) -> Response {
+        let Ok(addons) = self.addons(token) else { return Response::empty(502) };
+        let rks: Vec<Rk> = list.split(',').filter_map(Rk::decode).take(60).collect();
+        let jobs: Vec<Box<dyn FnOnce() -> Option<Title> + Send + '_>> = rks.iter()
+            .map(|rk| {
+                let addons = &addons;
+                Box::new(move || {
+                    let (stype, id) = rk.show();
+                    self.title(addons, stype, id)
+                }) as Box<dyn FnOnce() -> Option<Title> + Send + '_>
+            })
+            .collect();
+        let rows: Vec<Value> = parallel(jobs).into_iter().flatten().flatten()
+            .map(|t| catalog::detail_row(&t, row_shelf(Lib::of_title(&t.stype, &t.id)), &self.art))
+            .collect();
+        Response::json(200, &container(json!({"size": rows.len(), "Metadata": rows})))
+    }
+
+    /// `GET /library/metadata/{rk}/related`: **More Like This** — titles of the same kind in the
+    /// title's first genres (from the library's catalog that filters by genre), leaving out the
+    /// title itself and anything the account has watched.
+    pub(super) fn related(&self, token: &str, rk_s: &str) -> Response {
+        let empty = || Response::json(200, &container(json!({"size": 0, "Hub": []})));
+        let Some(rk) = Rk::decode(rk_s) else { return empty() };
+        let Ok(addons) = self.addons(token) else { return empty() };
+        let (stype, id) = rk.show();
+        let Some(t) = self.title(&addons, stype, id) else { return empty() };
+        let lib = Lib::of_title(&t.stype, &t.id);
+        let all = self.shelves(&addons);
+        let Some((s, offered)) = shelves_of(&all, lib).into_iter().find_map(|(_, s)| {
+            let c = &addons[s.addon].manifest.catalogs[s.catalog];
+            let e = c.extra.iter().find(|e| e.name == "genre" && !e.options.is_empty())?;
+            Some((s, e.options.clone()))
+        }) else { return empty() };
+        let genres: Vec<String> = t.genres.iter()
+            .filter_map(|g| offered.iter().find(|o| o.eq_ignore_ascii_case(g)).cloned())
+            .take(2)
+            .collect();
+        let jobs: Vec<Box<dyn FnOnce() -> Vec<Title> + Send + '_>> = genres.iter()
+            .map(|g| Box::new(move || self.catalog_page_in(&addons[s.addon], (s.addon, s.catalog), 0, None, Some(g.as_str())))
+                as Box<dyn FnOnce() -> Vec<Title> + Send + '_>)
+            .collect();
+        let pages: Vec<Vec<Title>> = parallel(jobs).into_iter().map(Option::unwrap_or_default).collect();
+        let items = self.library_items(token);
+        let mut seen: std::collections::HashSet<String> = items.iter()
+            .filter(|it| watched_at_all(it))
+            .filter_map(|it| it.get("_id").and_then(Value::as_str).map(str::to_string))
+            .collect();
+        seen.insert(t.id.clone());
+        let mut titles: Vec<Title> = Vec::new();
+        let longest = pages.iter().map(Vec::len).max().unwrap_or(0);
+        'fill: for i in 0..longest {
+            for page in &pages {
+                if let Some(x) = page.get(i).filter(|x| seen.insert(x.id.clone())) {
+                    titles.push(x.clone());
+                    if titles.len() >= RELATED_ROWS {
+                        break 'fill;
+                    }
+                }
+            }
+        }
+        if titles.is_empty() {
+            return empty();
+        }
+        let rows = self.rows(&titles, lib);
+        let kind = if matches!(rk, Rk::Item { kind: catalog::Kind::Movie, .. }) { "movie" } else { "show" };
+        Response::json(200, &container(json!({"size": 1, "Hub": [{
+            "hubIdentifier": format!("{kind}.similar"), "title": "More Like This", "type": kind,
+            "size": rows.len(), "Metadata": rows,
+        }]})))
+    }
+
+    /// `GET /library/people/{id}/media`: what a person is in — the search catalogs asked for their
+    /// name, each answer kept only when its own cast or crew names them (a search for a name also
+    /// finds titles that merely contain it).
+    pub(super) fn person_media(&self, token: &str, id: &str) -> Response {
+        let empty = || Response::json(200, &container(json!({"size": 0, "Metadata": []})));
+        let name = id.parse::<i64>().ok()
+            .and_then(|id| self.people.lock().unwrap_or_else(|e| e.into_inner()).get(&id).cloned());
+        let Some(name) = name else { return empty() };
+        let Ok(addons) = self.addons(token) else { return empty() };
+        let mut candidates: Vec<Title> = Vec::new();
+        for stype in ["movie", "series"] {
+            let catalogs: Vec<(usize, usize)> = library::search_catalogs(&addons, stype).into_iter()
+                .filter(|(a, _)| self.with_config(|c| c.addon_on(&addons[*a], super::super::api::Resource::Catalog)))
+                .take(1)
+                .collect();
+            for (a, c) in catalogs {
+                candidates.extend(self.catalog_page(&addons[a], (a, c), 0, Some(&name)).into_iter().take(PERSON_CANDIDATES));
+            }
+        }
+        let jobs: Vec<Box<dyn FnOnce() -> Option<Title> + Send + '_>> = candidates.iter()
+            .map(|c| {
+                let addons = &addons;
+                Box::new(move || self.title(addons, &c.stype, &c.id)) as Box<dyn FnOnce() -> Option<Title> + Send + '_>
+            })
+            .collect();
+        let named = |list: &[String]| list.iter().any(|n| n.trim().eq_ignore_ascii_case(name.trim()));
+        let rows: Vec<Value> = parallel(jobs).into_iter().flatten().flatten()
+            .filter(|t| named(&t.cast) || named(&t.directors) || named(&t.writers))
+            .map(|t| catalog::title_row(&t, row_shelf(Lib::of_title(&t.stype, &t.id)), &self.art))
+            .collect();
+        Response::json(200, &container(json!({"size": rows.len(), "Metadata": rows})))
     }
 }

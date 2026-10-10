@@ -119,6 +119,8 @@
     "many": "{count} créditos · Más recientes primero.",
     "other": "{count} créditos · Más recientes primero."
   },
+  "browse.menu.instant_only": "Solo instantáneas",
+  "browse.player.still_watching": "¿Sigues viendo? Pulsa OK para continuar.",
   "browse.peek.imdb": "IMDb {score}",
   "browse.peek.hint_play": "OK reproduce · mantén OK para más",
   "browse.peek.hint_details": "OK abre · mantén OK para más",

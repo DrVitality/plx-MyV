@@ -466,6 +466,14 @@
     },
     "description": "browse person credits"
   },
+  "browse.menu.instant_only": {
+    "value": "Instant only",
+    "description": "Stream picker switch: list only streams that start at once (cached on the debrid service)"
+  },
+  "browse.player.still_watching": {
+    "value": "Still watching? Press OK to keep going.",
+    "description": "Toast when the next episode starts paused after several episodes in a row with no button pressed"
+  },
   "browse.peek.imdb": {
     "value": "IMDb {score}",
     "description": "Details bubble facts line: the title's IMDb score, e.g. IMDb 8.1",

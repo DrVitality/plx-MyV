@@ -1445,6 +1445,35 @@
       "hours": "str"
     }
   },
+  "settings.stremio.debrid": {
+    "value": "Real-Debrid",
+    "description": "Addons & Home row: the Real-Debrid account"
+  },
+  "settings.stremio.debrid_left": {
+    "value": "{days} days left",
+    "description": "Addons & Home: days of Real-Debrid premium left",
+    "args": {
+      "days": "str"
+    }
+  },
+  "settings.stremio.debrid_unknown": {
+    "value": "Unknown",
+    "description": "Addons & Home: no Real-Debrid key found or it did not answer"
+  },
+  "settings.stremio.debrid_toast": {
+    "value": "Real-Debrid premium ends in {days} days.",
+    "description": "Toast when Real-Debrid premium is about to end",
+    "args": {
+      "days": "str"
+    }
+  },
+  "settings.stremio.new_episodes_toast": {
+    "value": "New episodes: {list}",
+    "description": "Toast on opening the app: new episodes of saved shows",
+    "args": {
+      "list": "str"
+    }
+  },
   "settings.stremio.title": {
     "value": "Addons & Home",
     "description": "Settings row and page title: Stremio addons and Home rows"

@@ -57,6 +57,12 @@ pub(super) struct StreamMemory {
     pub resolution: u32,
     #[serde(default)]
     pub addon: String,
+    /// The audio language last picked for the show (a stream's `languageCode`), if one was.
+    #[serde(default)]
+    pub audio_lang: Option<String>,
+    /// The subtitle language last picked for the show; `Some("")` = subtitles off.
+    #[serde(default)]
+    pub sub_lang: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -67,6 +73,9 @@ pub(super) struct Config {
     pub addons: Vec<AddonPref>,
     #[serde(default)]
     pub shows: HashMap<String, StreamMemory>,
+    /// The day (`YYYY-MM-DD`) new episodes were last announced, so each is announced once.
+    #[serde(default)]
+    pub announced_through: String,
 }
 
 /// One row Home can show, resolved against the installed addons.

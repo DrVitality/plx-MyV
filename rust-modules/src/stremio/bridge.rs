@@ -79,6 +79,9 @@ pub struct Bridge {
     /// The viewer's Home rows, addon switches and per-show stream memory ([`config`]).
     config: Mutex<config::Config>,
     config_path: Option<std::path::PathBuf>,
+    /// The people the app may open a page for, by their bridge id (`catalog::person_id`): filled as
+    /// title pages are read, since the id is a hash of the name.
+    people: Mutex<HashMap<i64, String>>,
     /// Each addon host's last answer: whether it answered, and how long it took.
     health: Mutex<HashMap<String, (bool, Duration)>>,
     /// The bridge itself, for background work (warming a stream); set by [`Bridge::share`].
@@ -140,6 +143,7 @@ impl Bridge {
             config: Mutex::new(config::load(config::path().as_ref())),
             config_path: config::path(),
             health: Mutex::new(HashMap::new()),
+            people: Mutex::new(HashMap::new()),
             me: std::sync::OnceLock::new(),
             warming: Mutex::new(std::collections::HashSet::new()),
             home_cache_served: std::sync::atomic::AtomicBool::new(false),
@@ -279,14 +283,17 @@ impl Bridge {
             ["hubs", "continueWatching"] => self.continue_watching(req, token),
             ["hubs", "search"] => self.search(req, token),
             ["library", "metadata", rk] if rk.starts_with(content::LISTING) => self.listing_header(token, rk),
+            ["library", "metadata", rk] if rk.contains(',') => self.metadata_many(token, rk),
             ["library", "metadata", rk] => self.metadata(token, rk),
+            ["library", "metadata", rk, "related"] => self.related(token, rk),
+            ["library", "people", id, "media"] => self.person_media(token, id),
             ["library", "collections", rk, "children"] => self.listing_children(req, token, rk),
             ["library", "metadata", rk, "children"] => self.children(token, rk),
             ["library", "metadata", rk, "allLeaves"] => self.all_leaves(token, rk),
             ["library", "metadata", rk, "subtitles"] => self.subtitle_search(req, token, rk),
             ["stremio", "art", key] => self.art(key),
             ["stremio", "streams", rk] => self.streams_route(token, rk),
-            ["stremio", "choices", rk] => self.choices(token, rk),
+            ["stremio", "choices", rk] => self.choices(req, token, rk),
             ["stremio", "choose", rk] => self.choose(req, rk),
             ["stremio", "library", rk] => self.library_toggle(req, token, rk),
             ["stremio", "config"] => self.config_route(req, token),

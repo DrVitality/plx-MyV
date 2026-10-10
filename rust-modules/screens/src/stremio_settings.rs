@@ -58,6 +58,7 @@ enum Id {
     Phone,
     Updates,
     DevMode,
+    Debrid,
 }
 
 impl FormId for Id {
@@ -74,6 +75,7 @@ impl FormId for Id {
             Id::Phone => 9,
             Id::Updates => 10,
             Id::DevMode => 11,
+            Id::Debrid => 12,
             Id::HomeRow(i) => 100 + u32::from(*i),
             Id::Addon(i) => 2000 + u32::from(*i),
         })
@@ -331,13 +333,19 @@ fn build(state: &State) -> (Form<Id, Act, SettingsPage>, String, String) {
                 Some(h) => msg::settings_stremio_devmode_left(&h.to_string()),
                 None => msg::settings_stremio_devmode_unknown().to_string(),
             };
+            let debrid = match config.debrid_days {
+                Some(d) => msg::settings_stremio_debrid_left(&d.to_string()),
+                None => msg::settings_stremio_debrid_unknown().to_string(),
+            };
             let tv = FormSection::new(msg::settings_stremio_tv_section())
                 .item(Id::Phone, RowKind::Button, Act::Open,
                     Row::new(msg::settings_stremio_phone()).detail(phone).server_detail())
                 .item(Id::Updates, RowKind::Button, Act::Open,
                     Row::new(msg::settings_stremio_updates()).value(update))
                 .item(Id::DevMode, RowKind::Button, Act::Open,
-                    Row::new(msg::settings_stremio_devmode()).value(devmode));
+                    Row::new(msg::settings_stremio_devmode()).value(devmode))
+                .item(Id::Debrid, RowKind::Button, Act::Open,
+                    Row::new(msg::settings_stremio_debrid()).value(debrid));
             let mut form = Form::new().section(rows).section(addons).section(tv);
             if state.failed {
                 form = form.section(retry());
@@ -483,6 +491,7 @@ mod tests {
             phone: Some(("http://192.0.2.10:32499".into(), "1234".into())),
             update: Some(false),
             devmode_hours: Some(900),
+            debrid_days: Some(40),
         }
     }
 

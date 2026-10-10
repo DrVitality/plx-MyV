@@ -1055,3 +1055,79 @@ fn search_offers_every_result_on_its_own_scrolling_page() {
     assert_eq!(page["MediaContainer"]["Metadata"][0]["title"], "Alien");
     assert_eq!(page["MediaContainer"]["totalSize"], 1);
 }
+
+#[test]
+fn a_title_page_offers_more_like_it_leaving_out_what_was_watched() {
+    let mut s = content_scripted();
+    s.addons[0].manifest.catalogs[0].extra.push(ExtraProp { name: "genre".into(), is_required: false,
+        options: vec!["Drama".into(), "Crime".into()] });
+    s.pages.insert("https://v3-cinemeta.example/meta/movie/tt0111161.json".into(), json!({"meta": {
+        "id": "tt0111161", "type": "movie", "name": "The Shawshank Redemption", "genres": ["Drama"]}}));
+    s.pages.insert("https://v3-cinemeta.example/catalog/movie/top/genre=Drama.json".into(), metas(json!([
+        {"id": "tt0111161", "type": "movie", "name": "The Shawshank Redemption"},
+        {"id": "tt0068646", "type": "movie", "name": "The Godfather"},
+        {"id": "tt0050083", "type": "movie", "name": "12 Angry Men"},
+    ])));
+    let b = bridge_with(s);
+    let rk = Rk::item("movie", "tt0111161").unwrap().encode();
+    let got = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{rk}/related"))));
+    let hub = &got["MediaContainer"]["Hub"][0];
+    assert_eq!(hub["title"], "More Like This");
+    let titles: Vec<&str> = hub["Metadata"].as_array().unwrap().iter().map(|r| r["title"].as_str().unwrap()).collect();
+    assert_eq!(titles, ["The Godfather", "12 Angry Men"], "not the title itself");
+}
+
+#[test]
+fn an_actor_page_lists_the_titles_whose_cast_names_them() {
+    let mut s = content_scripted();
+    s.pages.insert("https://v3-cinemeta.example/catalog/movie/top/search=Tim%20Robbins.json".into(), metas(json!([
+        {"id": "tt0111161", "type": "movie", "name": "The Shawshank Redemption"},
+        {"id": "tt0068646", "type": "movie", "name": "The Godfather"},
+    ])));
+    s.pages.insert("https://v3-cinemeta.example/meta/movie/tt0068646.json".into(), json!({"meta": {
+        "id": "tt0068646", "type": "movie", "name": "The Godfather", "cast": ["Marlon Brando"]}}));
+    let b = bridge_with(s);
+    let rk = Rk::item("movie", "tt0111161").unwrap().encode();
+    let page = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{rk}"))));
+    let role = &page["MediaContainer"]["Metadata"][0]["Role"][0];
+    assert_eq!(role["tag"], "Tim Robbins");
+    assert!(role.get("tagKey").is_none(), "no plex.tv person key: the account key would follow it there");
+    let id = role["id"].as_i64().unwrap();
+    assert_eq!(id, super::catalog::person_id("Tim Robbins"));
+    let media = json_of(&b.handle(&authed("GET", &format!("/library/people/{id}/media"))));
+    let titles: Vec<&str> = media["MediaContainer"]["Metadata"].as_array().unwrap().iter().map(|r| r["title"].as_str().unwrap()).collect();
+    assert_eq!(titles, ["The Shawshank Redemption"], "a search hit that does not cast them is left out");
+}
+
+#[test]
+fn the_stream_picker_can_list_only_instant_streams() {
+    let b = content_bridge();
+    let rk = Rk::item("movie", "tt0111161").unwrap().encode();
+    let all = json_of(&b.handle(&authed("GET", &format!("/stremio/choices/{rk}"))));
+    let instant = json_of(&b.handle(&authed("GET", &format!("/stremio/choices/{rk}?instant=1"))));
+    assert_eq!(all["MediaContainer"]["Metadata"].as_array().unwrap().len(), 2);
+    let rows = instant["MediaContainer"]["Metadata"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0]["title"].as_str().unwrap().contains("Instant"));
+}
+
+#[test]
+fn turning_subtitles_off_on_one_episode_carries_to_the_next() {
+    let mut s = content_scripted();
+    for ep in ["1:1", "1:2"] {
+        s.pages.insert(format!("https://torrentio.example/stream/series/tt0944947:{ep}.json"), json!({"streams": [
+            {"name": "[RD+] Torrentio\n1080p", "title": format!("GoT.S01E0{}.1080p.WEB.x264-TOP", &ep[2..]), "url": format!("https://t/top/{ep}")},
+        ]}));
+        s.files.insert(format!("https://t/top/{ep}"), sample_mkv());
+    }
+    let b = bridge_with(s);
+    let e1 = Rk::Episode { stype: "series".into(), id: "tt0944947".into(), video: "tt0944947:1:1".into() }.encode();
+    let e2 = Rk::Episode { stype: "series".into(), id: "tt0944947".into(), video: "tt0944947:1:2".into() }.encode();
+    let first = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{e1}"))));
+    let part = first["MediaContainer"]["Metadata"][0]["Media"][0]["Part"][0]["id"].as_i64().unwrap();
+    assert_eq!(b.handle(&authed("PUT", &format!("/library/parts/{part}?subtitleStreamID=0"))).status, 200);
+    let second = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{e2}"))));
+    let streams = second["MediaContainer"]["Metadata"][0]["Media"][0]["Part"][0]["Stream"].as_array().unwrap();
+    assert!(streams.iter().filter(|s| s["streamType"] == 3).all(|s| s["selected"] != true),
+            "the next episode starts with subtitles off too: {streams:?}");
+}

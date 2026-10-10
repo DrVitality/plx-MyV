@@ -691,7 +691,13 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
         // takes seconds), then present it over the same card (`stream_pick_tick`).
         Action::ChooseStream(rk) => {
             if let Some(mm) = item.as_ref().filter(|m| m.rk == rk && matches!(m.kind, 0 | 3)) {
-                bridge.stream_pick = StreamPickAwait::start(StreamPickJob::List, sid, mm, req_origin, from_home, now);
+                bridge.stream_pick = StreamPickAwait::start(StreamPickJob::List { instant: false }, sid, mm, req_origin, from_home, now);
+            }
+        }
+        // The picker's Instant only switch: the same list asked again, narrowed or not.
+        Action::StreamsInstant { rk, on } => {
+            if let Some(mm) = item.as_ref().filter(|m| m.rk == rk && matches!(m.kind, 0 | 3)) {
+                bridge.stream_pick = StreamPickAwait::start(StreamPickJob::List { instant: on }, sid, mm, req_origin, from_home, now);
             }
         }
         // A picked stream: record the choice on a worker, then play the captured item.
@@ -767,8 +773,9 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
 /// Which half of the stream picker a [`StreamPickAwait`] is waiting on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StreamPickJob {
-    /// *Choose Stream*: the list of streams, to present as a menu.
-    List,
+    /// *Choose Stream*: the list of streams, to present as a menu (`instant`: only those that
+    /// start at once).
+    List { instant: bool },
     /// A picked row: the choice of the stream at this index of the ranked list, then play.
     Choose(i64),
 }
@@ -816,7 +823,7 @@ impl StreamPickAwait {
         let rk = item.rk.clone();
         let started = plx_base::task::spawn_off_frame("stream picker", move |_| {
             let answer = match job {
-                StreamPickJob::List => match client.stream_choices(&rk) {
+                StreamPickJob::List { instant } => match client.stream_choices_narrowed(&rk, instant) {
                     Some(mc) => StreamPickAnswer::Listed(plx_screens::registry::StreamChoice::from_container(&mc)),
                     None => StreamPickAnswer::Failed,
                 },
@@ -858,7 +865,7 @@ pub(super) fn stream_pick_tick<R: super::playback::PlaybackResources>(
                 let job = wait.job;
                 bridge.stream_pick = None;
                 plx_base::eventlog::log(match job {
-                    StreamPickJob::List => "stream picker: the stream list could not be read",
+                    StreamPickJob::List { .. } => "stream picker: the stream list could not be read",
                     StreamPickJob::Choose(_) => "stream picker: the choice could not be recorded",
                 });
                 notify(plx_platform::i18n::msg::browse_menu_no_streams());
@@ -891,7 +898,8 @@ fn present_stream_picker(
     wait: &StreamPickAwait,
     choices: Vec<plx_screens::registry::StreamChoice>,
 ) {
-    if choices.is_empty() {
+    // an Instant only list that came back empty still opens, so its switch can be turned off
+    if choices.is_empty() && !matches!(wait.job, StreamPickJob::List { instant: true }) {
         plx_base::eventlog::log("stream picker: no playable stream");
         notify(plx_platform::i18n::msg::browse_menu_no_streams());
         return;
@@ -902,6 +910,7 @@ fn present_stream_picker(
         kind: plx_screens::registry::ItemMenuKind::Streams {
             row: Box::new(wait.item.clone()),
             choices: choices.into(),
+            instant: matches!(wait.job, StreamPickJob::List { instant: true }),
         },
         host: wait.origin.host,
         focus: wait.origin.focus,

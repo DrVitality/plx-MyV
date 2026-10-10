@@ -111,6 +111,9 @@ pub enum Action {
     SaveToLibrary(String),
     /// take it out of the library
     RemoveFromLibrary(String),
+    /// the stream picker's Instant only switch: list the streams again, `on` = only those that
+    /// start at once
+    StreamsInstant { rk: String, on: bool },
 }
 
 impl Action {
@@ -144,7 +147,7 @@ impl Action {
             | Action::ChooseStream(rk)
             | Action::SaveToLibrary(rk)
             | Action::RemoveFromLibrary(rk) => rk,
-            Action::PlayTrailer { rk, .. } | Action::PlayStream { rk, .. } => rk,
+            Action::PlayTrailer { rk, .. } | Action::PlayStream { rk, .. } | Action::StreamsInstant { rk, .. } => rk,
         }
     }
 
@@ -163,8 +166,12 @@ impl Action {
             Action::PlayStream { .. } => 10,
             Action::SaveToLibrary(_) => 11,
             Action::RemoveFromLibrary(_) => 12,
+            Action::StreamsInstant { .. } => 13,
         };
         c.u32(tag).str(self.rk());
+        if let Action::StreamsInstant { on, .. } = self {
+            c.bool(*on);
+        }
         if let Action::PlayStream { index, .. } = self {
             c.u32(*index as u32);
         }
@@ -226,6 +233,8 @@ pub enum ItemRow {
     Library,
     /// A stream picker row, by its place in the picker.
     Stream(u16),
+    /// The stream picker's Instant only switch.
+    InstantOnly,
 }
 
 impl ItemRow {
@@ -249,6 +258,7 @@ impl FormId for ItemRow {
             ItemRow::Play => 8,
             ItemRow::ChooseStream => 9,
             ItemRow::Library => 10,
+            ItemRow::InstantOnly => 11,
             ItemRow::Stream(i) => 100 + u32::from(*i),
         })
     }
@@ -511,8 +521,13 @@ fn build_season(rk: &str, mark: PosterMark) -> ItemForm {
 /// The stream picker: one row per stream, best first, the one that plays now ticked. The line is
 /// the bridge's (resolution · picture · readiness · size) and the detail the addon and file name,
 /// both server text. A press plays the card's item from that stream ([`Action::PlayStream`]).
-fn build_streams(rk: &str, choices: &[crate::registry::StreamChoice]) -> ItemForm {
-    let mut sec = FormSection::new(plx_platform::i18n::msg::browse_menu_streams_title());
+fn build_streams(rk: &str, choices: &[crate::registry::StreamChoice], instant: bool) -> ItemForm {
+    let mut sec = FormSection::new(plx_platform::i18n::msg::browse_menu_streams_title()).item(
+        ItemRow::InstantOnly,
+        RowKind::Toggle,
+        Action::StreamsInstant { rk: rk.to_string(), on: !instant },
+        Row::new(plx_platform::i18n::msg::browse_menu_instant_only()).toggle(instant),
+    );
     for (i, ch) in choices.iter().enumerate().take(usize::from(u16::MAX)) {
         sec = sec.item(
             ItemRow::Stream(i as u16),
@@ -615,7 +630,7 @@ impl ItemMenuScreen {
             }
             ItemMenuKind::Episode { mark } => build_episode(&self.arg.rk, *mark),
             ItemMenuKind::Season { mark } => build_season(&self.arg.rk, *mark),
-            ItemMenuKind::Streams { row, choices } => build_streams(&row.rk, choices),
+            ItemMenuKind::Streams { row, choices, instant } => build_streams(&row.rk, choices, *instant),
         };
         // a short list of one-line actions — BODY labels, not menu-size HEADLINE
         self.form.table.compact = true;

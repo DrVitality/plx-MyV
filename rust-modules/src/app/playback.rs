@@ -72,6 +72,54 @@ pub(crate) fn frames() -> i32 {
 pub(crate) fn seek_pending() -> i64 {
     plx_media::player::seek_pending()
 }
+/// **"Are you still watching?"**: episodes started on their own (Up Next's countdown, or the end
+/// of the last one) since the viewer last pressed anything. Past [`STILL_WATCHING_AFTER`], the
+/// next one starts paused and asks ([`still_watching_tick`]), so a sleeping viewer does not run
+/// a debrid account through a whole season.
+static AUTO_IN_A_ROW: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// The next episode is to pause as soon as it shows a picture.
+static PAUSE_WHEN_SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The input time last seen, so any press resets the count.
+static LAST_INPUT_SEEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// Episodes in a row that start on their own before the next one asks.
+const STILL_WATCHING_AFTER: u32 = 3;
+
+/// An episode is about to start on its own: count it, and arm the pause once the count is past
+/// [`STILL_WATCHING_AFTER`].
+pub(crate) fn note_auto_advance() {
+    use std::sync::atomic::Ordering::Relaxed;
+    if AUTO_IN_A_ROW.fetch_add(1, Relaxed) + 1 > STILL_WATCHING_AFTER {
+        AUTO_IN_A_ROW.store(0, Relaxed);
+        PAUSE_WHEN_SHOWN.store(true, Relaxed);
+    }
+}
+
+/// Every frame: any press resets the count; an armed pause lands on the first picture of the
+/// episode that started, with a toast that says why.
+pub(crate) fn still_watching_tick(pa: &mut plx_media::player::adapter::PlayerAdapter, last_input: u32, player_up: bool) {
+    use std::sync::atomic::Ordering::Relaxed;
+    if LAST_INPUT_SEEN.swap(last_input, Relaxed) != last_input {
+        AUTO_IN_A_ROW.store(0, Relaxed);
+    }
+    if !PAUSE_WHEN_SHOWN.load(Relaxed) {
+        return;
+    }
+    if !player_up {
+        PAUSE_WHEN_SHOWN.store(false, Relaxed);
+        return;
+    }
+    if plx_media::player::seen_frame() && is_started() {
+        PAUSE_WHEN_SHOWN.store(false, Relaxed);
+        if plx_media::player::lifecycle::set_transport_paused(pa, true) {
+            log("still watching: paused after episodes in a row with no press");
+            let message = plx_platform::i18n::msg::browse_player_still_watching().to_owned();
+            plx_base::task::spawn_small("still watching notice", move || {
+                let _ = plx_platform::tv::toast::toast(&message);
+            });
+        }
+    }
+}
+
 /// Settings > Video & playback > Skip intros, as last applied (`boot::apply_appearance`).
 static AUTO_SKIP_INTROS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -767,6 +815,7 @@ pub(crate) fn finish_playback(
     if plx_media::route::next_episode_mode() != plx_media::route::NextEpisodeMode::Off
         && play_up_next(ps, pa, HUD_LINGER_MS, pages, bridge)
     {
+        note_auto_advance();
         return true;
     }
     exit_player(ps, pa, refresh_hubs_at, pages);

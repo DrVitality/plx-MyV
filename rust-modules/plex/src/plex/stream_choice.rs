@@ -28,6 +28,14 @@ impl Client {
     }
 
     /// Plays the `index`-th stream of the ranked list for `rating_key` from now on.
+    /// [`Self::stream_choices`], `instant` keeping only the streams that start at once.
+    pub fn stream_choices_narrowed(&self, rating_key: &str, instant: bool) -> Option<MediaContainer> {
+        if !instant {
+            return self.stream_choices(rating_key);
+        }
+        self.get_json(&format!("/stremio/choices/{}?instant=1", urlenc_str(rating_key)))
+    }
+
     pub fn choose_stream(&self, rating_key: &str, index: i64) -> bool {
         self.get_json(&format!("/stremio/choose/{}?index={index}", urlenc_str(rating_key))).is_some()
     }
