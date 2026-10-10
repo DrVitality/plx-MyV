@@ -2023,7 +2023,11 @@ SIM_PRE = mkdir -p $(SIM_DIR); test -n "$(SIM_PMS)" || \
 FFMPEG_HOST_PREFIX = vendor/ffmpeg-prefix-host
 FFMPEG_HOST_INC    = $(FFMPEG_HOST_PREFIX)/include
 FFMPEG_HOST_NAMES  = libavutil-plx.61 libavcodec-plx.63 libavformat-plx.63 libswscale-plx.10
-FFMPEG_HOST_STAGED = $(addprefix pkg/,$(addsuffix .dylib,$(FFMPEG_HOST_NAMES)))
+# On Linux (the Windows/WSL simulator) the host build is ELF, staged as `libavformat-plx-host.so.63`
+# and so on so it neither collides with the ARM copies in pkg/ nor matches `make ipk`'s glob
+# (`ci/stage-host-ffmpeg.sh` says why the SONAME inside can stay as it is).
+FFMPEG_HOST_LINUX  = libavutil-plx-host.so.61 libavcodec-plx-host.so.63 libavformat-plx-host.so.63 libswscale-plx-host.so.10
+FFMPEG_HOST_STAGED = $(if $(filter Darwin,$(shell uname -s)),$(addprefix pkg/,$(addsuffix .dylib,$(FFMPEG_HOST_NAMES))),$(addprefix pkg/,$(FFMPEG_HOST_LINUX)))
 LIBASS_HOST_NAME = $(if $(filter Darwin,$(shell uname -s)),libass-plx.0.dylib,libass-plx-host.so.0)
 LIBASS_HOST_STAGED = pkg/$(LIBASS_HOST_NAME)
 
@@ -2042,7 +2046,11 @@ check-ass: $(LIBASS_HOST_STAGED)
 $(FFMPEG_HOST_INC)/libavformat/avformat.h: ci/build-ffmpeg.sh
 	HOST=1 ./ci/build-ffmpeg.sh
 
-$(FFMPEG_HOST_STAGED): pkg/%.dylib: $(FFMPEG_HOST_INC)/libavformat/avformat.h ci/stage-host-ffmpeg.sh
+$(addprefix pkg/,$(addsuffix .dylib,$(FFMPEG_HOST_NAMES))): pkg/%.dylib: $(FFMPEG_HOST_INC)/libavformat/avformat.h ci/stage-host-ffmpeg.sh
+	@mkdir -p pkg
+	./ci/stage-host-ffmpeg.sh $*
+
+$(addprefix pkg/,$(FFMPEG_HOST_LINUX)): pkg/%: $(FFMPEG_HOST_INC)/libavformat/avformat.h ci/stage-host-ffmpeg.sh
 	@mkdir -p pkg
 	./ci/stage-host-ffmpeg.sh $*
 
@@ -2050,7 +2058,7 @@ $(FFMPEG_HOST_STAGED): pkg/%.dylib: $(FFMPEG_HOST_INC)/libavformat/avformat.h ci
 # FFmpeg to call, so a property of `ci/build-ffmpeg.sh`'s COMPONENT LIST (which demuxer features,
 # which decoders) is invisible to it. These tests load the host build of that same list and are
 # `#[ignore]`d in the plain suite; the first is the zlib-compressed PGS track that no configure
-# flag change may silently drop again (`ff_image_subtitle_tests.rs`). macOS only, like the staging.
+# flag change may silently drop again (`ff_image_subtitle_tests.rs`). macOS and Linux, like the staging.
 check-ffmpeg: $(FFMPEG_HOST_STAGED)
 	cd rust-modules && CARGO_INCREMENTAL=0 PLX_FFMPEG_DIR=$(CURDIR)/pkg PATH="$$HOME/.cargo/bin:$$PATH" \
 	  cargo +$(RUST_NIGHTLY) test --lib -p plx_media ff::image_subtitle_tests -- --ignored
@@ -2123,10 +2131,12 @@ screenshots: screenshots-sim demo-library
 	  $(if $(SHOT_HERO_VARIANTS),--hero-variants,)
 	python3 tools/demo_library.py site-credits
 
-# Optimized Linux UI/Plex simulator with no host FFmpeg prerequisite. It runs natively on Linux;
-# Windows/WSLg uses the same binary through `tools/sim.ps1`. Play intentionally reaches the host
-# seam's existing "no video path" result.
-sim-linux: $(LIBASS_HOST_STAGED)
+# Optimized Linux simulator. It runs natively on Linux; Windows/WSLg uses the same binary through
+# `tools/sim.ps1`. Since the host FFmpeg is a prerequisite here too it can STREAM: with the
+# `plxnative-clocksink` trigger the demux runs against real network sources, and with
+# `plxnative-simvideo` a system `ffmpeg` paints the picture under the UI (no sound, nothing about
+# LG's decoder — see `player/sim_video.rs`). `tools/sim.ps1 run` arms both.
+sim-linux: $(FFMPEG_HOST_STAGED) $(LIBASS_HOST_STAGED) pkg/.ffabi-host-ok
 	$(TELEMETRY_ENV) \
 	  cargo build --release --manifest-path rust-modules/Cargo.toml --target-dir "$$SIM_LINUX_TDIR_ENV" \
 	  --features hostsim --bin plxnative-sim
@@ -2135,9 +2145,8 @@ sim-linux: $(LIBASS_HOST_STAGED)
 # drives it). Release, because a dump is a render of thousands of 1080p frames; its own target dir,
 # because the feature set differs from every other simulator build; `--no-default-features` because
 # `devtools` draws a frame counter into the picture, and `placeholder-sentinel` because the second
-# oracle is the sentinel colour. Like `sim-linux` it needs only libass: the storyboard plays no
-# video, so no host FFmpeg (whose staged names are `.dylib`s, which is what keeps
-# `screenshots-sim` macOS-only). It builds on macOS (previews) and on Linux, where
+# oracle is the sentinel colour. It needs only libass: the storyboard plays no video, so no host
+# FFmpeg. It builds on macOS (previews) and on Linux, where
 # `.github/workflows/site-video.yml` builds and runs it: that render is the canonical one.
 SITE_VIDEO_TDIR ?= $(SIM_TDIR)-video
 SITE_VIDEO_BIN   = $(SITE_VIDEO_TDIR)/release/plxnative-sim

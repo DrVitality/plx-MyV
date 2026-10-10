@@ -155,12 +155,13 @@ runtime="${PLX_RUNTIME:-$HOME/.local/state/plxnative-sim}"
 target="${PLX_TARGET:-$HOME/.cache/plxnative-sim/target}"
 assets="${PLX_ASSETS:-$HOME/.local/share/plxnative-sim/assets}"
 mkdir -p "$runtime" "$target" "$assets"
-# All launch paths use the same build-and-stage operation. The ASS library is
-# produced by make, and the process loads it from PLXNATIVE_APP_DIR, not pkg/.
+# All launch paths use the same build-and-stage operation. The ASS and FFmpeg libraries are
+# produced by make, and the process loads them from PLXNATIVE_APP_DIR, not pkg/.
 build_simulator() {
     cd "$repo"
     make sim-wsl SIM_TDIR="$target"
-    for file in appfont.ttf appfont-bold.ttf appfont-cjk.ttf OFL.txt le-roots.pem libass-plx-host.so.0; do
+    for file in appfont.ttf appfont-bold.ttf appfont-cjk.ttf OFL.txt le-roots.pem libass-plx-host.so.0 \
+                libavutil-plx-host.so.61 libavcodec-plx-host.so.63 libavformat-plx-host.so.63 libswscale-plx-host.so.10; do
         staged="$assets/$file.$$.new"
         install -m 0644 "$repo/pkg/$file" "$staged"
         mv -f "$staged" "$assets/$file"
@@ -194,6 +195,11 @@ export PLXNATIVE_RUNTIME_DIR="$runtime"
 export PLXNATIVE_APP_DIR="$assets"
 export PLXNATIVE_WIN=1920x1080
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-x11}"
+# Playback on this computer: the clock sink accepts the demuxed stream and keeps time, and a system
+# ffmpeg paints the picture under the UI (`rust-modules/media/src/player/sim_video.rs`). No sound,
+# and nothing it shows says anything about the television's decoder.
+touch "$runtime/plxnative-clocksink" "$runtime/plxnative-simvideo"
+command -v ffmpeg >/dev/null 2>&1 || echo "No system ffmpeg: the player will keep time but show no picture (run 'sim.ps1 setup')." >&2
 '@
 
 $instanceLocks = @'
@@ -219,7 +225,7 @@ switch ($Action) {
 set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y build-essential cmake pkg-config libsdl2-dev libsdl2-ttf-dev libgl1-mesa-dev mesa-utils curl ca-certificates util-linux
+apt-get install -y build-essential cmake pkg-config libsdl2-dev libsdl2-ttf-dev libgl1-mesa-dev mesa-utils curl ca-certificates util-linux zlib1g-dev ffmpeg
 '@
         Invoke-WslShell -Script @'
 set -e
