@@ -21,12 +21,35 @@ const JSON_TTL: Duration = Duration::from_secs(600);
 pub(super) const LIBRARY_TTL: Duration = Duration::from_secs(60);
 /// Rows per shelf on Home and on a library's shelves.
 const SHELF_ROWS: usize = 20;
-/// Shelves per library on Home.
-const HOME_SHELVES_PER_LIB: usize = 2;
 /// Search catalogs asked per kind, and rows kept per kind.
 const SEARCH_CATALOGS: usize = 2;
 /// Pages of a catalog fetched at most to serve one request.
 const MAX_PAGES: usize = 10;
+
+/// Cards on Home's My Library row.
+const LIBRARY_ROWS: usize = 40;
+/// How recent an episode New Episodes shows, in days.
+const NEW_EPISODE_DAYS: i64 = 21;
+/// Saved shows New Episodes looks at, most recently changed first.
+const NEW_EPISODE_SHOWS: usize = 24;
+
+/// Is this library item one the account saved (not removed, not a temporary watch entry)?
+pub(super) fn is_saved(it: &Value) -> bool {
+    !it.get("removed").and_then(Value::as_bool).unwrap_or(false)
+        && !it.get("temp").and_then(Value::as_bool).unwrap_or(false)
+        && it.get("type").and_then(Value::as_str).is_some_and(|t| t != "other")
+}
+
+/// The UTC date `days_ago` days before today, as `YYYY-MM-DD` (how Stremio dates episodes).
+fn iso_day(days_ago: i64) -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+        - days_ago * 86_400;
+    let (y, m, d) = plx_net::net::civil_date(secs);
+    format!("{y:04}-{m:02}-{d:02}")
+}
 
 /// Runs `jobs` side by side and returns their results in order. A job whose thread the OS refuses
 /// runs inline instead, so a refusal costs time, never an answer.
@@ -185,7 +208,32 @@ impl Bridge {
     }
 
     fn rows(&self, titles: &[Title], lib: Lib) -> Vec<Value> {
-        titles.iter().map(|t| catalog::title_row(t, row_shelf(lib), &self.art)).collect()
+        let saved = self.saved_ids();
+        titles
+            .iter()
+            .map(|t| {
+                let mut row = catalog::title_row(t, row_shelf(lib), &self.art);
+                if saved.contains(&t.id) {
+                    row["stremioInLibrary"] = json!(true);
+                }
+                row
+            })
+            .collect()
+    }
+
+    /// The ids the account has SAVED in its library (not removed, not a temporary watch entry),
+    /// as last read — never a fetch of its own, so a row built before the library was read simply
+    /// carries no mark.
+    pub(super) fn saved_ids(&self) -> std::collections::HashSet<String> {
+        let memo = self.library.lock().unwrap_or_else(|e| e.into_inner());
+        memo.as_ref()
+            .map(|(_, _, items)| {
+                items.iter()
+                    .filter(|it| is_saved(it))
+                    .filter_map(|it| it.get("_id").and_then(Value::as_str).map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     // ---------------------------------------------------------------- libraries
@@ -195,7 +243,7 @@ impl Bridge {
             Ok(addons) => addons,
             Err(e) => return api_failure(e),
         };
-        let all = library::shelves(&addons);
+        let all = self.shelves(&addons);
         let rows: Vec<Value> = library::libraries(&all)
             .into_iter()
             .map(|lib| json!({"key": lib.key().to_string(), "type": lib.section_type(), "title": lib.title(),
@@ -212,7 +260,7 @@ impl Bridge {
             Ok(addons) => addons,
             Err(e) => return api_failure(e),
         };
-        let all = library::shelves(&addons);
+        let all = self.shelves(&addons);
         let (start, size) = window(req, 60);
         let Some((_, first)) = shelves_of(&all, lib).into_iter().next() else {
             return Response::json(200, &container(json!({"Metadata": [], "totalSize": 0, "offset": start})));
@@ -241,7 +289,7 @@ impl Bridge {
             Ok(addons) => addons,
             Err(e) => return api_failure(e),
         };
-        let all = library::shelves(&addons);
+        let all = self.shelves(&addons);
         let hubs = self.hubs_for(&addons, &all, &shelves_of(&all, lib));
         Response::json(200, &container(json!({"size": hubs.len(), "Hub": hubs})))
     }
@@ -277,7 +325,19 @@ impl Bridge {
             Ok(addons) => addons,
             Err(e) => return api_failure(e),
         };
-        let all = library::shelves(&addons);
+        // the bridge's own rows, whole
+        let own = match n {
+            "library" => Some(self.library_rows(token, usize::MAX)),
+            "new_episodes" => Some(self.new_episode_rows(token, &addons)),
+            _ => None,
+        };
+        if let Some(rows) = own {
+            let (start, size) = window(req, 60);
+            let page: Vec<Value> = rows.iter().skip(start).take(size).cloned().collect();
+            return Response::json(200, &container(json!({"size": page.len(), "totalSize": rows.len(),
+                                                         "offset": start, "Metadata": page})));
+        }
+        let all = self.shelves(&addons);
         let Some(s) = n.parse::<usize>().ok().and_then(|n| all.get(n).copied()) else {
             return Response::empty(404);
         };
@@ -291,26 +351,149 @@ impl Bridge {
 
     // ---------------------------------------------------------------- Home
 
-    /// Home: Continue Watching, then the first shelves of each library.
+    /// Home: the rows the viewer switched on, in their order (Settings > Addons & Home; by
+    /// default Continue Watching, New Episodes, the first shelves of each library, My Library).
     pub(super) fn home_hubs(&self, req: &Request, token: &str) -> Response {
+        use super::config::HomeRow;
         let addons = match self.addons(token) {
             Ok(addons) => addons,
             Err(e) => return api_failure(e),
         };
-        let all = library::shelves(&addons);
-        let picked: Vec<(usize, Shelf)> = Lib::ALL
+        let all = self.shelves(&addons);
+        // read first: the library marks every catalog row built below
+        let _ = self.library_items(token);
+        let rows: Vec<HomeRow> = self.with_config(|c| c.home_rows(&addons, &all))
             .into_iter()
-            .flat_map(|lib| shelves_of(&all, lib).into_iter().take(HOME_SHELVES_PER_LIB))
+            .filter(|(_, _, shown)| *shown)
+            .map(|(_, row, _)| row)
+            .collect();
+        let picked: Vec<(usize, Shelf)> = rows
+            .iter()
+            .filter_map(|r| match r {
+                HomeRow::Shelf(n) => all.get(*n).map(|s| (*n, *s)),
+                _ => None,
+            })
+            .collect();
+        let mut by_shelf: std::collections::HashMap<String, Value> = self
+            .hubs_for(&addons, &all, &picked)
+            .into_iter()
+            .filter_map(|h| Some((h.get("hubIdentifier")?.as_str()?.to_string(), h)))
             .collect();
         let mut hubs = Vec::new();
-        if req.query("excludeContinueWatching") != Some("1") {
-            let rows = self.continue_rows(token, SHELF_ROWS);
-            hubs.push(json!({"title": "Continue Watching", "type": "mixed",
-                             "hubIdentifier": "home.continue", "key": "/hubs/continueWatching",
-                             "size": rows.len(), "Metadata": rows}));
+        for row in rows {
+            match row {
+                HomeRow::Continue => {
+                    if req.query("excludeContinueWatching") != Some("1") {
+                        let rows = self.continue_rows(token, SHELF_ROWS);
+                        hubs.push(json!({"title": "Continue Watching", "type": "mixed",
+                                         "hubIdentifier": "home.continue", "key": "/hubs/continueWatching",
+                                         "size": rows.len(), "Metadata": rows}));
+                    }
+                }
+                HomeRow::NewEpisodes => {
+                    let rows = self.new_episode_rows(token, &addons);
+                    if !rows.is_empty() {
+                        hubs.push(json!({"title": "New Episodes", "type": "episode",
+                                         "hubIdentifier": "stremio.new_episodes", "key": "/hubs/stremio/new_episodes",
+                                         "size": rows.len(), "Metadata": rows}));
+                    }
+                }
+                HomeRow::Library => {
+                    let rows = self.library_rows(token, LIBRARY_ROWS);
+                    if !rows.is_empty() {
+                        hubs.push(json!({"title": "My Library", "type": "mixed",
+                                         "hubIdentifier": "stremio.library", "key": "/hubs/stremio/library",
+                                         "size": rows.len(), "Metadata": rows}));
+                    }
+                }
+                HomeRow::Shelf(n) => {
+                    if let Some(h) = by_shelf.remove(&format!("stremio.shelf.{n}")) {
+                        hubs.push(h);
+                    }
+                }
+            }
         }
-        hubs.extend(self.hubs_for(&addons, &all, &picked));
         Response::json(200, &container(json!({"size": hubs.len(), "Hub": hubs})))
+    }
+
+    /// My Library: what the account saved, most recently changed first.
+    pub(super) fn library_rows(&self, token: &str, count: usize) -> Vec<Value> {
+        let items = self.library_items(token);
+        let mut saved: Vec<&Value> = items.iter().filter(|it| is_saved(it)).collect();
+        saved.sort_by(|a, b| {
+            let at = |v: &Value| v.get("_mtime").and_then(Value::as_str).unwrap_or("").to_string();
+            at(b).cmp(&at(a))
+        });
+        saved.into_iter().take(count).filter_map(|it| self.library_row(it)).collect()
+    }
+
+    /// One saved item as a card: the film (playable from the card), or the show.
+    fn library_row(&self, it: &Value) -> Option<Value> {
+        let id = it.get("_id")?.as_str()?;
+        let stype = it.get("type")?.as_str()?;
+        let rk = Rk::item(stype, id)?;
+        let rk_s = rk.encode();
+        let lib = Lib::of_title(stype, id);
+        let mut row = json!({
+            "ratingKey": rk_s, "key": format!("/library/metadata/{rk_s}"),
+            "title": it.get("name").and_then(Value::as_str).unwrap_or(id),
+            "librarySectionID": lib.key(), "librarySectionTitle": lib.title(),
+            "stremioInLibrary": true,
+        });
+        let obj = row.as_object_mut()?;
+        if let Some(p) = it.get("poster").and_then(Value::as_str).filter(|p| !p.is_empty()) {
+            obj.insert("thumb".into(), json!(self.art.path(p)));
+        }
+        if matches!(rk, Rk::Item { kind: catalog::Kind::Movie, .. }) {
+            obj.insert("type".into(), json!("movie"));
+            let duration = it.pointer("/state/duration").and_then(Value::as_i64).unwrap_or(0);
+            obj.insert("Media".into(), catalog::placeholder_media(&rk_s, (duration > 0).then_some(duration / 60_000)));
+        } else {
+            obj.insert("type".into(), json!("show"));
+        }
+        Some(row)
+    }
+
+    /// New Episodes: for each show the account saved, its newest episode released within the
+    /// last [`NEW_EPISODE_DAYS`] days, newest first.
+    pub(super) fn new_episode_rows(&self, token: &str, addons: &[Addon]) -> Vec<Value> {
+        let items = self.library_items(token);
+        let shows: Vec<(String, String)> = items
+            .iter()
+            .filter(|it| is_saved(it))
+            .filter_map(|it| {
+                let stype = it.get("type")?.as_str()?;
+                let id = it.get("_id")?.as_str()?;
+                if stype == "movie" || stype == "other" {
+                    return None;
+                }
+                Some((stype.to_string(), id.to_string()))
+            })
+            .take(NEW_EPISODE_SHOWS)
+            .collect();
+        let (today, since) = (iso_day(0), iso_day(NEW_EPISODE_DAYS));
+        let jobs: Vec<Box<dyn FnOnce() -> Option<Title> + Send + '_>> = shows
+            .iter()
+            .map(|(stype, id)| {
+                Box::new(move || self.title(addons, stype, id)) as Box<dyn FnOnce() -> Option<Title> + Send + '_>
+            })
+            .collect();
+        let mut found: Vec<(String, Value)> = parallel(jobs)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|t| {
+                let e = t.videos.iter()
+                    .filter(|e| e.season > 0 && e.released.as_deref().is_some_and(|d| d >= since.as_str() && d <= today.as_str()))
+                    .max_by(|a, b| a.released.cmp(&b.released).then((a.season, a.episode).cmp(&(b.season, b.episode))))?;
+                let lib = Lib::of_title(&t.stype, &t.id);
+                let mut row = catalog::episode_row(&t, e, row_shelf(lib), &self.art, true);
+                row["stremioInLibrary"] = json!(true);
+                Some((e.released.clone().unwrap_or_default(), row))
+            })
+            .collect();
+        found.sort_by(|a, b| b.0.cmp(&a.0));
+        found.into_iter().map(|(_, row)| row).collect()
     }
 
     pub(super) fn continue_watching(&self, req: &Request, token: &str) -> Response {
@@ -437,7 +620,9 @@ impl Bridge {
         let mut hubs = Vec::new();
         for (stype, wire) in [("movie", "movie"), ("series", "show")] {
             let catalogs: Vec<(usize, usize)> =
-                library::search_catalogs(&addons, stype).into_iter().take(SEARCH_CATALOGS).collect();
+                library::search_catalogs(&addons, stype).into_iter()
+                    .filter(|(a, _)| self.with_config(|c| c.addon_on(&addons[*a], super::super::api::Resource::Catalog)))
+                    .take(SEARCH_CATALOGS).collect();
             let q = query.as_str();
             let addons_ref = &addons;
             let jobs: Vec<Box<dyn FnOnce() -> Vec<Title> + Send + '_>> = catalogs
@@ -596,7 +781,9 @@ impl Bridge {
             Rk::Season { .. } => return Err(Response::empty(404)),
         };
         let addons = self.addons(token).map_err(api_failure)?;
-        let providers: Vec<&Addon> = library::stream_providers(&addons, stype, id).collect();
+        let providers: Vec<&Addon> = library::stream_providers(&addons, stype, id)
+            .filter(|a| self.with_config(|c| c.addon_on(a, super::super::api::Resource::Stream)))
+            .collect();
         let jobs: Vec<Box<dyn FnOnce() -> Vec<Stream> + Send + '_>> = providers
             .iter()
             .map(|&addon| {
@@ -658,7 +845,10 @@ impl Bridge {
             .enumerate()
             .filter(|(_, (s, _, _))| s.url.is_some())
             .map(|(i, (s, f, _))| {
-                let file = s.filename.as_deref().unwrap_or(s.name.as_str());
+                // the file's name, else the release name the addon wrote first
+                let file = s.filename.as_deref()
+                    .or_else(|| s.detail.lines().next().filter(|l| !l.trim().is_empty()))
+                    .unwrap_or(s.name.as_str());
                 json!({
                     "ratingKey": rk_s, "key": format!("/stremio/choose/{rk_s}?index={i}"),
                     "type": "clip", "index": i, "title": choice_label(f),
@@ -704,4 +894,124 @@ fn choice_label(f: &super::super::streams::Facts) -> String {
         parts.push(if gb >= 1.0 { format!("{gb:.1} GB") } else { format!("{:.0} MB", gb * 1024.0) });
     }
     parts.join(" · ")
+}
+
+// ---------------------------------------------------------------- the account's library
+
+impl Bridge {
+    /// `/stremio/library/{rk}?add=1|0`: save the title (a film, or an episode's show) in the
+    /// account's library, or take it out. Answers `{"inLibrary": bool}` with what now holds.
+    pub(super) fn library_toggle(&self, req: &Request, token: &str, rk_s: &str) -> Response {
+        let Some(rk) = Rk::decode(rk_s) else { return Response::empty(404) };
+        let add = req.query("add") != Some("0");
+        let (stype, id) = rk.show();
+        let now = super::play::now_iso();
+        let items = self.library_items(token);
+        let item = match items.iter().find(|it| it.get("_id").and_then(Value::as_str) == Some(id)) {
+            Some(existing) => {
+                let mut it = existing.clone();
+                it["removed"] = json!(!add);
+                it["temp"] = json!(false);
+                it["_mtime"] = json!(now);
+                it
+            }
+            None if !add => return Response::json(200, &json!({"inLibrary": false})),
+            None => {
+                let addons = match self.addons(token) {
+                    Ok(addons) => addons,
+                    Err(e) => return api_failure(e),
+                };
+                let Some(t) = self.title(&addons, stype, id) else { return Response::empty(404) };
+                json!({
+                    "_id": id, "name": t.name, "type": stype, "poster": t.poster,
+                    "posterShape": "poster", "removed": false, "temp": false, "_ctime": now, "_mtime": now,
+                    "state": {"lastWatched": null, "timeWatched": 0, "timeOffset": 0, "overallTimeWatched": 0,
+                              "timesWatched": 0, "flaggedWatched": 0, "duration": 0, "video_id": null,
+                              "watched": null, "noNotif": false},
+                    "behaviorHints": {"defaultVideoId": null, "featuredVideoId": null, "hasScheduledVideos": false},
+                })
+            }
+        };
+        match self.stremio.library_put(token, &[item]) {
+            Ok(()) => {
+                *self.library.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                super::super::note_home_changed();
+                Response::json(200, &json!({"inLibrary": add}))
+            }
+            Err(e) => api_failure(e),
+        }
+    }
+
+    /// `/stremio/config`: the Home rows and addons Settings lists, after the change the query
+    /// names, if any — `op=show&id=…&on=0|1`, `op=move&id=…&to=N`, `op=streams|catalogs&id=…&on=0|1`.
+    pub(super) fn config_route(&self, req: &Request, token: &str) -> Response {
+        use super::super::api::Resource;
+        let addons = match self.addons(token) {
+            Ok(addons) => addons,
+            Err(e) => return api_failure(e),
+        };
+        let on = req.query("on") != Some("0");
+        let id = req.query("id").unwrap_or("").to_string();
+        let changed = match req.query("op") {
+            Some("show") => {
+                let all = self.shelves(&addons);
+                self.change_config(|c| c.show_row(&addons, &all, &id, on));
+                true
+            }
+            Some("move") => {
+                let all = self.shelves(&addons);
+                let to = req.query("to").and_then(|t| t.parse().ok()).unwrap_or(0);
+                self.change_config(|c| c.move_row(&addons, &all, &id, to));
+                true
+            }
+            Some("streams") => {
+                self.change_config(|c| c.set_addon(&id, Resource::Stream, on));
+                true
+            }
+            Some("catalogs") => {
+                self.change_config(|c| c.set_addon(&id, Resource::Catalog, on));
+                true
+            }
+            _ => false,
+        };
+        if changed {
+            super::super::note_home_changed();
+        }
+        let all = self.shelves(&addons);
+        let rows: Vec<Value> = self
+            .with_config(|c| c.home_rows(&addons, &all))
+            .into_iter()
+            .map(|(id, row, shown)| {
+                let (title, detail) = match row {
+                    super::config::HomeRow::Continue => ("Continue Watching".to_string(), "What you are watching".to_string()),
+                    super::config::HomeRow::NewEpisodes => ("New Episodes".to_string(), "Shows in your library".to_string()),
+                    super::config::HomeRow::Library => ("My Library".to_string(), "What you saved".to_string()),
+                    super::config::HomeRow::Shelf(n) => {
+                        let s = all[n];
+                        (shelf_title(&addons, &all, s), format!("{} · {}", s.lib.title(), addons[s.addon].manifest.name.trim()))
+                    }
+                };
+                json!({"id": id, "title": title, "detail": detail, "shown": shown})
+            })
+            .collect();
+        let list: Vec<Value> = addons
+            .iter()
+            .map(|a| {
+                let streams = a.has(Resource::Stream);
+                let catalogs = a.has(Resource::Catalog) && a.manifest.catalogs.iter().any(|c| c.browsable());
+                let mut does = Vec::new();
+                if streams { does.push("streams"); }
+                if catalogs { does.push("catalogs"); }
+                if a.has(Resource::Meta) { does.push("details"); }
+                if a.has(Resource::Subtitles) { does.push("subtitles"); }
+                self.with_config(|c| json!({
+                    "id": super::config::addon_id(a), "name": a.manifest.name.trim(),
+                    "detail": does.join(", "),
+                    "streams": streams.then(|| c.addon_on(a, Resource::Stream)),
+                    "catalogs": catalogs.then(|| c.addon_on(a, Resource::Catalog)),
+                }))
+            })
+            .collect();
+        Response::json(200, &json!({"rows": rows, "addons": list}))
+    }
 }

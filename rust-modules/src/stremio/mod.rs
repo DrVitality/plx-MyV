@@ -43,6 +43,20 @@ pub fn apply_stream_prefs(res: u8, instant_only: bool) {
     streams::set_prefs(streams::Prefs { max_res, instant_only });
 }
 
+static HOME_CHANGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Something Home shows changed behind the app's back (a library add or remove, a Home-row or
+/// addon setting): the app refetches its hubs once. Clears the flag.
+pub fn take_home_changed() -> bool {
+    HOME_CHANGED.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Raised by the bridge after such a change.
+pub(crate) fn note_home_changed() {
+    HOME_CHANGED.store(true, std::sync::atomic::Ordering::Relaxed);
+    plx_machine::present::wake_from_worker();
+}
+
 /// The resolution caps Settings offers, best first: none, 1080p, 720p.
 pub const STREAM_RES_LADDER: [u32; 3] = [0, 1080, 720];
 use std::sync::Arc;

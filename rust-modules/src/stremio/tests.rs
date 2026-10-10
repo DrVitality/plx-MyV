@@ -80,6 +80,7 @@ fn addon(url: &str, name: &str, resources: Value, types: &[&str], prefixes: Opti
     Addon {
         transport_url: url.into(),
         manifest: Manifest {
+            id: format!("org.example.{}", name.to_ascii_lowercase()),
             name: name.into(),
             catalogs,
             resources: resources.as_array().cloned().unwrap_or_default(),
@@ -416,7 +417,72 @@ fn a_library_shelf_is_each_of_its_catalogs_and_home_leads_with_continue_watching
     assert_eq!(cw[0]["title"], "Game of Thrones");
     assert_eq!(cw[0]["summary"], "Continue S1 · E2");
     assert_eq!(cw[0]["ratingKey"], Rk::item("series", "tt0944947").unwrap().encode());
-    assert_eq!(hubs.len(), 4, "Continue Watching plus a shelf from each library: {hubs:?}");
+    assert_eq!(hubs.len(), 5, "Continue Watching, a shelf from each library, My Library: {hubs:?}");
+    // My Library: what the account saved (not removed), marked as saved
+    let mine = hubs.last().unwrap();
+    assert_eq!(mine["hubIdentifier"], "stremio.library");
+    let titles: Vec<&str> = mine["Metadata"].as_array().unwrap().iter().map(|r| r["title"].as_str().unwrap()).collect();
+    assert!(titles.contains(&"Game of Thrones") && titles.contains(&"The Godfather"), "{titles:?}");
+    assert!(!titles.contains(&"The Shawshank Redemption"), "a removed item is not saved");
+    // a catalog row of a saved title says so, which is what the card menu's Library row reads
+    let movies = hubs.iter().find(|h| h["title"] == "Popular" && h["type"] == "movie").unwrap();
+    let godfather = movies["Metadata"].as_array().unwrap().iter().find(|r| r["title"] == "The Godfather").unwrap();
+    assert_eq!(godfather["stremioInLibrary"], true);
+}
+
+#[test]
+fn home_rows_follow_the_viewers_switches_and_order() {
+    let b = content_bridge();
+    let config = json_of(&b.handle(&authed("GET", "/stremio/config")));
+    let ids: Vec<String> = config["rows"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap().to_string()).collect();
+    assert_eq!(ids[0], "continue");
+    assert!(ids.contains(&"library".to_string()) && ids.contains(&"new_episodes".to_string()));
+    // hide Continue Watching, move My Library to the top
+    b.handle(&authed("GET", "/stremio/config?op=show&id=continue&on=0"));
+    let after = json_of(&b.handle(&authed("GET", "/stremio/config?op=move&id=library&to=0")));
+    assert_eq!(after["rows"][0]["id"], "library");
+    assert_eq!(after["rows"][1]["id"], "continue");
+    assert_eq!(after["rows"][1]["shown"], false);
+    let home = json_of(&b.handle(&authed("GET", "/hubs")));
+    let hubs = home["MediaContainer"]["Hub"].as_array().unwrap();
+    assert_eq!(hubs[0]["hubIdentifier"], "stremio.library");
+    assert!(hubs.iter().all(|h| h["hubIdentifier"] != "home.continue"), "a hidden row is not on Home");
+    assert!(super::take_home_changed(), "the app is told to refetch Home");
+}
+
+#[test]
+fn an_addon_switched_off_for_catalogs_leaves_every_library_and_for_streams_every_list() {
+    let b = content_bridge();
+    let config = json_of(&b.handle(&authed("GET", "/stremio/config")));
+    let addons = config["addons"].as_array().unwrap();
+    let kitsu = addons.iter().find(|a| a["name"] == "Kitsu").unwrap();
+    assert_eq!(kitsu["catalogs"], true);
+    assert!(kitsu["streams"].is_null(), "Kitsu offers no streams to switch");
+    let id = kitsu["id"].as_str().unwrap();
+    b.handle(&authed("GET", &format!("/stremio/config?op=catalogs&id={id}&on=0")));
+    let listed = json_of(&b.handle(&authed("GET", "/library/sections")));
+    let titles: Vec<&str> = listed["MediaContainer"]["Directory"].as_array().unwrap().iter()
+        .map(|d| d["title"].as_str().unwrap()).collect();
+    assert_eq!(titles, ["Movies", "TV Shows"], "no anime catalog is left");
+
+    let torrentio = addons.iter().find(|a| a["name"] == "Torrentio").unwrap();
+    assert_eq!(torrentio["streams"], true);
+    let tid = torrentio["id"].as_str().unwrap();
+    b.handle(&authed("GET", &format!("/stremio/config?op=streams&id={tid}&on=0")));
+    let rk = Rk::item("movie", "tt0111161").unwrap().encode();
+    let got = json_of(&b.handle(&authed("GET", &format!("/stremio/streams/{rk}"))));
+    assert_eq!(got["streams"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn saving_and_removing_a_title_writes_the_library() {
+    let s = content_scripted();
+    let b = bridge_with(s);
+    let rk = Rk::item("movie", "tt0111161").unwrap().encode();
+    let added = json_of(&b.handle(&authed("GET", &format!("/stremio/library/{rk}?add=1"))));
+    assert_eq!(added["inLibrary"], true);
+    let removed = json_of(&b.handle(&authed("GET", &format!("/stremio/library/{rk}?add=0"))));
+    assert_eq!(removed["inLibrary"], false);
 }
 
 #[test]
@@ -524,6 +590,60 @@ fn the_stream_picker_lists_playable_streams_and_names_the_one_that_plays() {
 }
 
 // ---------------------------------------------------------------- playback
+
+#[test]
+fn a_dead_first_stream_falls_through_to_the_next_that_answers() {
+    let mut s = content_scripted();
+    s.pages.insert("https://torrentio.example/stream/movie/tt0111161.json".into(), json!({"streams": [
+        {"name": "[RD+] Torrentio\n1080p", "title": "Dead.1080p.WEB.x264-AAA", "url": "https://t/dead"},
+        {"name": "[RD+] Torrentio\n1080p", "title": "Alive.1080p.WEB.x264-BBB", "url": "https://t/alive"},
+    ]}));
+    s.files.insert("https://t/alive".into(), sample_mkv());
+    let b = bridge_with(s);
+    let rk = Rk::item("movie", "tt0111161").unwrap().encode();
+    let detail = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{rk}"))));
+    let part = detail["MediaContainer"]["Metadata"][0]["Media"][0]["Part"][0]["key"].as_str().unwrap().to_string();
+    let played = b.handle(&authed("GET", &part));
+    assert_eq!(played.location.as_deref(), Some("https://t/alive"));
+}
+
+#[test]
+fn the_next_episode_plays_from_the_release_the_last_one_did() {
+    let mut s = content_scripted();
+    for ep in ["1:1", "1:2"] {
+        s.pages.insert(format!("https://torrentio.example/stream/series/tt0944947:{ep}.json"), json!({"streams": [
+            {"name": "[RD+] Torrentio\n1080p", "title": format!("GoT.S01E0{}.1080p.WEB.x264-TOP", &ep[2..]), "url": format!("https://t/top/{ep}")},
+            {"name": "[RD+] Torrentio\n1080p", "title": format!("GoT.S01E0{}.1080p.WEB.x264-MINE", &ep[2..]), "url": format!("https://t/mine/{ep}")},
+        ]}));
+    }
+    let b = bridge_with(s);
+    let e1 = Rk::Episode { stype: "series".into(), id: "tt0944947".into(), video: "tt0944947:1:1".into() }.encode();
+    let e2 = Rk::Episode { stype: "series".into(), id: "tt0944947".into(), video: "tt0944947:1:2".into() }.encode();
+    // the viewer picks MINE for episode 1
+    b.handle(&authed("GET", &format!("/stremio/choose/{e1}?index=1")));
+    let _ = b.handle(&authed("GET", &format!("/library/metadata/{e1}")));
+    // episode 2, never picked, follows the same release group
+    let page = json_of(&b.handle(&authed("GET", &format!("/stremio/choices/{e2}"))));
+    let playing = page["MediaContainer"]["offset"].as_i64().unwrap();
+    let row = page["MediaContainer"]["Metadata"].as_array().unwrap().iter().find(|r| r["index"] == playing).unwrap();
+    assert!(row["summary"].as_str().unwrap().contains("MINE"), "{row}");
+}
+
+#[test]
+fn aniskip_openings_and_endings_become_markers() {
+    let v = json!({"found": true, "results": [
+        {"interval": {"startTime": 90.5, "endTime": 180.0}, "skipType": "op"},
+        {"interval": {"startTime": 1300.0, "endTime": 1390.0}, "skipType": "ed"},
+        {"interval": {"startTime": 5.0, "endTime": 2.0}, "skipType": "op"},
+    ]});
+    let m = super::bridge::aniskip_markers_for_test(&v, 1_420_000);
+    assert_eq!(m.len(), 2);
+    assert_eq!(m[0]["type"], "intro");
+    assert_eq!(m[0]["startTimeOffset"], 90_500);
+    assert_eq!(m[1]["type"], "credits");
+    assert_eq!(m[1]["final"], true);
+    assert!(super::bridge::aniskip_markers_for_test(&json!({"found": false}), 1_000).is_empty());
+}
 
 /// An EBML element.
 fn el(id: u32, data: &[u8]) -> Vec<u8> {

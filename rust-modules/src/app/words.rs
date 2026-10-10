@@ -173,7 +173,7 @@ mod heartbeat_word_tests {
     /// harness could not tell "opened the Home-sources editor" from "opened Settings and did
     /// nothing", so a trigger that silently failed to reach Favourites still produced a scene that
     /// passed, measuring the wrong screen.
-    const FAMILY_INNER: [&str; 7] = [
+    const FAMILY_INNER: [&str; 8] = [
         plx_screens::registry::word::PRIVACY,
         plx_screens::registry::word::LEGAL,
         plx_screens::registry::word::ONBOARD,
@@ -181,6 +181,7 @@ mod heartbeat_word_tests {
         plx_screens::registry::word::AUDIO,
         plx_screens::registry::word::APPEARANCE,
         plx_screens::registry::word::PICKER,
+        plx_screens::registry::word::ADDONS,
     ];
 
     /// **Every caller holds `plx_base::testlock::serial()` for its whole body**, because deriving

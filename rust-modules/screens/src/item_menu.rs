@@ -107,6 +107,10 @@ pub enum Action {
     /// play this film or episode from the `index`-th stream of the bridge's ranked list, and keep
     /// that stream for it from now on
     PlayStream { rk: String, index: i64 },
+    /// save this title (an episode: its show) in the account's Stremio library
+    SaveToLibrary(String),
+    /// take it out of the library
+    RemoveFromLibrary(String),
 }
 
 impl Action {
@@ -137,7 +141,9 @@ impl Action {
             | Action::Play(rk)
             | Action::PlayFromStart(rk)
             | Action::RemoveFromDeck(rk)
-            | Action::ChooseStream(rk) => rk,
+            | Action::ChooseStream(rk)
+            | Action::SaveToLibrary(rk)
+            | Action::RemoveFromLibrary(rk) => rk,
             Action::PlayTrailer { rk, .. } | Action::PlayStream { rk, .. } => rk,
         }
     }
@@ -155,6 +161,8 @@ impl Action {
             Action::Play(_) => 8,
             Action::ChooseStream(_) => 9,
             Action::PlayStream { .. } => 10,
+            Action::SaveToLibrary(_) => 11,
+            Action::RemoveFromLibrary(_) => 12,
         };
         c.u32(tag).str(self.rk());
         if let Action::PlayStream { index, .. } = self {
@@ -214,6 +222,8 @@ pub enum ItemRow {
     RemoveFromDeck,
     Play,
     ChooseStream,
+    /// Add to / Remove from My Library.
+    Library,
     /// A stream picker row, by its place in the picker.
     Stream(u16),
 }
@@ -238,6 +248,7 @@ impl FormId for ItemRow {
             ItemRow::RemoveFromDeck => 7,
             ItemRow::Play => 8,
             ItemRow::ChooseStream => 9,
+            ItemRow::Library => 10,
             ItemRow::Stream(i) => 100 + u32::from(*i),
         })
     }
@@ -355,6 +366,21 @@ fn build_with(
         RowKind::Button,
         Action::ChooseStream(m.rk.clone()),
         Row::new(plx_platform::i18n::msg::browse_menu_choose_stream()).licon(Icon::More),
+    );
+
+    // ---- the account's Stremio library: save the title, or take it out ----
+    let saved = m.in_library;
+    sec = sec.item_if(
+        leaf || m.kind == 1,
+        ItemRow::Library,
+        RowKind::Button,
+        if saved { Action::RemoveFromLibrary(m.rk.clone()) } else { Action::SaveToLibrary(m.rk.clone()) },
+        Row::new(if saved {
+            plx_platform::i18n::msg::browse_menu_library_remove()
+        } else {
+            plx_platform::i18n::msg::browse_menu_library_add()
+        })
+        .licon(if saved { Icon::MinusCircleFill } else { Icon::CheckCircleFill }),
     );
 
     // ---- and, only on a Continue Watching card, the row that takes it off the deck ----
@@ -996,11 +1022,11 @@ mod tests {
         let on = build_deck(&item(3, PosterMark::None), true, DeckPress::Details);
         assert_eq!(
             labels(&on),
-            ["Play", "Go to Show", "—", "Mark as Watched", "Play from Start", "Choose Stream", "Remove from Deck"]
+            ["Play", "Go to Show", "—", "Mark as Watched", "Play from Start", "Choose Stream", "Add to My Library", "Remove from Deck"]
         );
         assert_eq!(
             on.ids(),
-            [ItemRow::Play, ItemRow::GoToShow, ItemRow::MarkWatched, ItemRow::PlayFromStart, ItemRow::ChooseStream, ItemRow::RemoveFromDeck]
+            [ItemRow::Play, ItemRow::GoToShow, ItemRow::MarkWatched, ItemRow::PlayFromStart, ItemRow::ChooseStream, ItemRow::Library, ItemRow::RemoveFromDeck]
         );
         assert!(!on.offers(ItemRow::GoToItem), "OK on the card already opens that page");
         assert_eq!(on.action(ItemRow::Play), Action::Play("42".into()));
@@ -1012,7 +1038,7 @@ mod tests {
 
         // a movie: no navigation group at all, so no separator — not at the top, not under Play
         let movie = build_deck(&item(0, PosterMark::None), true, DeckPress::Details);
-        assert_eq!(labels(&movie), ["Play", "Mark as Watched", "Play from Start", "Choose Stream", "Remove from Deck"]);
+        assert_eq!(labels(&movie), ["Play", "Mark as Watched", "Play from Start", "Choose Stream", "Add to My Library", "Remove from Deck"]);
         assert!(!movie.offers(ItemRow::GoToItem) && !movie.offers(ItemRow::GoToShow));
         assert!(!labels(&movie).iter().any(|l| l == "—"), "{:?}", labels(&movie));
 
@@ -1020,7 +1046,7 @@ mod tests {
         let mut orphan = item(3, PosterMark::None);
         orphan.show_rk.clear();
         let orphan = build_deck(&orphan, true, DeckPress::Details);
-        assert_eq!(labels(&orphan), ["Play", "Mark as Watched", "Play from Start", "Choose Stream", "Remove from Deck"]);
+        assert_eq!(labels(&orphan), ["Play", "Mark as Watched", "Play from Start", "Choose Stream", "Add to My Library", "Remove from Deck"]);
 
         // an item with a resume point says so, in the hero pill's word
         let resuming = build_deck(&item(0, PosterMark::InProgress), true, DeckPress::Details);
@@ -1084,13 +1110,13 @@ mod tests {
                 "—",
                 "Mark as Watched",
                 "Play from Start",
-                "Choose Stream"
+                "Choose Stream", "Add to My Library"
             ]
         );
         // the separator is not a row: every BOUND row acts, and there are four of them
         assert_eq!(
             menu.ids(),
-            [ItemRow::GoToItem, ItemRow::GoToShow, ItemRow::MarkWatched, ItemRow::PlayFromStart, ItemRow::ChooseStream]
+            [ItemRow::GoToItem, ItemRow::GoToShow, ItemRow::MarkWatched, ItemRow::PlayFromStart, ItemRow::ChooseStream, ItemRow::Library]
         );
         // "Go to Show" targets the SHOW rk + the episode's season, not the episode
         match menu.action(ItemRow::GoToShow) {
@@ -1104,7 +1130,7 @@ mod tests {
         let menu = build(&item(0, PosterMark::Watched), false); // movie, viewCount >= 1
         assert_eq!(
             labels(&menu),
-            ["Go to Movie", "—", "Mark as Unwatched", "Play from Start", "Choose Stream"]
+            ["Go to Movie", "—", "Mark as Unwatched", "Play from Start", "Choose Stream", "Add to My Library"]
         );
         assert_eq!(
             menu.action(ItemRow::MarkUnwatched).watch_write(),
@@ -1130,7 +1156,7 @@ mod tests {
         let menu = build(&item(1, PosterMark::InProgress), false);
         assert_eq!(
             labels(&menu),
-            ["Go to Show", "—", "Mark as Watched", "Mark as Unwatched"]
+            ["Go to Show", "—", "Mark as Watched", "Mark as Unwatched", "Add to My Library"]
         );
         assert_eq!(
             menu.action(ItemRow::MarkWatched).watch_write(),
@@ -1144,10 +1170,10 @@ mod tests {
         // a show whose every leaf is seen is DONE, and offering to mark it watched again was the
         // old row set's other wrong answer (it read `!unwatched`, which cannot tell the two apart)
         let menu = build(&item(1, PosterMark::Watched), false);
-        assert_eq!(labels(&menu), ["Go to Show", "—", "Mark as Unwatched"]);
+        assert_eq!(labels(&menu), ["Go to Show", "—", "Mark as Unwatched", "Add to My Library"]);
         // …and one nobody has opened offers only the way forward
         let menu = build(&item(1, PosterMark::None), false);
-        assert_eq!(labels(&menu), ["Go to Show", "—", "Mark as Watched"]);
+        assert_eq!(labels(&menu), ["Go to Show", "—", "Mark as Watched", "Add to My Library"]);
     }
 
     #[test]
@@ -1159,7 +1185,7 @@ mod tests {
         let menu = build(&m, false);
         assert_eq!(
             labels(&menu),
-            ["Go to Episode", "—", "Mark as Watched", "Play from Start", "Choose Stream"]
+            ["Go to Episode", "—", "Mark as Watched", "Play from Start", "Choose Stream", "Add to My Library"]
         );
         assert!(!menu.offers(ItemRow::GoToShow));
         // and a SEASON with no parent has no navigation at all — so no leading separator either,
@@ -1189,7 +1215,7 @@ mod tests {
                 "—",
                 "Mark as Watched",
                 "Play from Start",
-                "Choose Stream"
+                "Choose Stream", "Add to My Library"
             ]
         );
         assert!(
@@ -1206,7 +1232,7 @@ mod tests {
                 "—",
                 "Mark as Watched",
                 "Play from Start",
-                "Choose Stream",
+                "Choose Stream", "Add to My Library",
                 "Remove from Deck"
             ],
             "…and on the deck it is the LAST row, after the watched toggle"
@@ -1234,7 +1260,7 @@ mod tests {
         // the shelf menu's episode rows END with exactly these two, in this order
         let shelf = build(&item(3, PosterMark::None), false);
         let shelf_labels = labels(&shelf);
-        assert_eq!(labels(&menu), shelf_labels[shelf_labels.len() - 3..shelf_labels.len() - 1]);
+        assert_eq!(labels(&menu), shelf_labels[shelf_labels.len() - 4..shelf_labels.len() - 2]);
 
         // a watched episode gets the way back instead, carrying its OWN rk (the menu captured its
         // target when it was presented — nothing here may resolve through a live focus index)
@@ -1290,15 +1316,15 @@ mod tests {
         };
         assert_eq!(
             tail(PosterMark::None),
-            ["Mark as Watched", "Play from Start", "Choose Stream"]
+            ["Mark as Watched", "Play from Start", "Choose Stream", "Add to My Library"]
         );
         assert_eq!(
             tail(PosterMark::InProgress),
-            ["Mark as Watched", "Mark as Unwatched", "Play from Start", "Choose Stream"]
+            ["Mark as Watched", "Mark as Unwatched", "Play from Start", "Choose Stream", "Add to My Library"]
         );
         assert_eq!(
             tail(PosterMark::Watched),
-            ["Mark as Unwatched", "Play from Start", "Choose Stream"]
+            ["Mark as Unwatched", "Play from Start", "Choose Stream", "Add to My Library"]
         );
 
         // …and the detail page's filmstrip, off the same builder, so the two cannot drift
@@ -1351,7 +1377,7 @@ mod tests {
         };
         assert_eq!(
             set(&movie("")),
-            ["Go to Movie", "—", "Mark as Watched", "Play from Start", "Choose Stream"],
+            ["Go to Movie", "—", "Mark as Watched", "Play from Start", "Choose Stream", "Add to My Library"],
             "never started: only the way forward"
         );
         assert_eq!(
@@ -1362,13 +1388,13 @@ mod tests {
                 "Mark as Watched",
                 "Mark as Unwatched",
                 "Play from Start",
-                "Choose Stream"
+                "Choose Stream", "Add to My Library"
             ],
             "part-watched: both ends are reachable and both are true"
         );
         assert_eq!(
             set(&movie(r#","viewCount":2"#)),
-            ["Go to Movie", "—", "Mark as Unwatched", "Play from Start", "Choose Stream"],
+            ["Go to Movie", "—", "Mark as Unwatched", "Play from Start", "Choose Stream", "Add to My Library"],
             "finished: only the way back"
         );
 
@@ -1377,17 +1403,17 @@ mod tests {
             |extra: &str| format!(r#"{{"ratingKey":"14","type":"show","leafCount":10{extra}}}"#);
         assert_eq!(
             set(&show("")),
-            ["Go to Show", "—", "Mark as Watched"],
+            ["Go to Show", "—", "Mark as Watched", "Add to My Library"],
             "no leaf viewed"
         );
         assert_eq!(
             set(&show(r#","viewedLeafCount":3"#)),
-            ["Go to Show", "—", "Mark as Watched", "Mark as Unwatched"],
+            ["Go to Show", "—", "Mark as Watched", "Mark as Unwatched", "Add to My Library"],
             "3 of 10: neither watched nor unwatched, so BOTH verbs — the case `viewCount > 0` misses"
         );
         assert_eq!(
             set(&show(r#","viewedLeafCount":10"#)),
-            ["Go to Show", "—", "Mark as Unwatched"],
+            ["Go to Show", "—", "Mark as Unwatched", "Add to My Library"],
             "all 10"
         );
 
@@ -1486,7 +1512,8 @@ mod tests {
         assert_eq!(step(GoToShow, Dir::Down), Some(key(MarkWatched))); // the separator is skipped
         assert_eq!(step(MarkWatched, Dir::Down), Some(key(PlayFromStart)));
         assert_eq!(step(PlayFromStart, Dir::Down), Some(key(ChooseStream)));
-        assert_eq!(step(ChooseStream, Dir::Down), None); // stops at the end
+        assert_eq!(step(ChooseStream, Dir::Down), Some(key(Library)));
+        assert_eq!(step(Library, Dir::Down), None); // stops at the end
         assert_eq!(step(MarkWatched, Dir::Up), Some(key(GoToShow))); // skipped back over the separator
         assert_eq!(step(GoToShow, Dir::Up), Some(key(GoToItem)));
         assert_eq!(step(GoToItem, Dir::Up), None); // stops at the start
@@ -1898,7 +1925,7 @@ mod tests {
         let menu = build(&item(0, PosterMark::None), false);
         assert_eq!(
             labels(&menu),
-            ["Go to Movie", "—", "Mark as Watched", "Play from Start", "Choose Stream"]
+            ["Go to Movie", "—", "Mark as Watched", "Play from Start", "Choose Stream", "Add to My Library"]
         );
         assert!(!menu.offers(ItemRow::PlayTrailer));
     }

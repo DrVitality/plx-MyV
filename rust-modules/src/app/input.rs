@@ -565,6 +565,7 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
     //
     // The empty-rk guard the head of this function used to carry is the SURFACE's now
     // (`ItemMenuScreen::activate`): a row with no target never becomes a request at all.
+    let save_to_library = matches!(act, Action::SaveToLibrary(_));
     match act {
         Action::GoToItem(rk) => {
             let _ = from_home; // see the note below `apply_item_action`
@@ -699,6 +700,22 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
                 bridge.stream_pick = StreamPickAwait::start(StreamPickJob::Choose(index), sid, mm, req_origin, from_home, now);
             }
         }
+        // My Library: the bridge writes the account's library and raises its Home-changed flag,
+        // which the run loop answers with one hubs refetch (the card's mark follows from it).
+        Action::SaveToLibrary(rk) | Action::RemoveFromLibrary(rk) if !rk.is_empty() => {
+            let add = save_to_library;
+            if let Some(client) = plx_plex::plex::client_for(sid) {
+                let started = plx_base::task::spawn_off_frame("my library", move |_| {
+                    if !client.stremio_library(&rk, add) {
+                        plx_base::eventlog::log("my library: the change was refused");
+                    }
+                });
+                if !started {
+                    plx_base::eventlog::log("my library: the worker was refused");
+                }
+            }
+        }
+        Action::SaveToLibrary(_) | Action::RemoveFromLibrary(_) => {}
         Action::PlayTrailer {
             rk,
             part,

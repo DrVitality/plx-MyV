@@ -72,6 +72,20 @@ pub(super) fn execute(command: PreferenceCmd) {
                 plx_machine::idle::invalidate();
             });
         }
+        PreferenceCmd::Stremio { op, reply } => {
+            let Some(client) = plx_plex::plex::client_opt() else {
+                let _ = reply.send(None);
+                plx_machine::idle::invalidate();
+                return;
+            };
+            plx_base::task::spawn_small("stremio settings", move || {
+                let config = client.stremio_get(&op.path())
+                    .as_ref()
+                    .and_then(plx_screens::registry::StremioConfig::from_json);
+                let _ = reply.send(config);
+                plx_machine::idle::invalidate();
+            });
+        }
         PreferenceCmd::SkipInterval { interval, reply } => {
             let _ = plx_base::storage_worker::submit_retained(move || {
                 let _ = reply.send(plx_media::route::set_skip_interval(interval));

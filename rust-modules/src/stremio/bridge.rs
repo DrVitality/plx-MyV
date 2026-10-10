@@ -15,6 +15,7 @@
 //! hold is short-lived — the pending sign-in codes, and minutes-long memos of the addon list, the
 //! account's library and each addon answer, so a burst of requests costs one Stremio call.
 
+mod config;
 mod content;
 mod play;
 
@@ -72,6 +73,9 @@ pub struct Bridge {
     art: ArtMap,
     /// Chosen streams, track choices, subtitles and progress bookkeeping.
     play: play::PlayState,
+    /// The viewer's Home rows, addon switches and per-show stream memory ([`config`]).
+    config: Mutex<config::Config>,
+    config_path: Option<std::path::PathBuf>,
 }
 
 fn container(fields: Value) -> Value {
@@ -115,7 +119,35 @@ impl Bridge {
             library: Mutex::new(None),
             art: ArtMap::default(),
             play: play::PlayState::default(),
+            config: Mutex::new(config::load(config::path().as_ref())),
+            config_path: config::path(),
         }
+    }
+
+    /// Read the settings under the lock.
+    fn with_config<T>(&self, f: impl FnOnce(&config::Config) -> T) -> T {
+        f(&self.config.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    /// Change the settings and keep the change.
+    fn change_config(&self, f: impl FnOnce(&mut config::Config)) {
+        let snapshot = {
+            let mut c = self.config.lock().unwrap_or_else(|e| e.into_inner());
+            f(&mut c);
+            c.clone()
+        };
+        config::save(self.config_path.as_ref(), &snapshot);
+    }
+
+    /// The catalogs in use, placed in their libraries: every browsable catalog of an addon whose
+    /// catalogs are switched on. Every shelf number (`/hubs/stremio/{n}`) indexes this list.
+    fn shelves(&self, addons: &[Addon]) -> Vec<super::library::Shelf> {
+        self.with_config(|c| {
+            super::library::shelves(addons)
+                .into_iter()
+                .filter(|s| c.addon_on(&addons[s.addon], super::api::Resource::Catalog))
+                .collect()
+        })
     }
 
     /// Answers one request.
@@ -177,6 +209,8 @@ impl Bridge {
             ["stremio", "streams", rk] => self.streams_route(token, rk),
             ["stremio", "choices", rk] => self.choices(token, rk),
             ["stremio", "choose", rk] => self.choose(req, rk),
+            ["stremio", "library", rk] => self.library_toggle(req, token, rk),
+            ["stremio", "config"] => self.config_route(req, token),
             // The part URL (`catalog::part_key`): the chosen stream, by redirect.
             ["library", "parts", _, rk, _] => self.play(token, rk),
             ["video", ":", "transcode", "universal", "decision"] => self.decision(req, token),
@@ -350,4 +384,10 @@ impl Bridge {
             Some(AddonMemo { token: token.to_string(), at: Instant::now(), addons: addons.clone() });
         Ok(addons)
     }
+}
+
+/// [`play::aniskip_markers`], for the bridge's tests.
+#[cfg(test)]
+pub fn aniskip_markers_for_test(v: &Value, duration_ms: i64) -> Vec<Value> {
+    play::aniskip_markers(v, duration_ms)
 }

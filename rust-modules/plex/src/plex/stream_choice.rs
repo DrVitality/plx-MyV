@@ -16,6 +16,17 @@ impl Client {
         self.get_json(&format!("/stremio/choices/{}", urlenc_str(rating_key)))
     }
 
+    /// Saves `rating_key` (a film, or an episode's show) in the account's library, or takes it out.
+    pub fn stremio_library(&self, rating_key: &str, add: bool) -> bool {
+        self.stremio_get(&format!("/stremio/library/{}?add={}", urlenc_str(rating_key), u8::from(add))).is_some()
+    }
+
+    /// A bridge route's plain JSON answer (not a media-server container): Settings' Home rows and
+    /// addons (`/stremio/config…`). `None` when the bridge did not answer or the body is not JSON.
+    pub fn stremio_get(&self, path: &str) -> Option<serde_json::Value> {
+        serde_json::from_slice(&self.get_json_body(path)?).ok()
+    }
+
     /// Plays the `index`-th stream of the ranked list for `rating_key` from now on.
     pub fn choose_stream(&self, rating_key: &str, index: i64) -> bool {
         self.get_json(&format!("/stremio/choose/{}?index={index}", urlenc_str(rating_key))).is_some()

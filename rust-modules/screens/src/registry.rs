@@ -92,6 +92,77 @@ pub enum PreferenceCmd {
     SubtitleSize { size: plx_plex::plex::session::SubtitleSize, reply: std::sync::mpsc::Sender<bool> },
     SubtitlePosition { position: plx_plex::plex::session::SubtitlePosition, reply: std::sync::mpsc::Sender<bool> },
     Language { language: plx_platform::i18n::Preference, reply: std::sync::mpsc::Sender<bool> },
+    /// Settings › Addons & Home: read (or change, then read) the Stremio bridge's Home rows and
+    /// addon switches. `None` when the bridge did not answer.
+    Stremio { op: StremioOp, reply: std::sync::mpsc::Sender<Option<StremioConfig>> },
+}
+
+/// One row Home can show, as Settings lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StremioRow {
+    pub id: String,
+    pub title: String,
+    pub detail: String,
+    pub shown: bool,
+}
+
+/// One installed addon, with the switches it has (`None`: it offers no such thing).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StremioAddon {
+    pub id: String,
+    pub name: String,
+    pub detail: String,
+    pub streams: Option<bool>,
+    pub catalogs: Option<bool>,
+}
+
+/// The bridge's Home rows (in Home's order) and addons.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StremioConfig {
+    pub rows: Vec<StremioRow>,
+    pub addons: Vec<StremioAddon>,
+}
+
+impl StremioConfig {
+    /// The bridge's `/stremio/config` answer.
+    pub fn from_json(v: &serde_json::Value) -> Option<StremioConfig> {
+        let field = |o: &serde_json::Value, k: &str| o.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let rows = v.get("rows")?.as_array()?.iter()
+            .map(|r| (field(r, "id"), field(r, "title"), field(r, "detail"),
+                      r.get("shown").and_then(|x| x.as_bool()).unwrap_or(false)))
+            .map(|(id, title, detail, shown)| StremioRow { id, title, detail, shown })
+            .collect();
+        let addons = v.get("addons")?.as_array()?.iter().map(|a| StremioAddon {
+            id: field(a, "id"), name: field(a, "name"), detail: field(a, "detail"),
+            streams: a.get("streams").and_then(|x| x.as_bool()),
+            catalogs: a.get("catalogs").and_then(|x| x.as_bool()),
+        }).collect();
+        Some(StremioConfig { rows, addons })
+    }
+}
+
+/// What a Settings › Addons & Home press asks the bridge to change.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StremioOp {
+    Read,
+    ShowRow { id: String, shown: bool },
+    MoveRow { id: String, to: usize },
+    Streams { id: String, on: bool },
+    Catalogs { id: String, on: bool },
+}
+
+impl StremioOp {
+    /// The bridge path that performs it.
+    pub fn path(&self) -> String {
+        let enc = plx_plex::plex::urlenc_str;
+        match self {
+            StremioOp::Read => "/stremio/config".into(),
+            StremioOp::ShowRow { id, shown } => format!("/stremio/config?op=show&id={}&on={}", enc(id), u8::from(*shown)),
+            StremioOp::MoveRow { id, to } => format!("/stremio/config?op=move&id={}&to={to}", enc(id)),
+            StremioOp::Streams { id, on } => format!("/stremio/config?op=streams&id={}&on={}", enc(id), u8::from(*on)),
+            StremioOp::Catalogs { id, on } => format!("/stremio/config?op=catalogs&id={}&on={}", enc(id), u8::from(*on)),
+        }
+    }
 }
 
 /// Whether an item has a context menu to open (`item_menu::has_actions`): the one predicate the
@@ -1302,6 +1373,8 @@ pub mod word {
     /// The Appearance page (`screens::preferences`, `Kind::Appearance`).
     pub const APPEARANCE: &str = "appearance";
     pub const PICKER: &str = "picker";
+    /// Settings › Addons & Home and its two child pages (`screens::stremio_settings`).
+    pub const ADDONS: &str = "addons";
     pub const CONSENT: &str = "consent";
     pub const ONBOARD: &str = "onboard";
     /// The QR sign-in (`screens::login::LoginScreen`). Same spelling as `app::words::route_word`'s

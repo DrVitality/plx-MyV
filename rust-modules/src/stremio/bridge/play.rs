@@ -69,6 +69,29 @@ pub(super) struct PlayState {
     queue: Mutex<Option<Value>>,
 }
 
+/// Streams tried at most before the first pick stands.
+const FALLBACK_TRIES: usize = 3;
+
+/// Could this stream start at once, as a fallback? Cached or direct, and not a camera copy.
+fn fallback_ok(f: &Facts) -> bool {
+    f.ready != super::super::streams::Ready::Uncached && !f.cam && !f.av1
+}
+
+/// The stream most like `m` among those that could start at once: the same release group and
+/// resolution, else the same resolution from the same addon.
+pub(super) fn like_last(m: &super::config::StreamMemory, streams: &[(Stream, Facts, i64)]) -> Option<usize> {
+    let group_of = |s: &Stream| super::config::release_group(s.filename.as_deref().unwrap_or(s.detail.as_str()));
+    let ok: Vec<usize> = (0..streams.len()).filter(|i| fallback_ok(&streams[*i].1)).collect();
+    if !m.group.is_empty() {
+        if let Some(i) = ok.iter().copied().find(|i| {
+            streams[*i].1.resolution == m.resolution && group_of(&streams[*i].0).eq_ignore_ascii_case(&m.group)
+        }) {
+            return Some(i);
+        }
+    }
+    ok.into_iter().find(|i| streams[*i].1.resolution == m.resolution && streams[*i].0.addon == m.addon)
+}
+
 /// The stand-in final credits marker for an episode `duration_ms` long: its last 3 %, at least
 /// 45 seconds and at most two and a half minutes.
 pub(super) fn credits_marker(duration_ms: i64) -> Value {
@@ -77,7 +100,7 @@ pub(super) fn credits_marker(duration_ms: i64) -> Value {
 }
 
 /// "Now", in the ISO form Stremio's library stores.
-fn now_iso() -> String {
+pub(super) fn now_iso() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -117,19 +140,25 @@ fn apply_tracks(media: &mut Value, audio: Option<i64>, sub: Option<i64>) {
 
 impl Bridge {
     /// Reads a file's tracks from its first bytes, following the parser to where they are.
-    fn probe_url(&self, url: &str) -> Option<Probe> {
-        let head = self.stremio.fetch_range(url, 0, PROBE_HEAD).ok()?;
-        match probe::parse(&head, None) {
+    /// `Err` when the link answered nothing at all (dead, refused, not cached after all): the
+    /// stream cannot play, which is what makes the next one worth trying. `Ok(None)` is a file
+    /// that answered but whose tracks could not be read, which still plays.
+    fn probe_url(&self, url: &str) -> Result<Option<Probe>, ()> {
+        let head = self.stremio.fetch_range(url, 0, PROBE_HEAD).map_err(|_| ())?;
+        if head.is_empty() {
+            return Err(());
+        }
+        Ok(match probe::parse(&head, None) {
             Parse::Done(p) => Some(p),
             Parse::Need(at) => {
-                let more = self.stremio.fetch_range(url, at, PROBE_MORE).ok()?;
-                match probe::parse(&head, Some((at, &more))) {
-                    Parse::Done(p) => Some(p),
+                let more = self.stremio.fetch_range(url, at, PROBE_MORE).ok();
+                match more.map(|more| probe::parse(&head, Some((at, &more)))) {
+                    Some(Parse::Done(p)) => Some(p),
                     _ => None,
                 }
             }
             Parse::Unknown => None,
-        }
+        })
     }
 
     /// Subtitles from the subtitle providers for a film or episode, English first.
@@ -178,11 +207,37 @@ impl Bridge {
             }
         }
         let streams = self.ranked_streams(token, rk).ok()?;
-        let chosen = self.chosen_index(rk_s, &streams);
+        let first = self.chosen_index(rk_s, &streams);
+        // The first pick, then the next streams that could start at once, until one answers: a
+        // dead or refused link moves on rather than failing the play. When none answers the
+        // first pick stands, and the player reports what it finds.
+        let mut chosen = first;
+        let mut probed = None;
+        let candidates = first.into_iter().chain(
+            (0..streams.len()).filter(|i| Some(*i) != first && fallback_ok(&streams[*i].1)));
+        for (tried, i) in candidates.enumerate() {
+            if tried >= FALLBACK_TRIES {
+                break;
+            }
+            let Some(url) = streams[i].0.url.as_deref() else { continue };
+            match self.probe_url(url) {
+                Ok(p) => {
+                    if tried > 0 {
+                        plx_base::eventlog::log(&format!("stremio: stream {} answered after {tried} that did not", i));
+                    }
+                    chosen = Some(i);
+                    probed = p;
+                    break;
+                }
+                Err(()) => plx_base::eventlog::log(&format!("stremio: stream {i} did not answer; trying the next")),
+            }
+        }
+        if let (Some(i), Rk::Episode { id, .. }) = (chosen, rk) {
+            self.remember_stream(id, &streams[i].0, &streams[i].1);
+        }
         let part = catalog::part_id(rk_s);
         let media = match chosen.map(|i| &streams[i]) {
             Some((s, f, _)) => {
-                let probed = s.url.as_deref().and_then(|u| self.probe_url(u));
                 let (stype, video) = match rk {
                     Rk::Item { stype, id, .. } => (stype.as_str(), id.as_str()),
                     Rk::Episode { stype, video, .. } => (stype.as_str(), video.as_str()),
@@ -222,11 +277,43 @@ impl Bridge {
         Some(r)
     }
 
-    /// Which of `streams` plays for `rk_s`: the viewer's choice while it names one of them, else
-    /// the best.
-    pub(super) fn chosen_index(&self, rk_s: &str, streams: &[(super::super::streams::Stream, super::super::streams::Facts, i64)]) -> Option<usize> {
+    /// Which of `streams` plays for `rk_s`: the viewer's choice while it names one of them; for
+    /// an episode, the stream most like the one the show last played from (same release group
+    /// and resolution, else same resolution and addon); else the best.
+    pub(super) fn chosen_index(&self, rk_s: &str, streams: &[(Stream, Facts, i64)]) -> Option<usize> {
         let wanted = self.play.choice.lock().unwrap_or_else(|e| e.into_inner()).get(rk_s).copied();
-        wanted.filter(|i| *i < streams.len()).or_else(|| best(streams))
+        if let Some(i) = wanted.filter(|i| *i < streams.len()) {
+            return Some(i);
+        }
+        if let Some(Rk::Episode { id, .. }) = Rk::decode(rk_s) {
+            let memory = self.with_config(|c| c.shows.get(&id).cloned());
+            if let Some(i) = memory.and_then(|m| like_last(&m, streams)) {
+                return Some(i);
+            }
+        }
+        best(streams)
+    }
+
+    /// Keep what a show's episode is playing from, for the next one (written only on a change).
+    fn remember_stream(&self, show_id: &str, s: &Stream, f: &Facts) {
+        let name = s.filename.as_deref().unwrap_or(s.detail.as_str());
+        let memory = super::config::StreamMemory {
+            group: super::config::release_group(name),
+            resolution: f.resolution,
+            addon: s.addon.clone(),
+        };
+        if self.with_config(|c| c.shows.get(show_id) == Some(&memory)) {
+            return;
+        }
+        self.change_config(|c| {
+            // bounded: the shows watched most recently are the ones worth remembering
+            if c.shows.len() >= 200 && !c.shows.contains_key(show_id) {
+                if let Some(k) = c.shows.keys().next().cloned() {
+                    c.shows.remove(&k);
+                }
+            }
+            c.shows.insert(show_id.to_string(), memory);
+        });
     }
 
     /// Forgets a resolved choice, so the next request resolves it again.
@@ -325,9 +412,18 @@ impl Bridge {
         }
         // Stremio has no credits markers. An episode's last stretch stands in for them, so the
         // player's Up Next card (which waits for a FINAL credits marker) offers the next episode.
-        if matches!(rk, Rk::Episode { .. }) {
+        if let Rk::Episode { video, .. } = rk {
             if let Some(d) = row.get("duration").and_then(Value::as_i64).filter(|d| *d > 0) {
-                row["Marker"] = json!([credits_marker(d)]);
+                // an anime episode's real opening and ending, when AniSkip knows them
+                let skip = t.videos.iter().find(|e| &e.video == video)
+                    .filter(|_| catalog::is_anime(&t.stype, &t.id))
+                    .and_then(|e| self.anime_skips(&t.id, e.episode, d));
+                let mut markers = skip.unwrap_or_default();
+                // Up Next waits for a final credits marker: the stand-in when AniSkip had no ending
+                if !markers.iter().any(|m| m.get("type").and_then(Value::as_str) == Some("credits")) {
+                    markers.push(credits_marker(d));
+                }
+                row["Marker"] = json!(markers);
             }
         }
         Ok(row)
@@ -520,4 +616,58 @@ impl Bridge {
             Err(_) => plx_base::eventlog::log("stremio: a progress write was refused"),
         }
     }
+}
+
+// ---------------------------------------------------------------- anime openings and endings
+
+impl Bridge {
+    /// The intro and credits markers of episode `episode` of the anime `id` (`kitsu:N` or
+    /// `mal:N`), from AniSkip's community timestamps. `None` when the title has no MyAnimeList id
+    /// or AniSkip has nothing for the episode; the stand-in credits marker then stays.
+    fn anime_skips(&self, id: &str, episode: i64, duration_ms: i64) -> Option<Vec<Value>> {
+        let mal = self.mal_id(id)?;
+        let url = format!("https://api.aniskip.com/v2/skip-times/{mal}/{episode}?types%5B%5D=op&types%5B%5D=ed&episodeLength={}",
+            duration_ms / 1000);
+        let v = self.fetch_json(&url).ok()?;
+        let markers = aniskip_markers(&v, duration_ms);
+        (!markers.is_empty()).then_some(markers)
+    }
+
+    /// The MyAnimeList id behind an anime id: `mal:N` directly, `kitsu:N` through Kitsu's mappings.
+    fn mal_id(&self, id: &str) -> Option<i64> {
+        if let Some(n) = id.strip_prefix("mal:") {
+            return n.split(':').next()?.parse().ok();
+        }
+        let kitsu = id.strip_prefix("kitsu:")?.split(':').next()?;
+        let url = format!("https://kitsu.io/api/edge/anime/{kitsu}/mappings?filter%5BexternalSite%5D=myanimelist%2Fanime");
+        let v = self.fetch_json(&url).ok()?;
+        v.get("data")?.as_array()?.iter().find_map(|m| {
+            let a = m.get("attributes")?;
+            (a.get("externalSite")?.as_str()? == "myanimelist/anime")
+                .then(|| a.get("externalId")?.as_str()?.parse().ok())?
+        })
+    }
+}
+
+/// AniSkip's answer as markers: the opening (`op`) as an intro, the ending (`ed`) as the final
+/// credits — what the player's Skip button and Up Next read.
+pub(super) fn aniskip_markers(v: &Value, duration_ms: i64) -> Vec<Value> {
+    if v.get("found").and_then(Value::as_bool) != Some(true) {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for r in v.get("results").and_then(Value::as_array).into_iter().flatten() {
+        let (Some(start), Some(end)) = (r.pointer("/interval/startTime").and_then(Value::as_f64),
+                                        r.pointer("/interval/endTime").and_then(Value::as_f64)) else { continue };
+        let (start, end) = ((start * 1000.0) as i64, ((end * 1000.0) as i64).min(duration_ms));
+        if end <= start {
+            continue;
+        }
+        match r.get("skipType").and_then(Value::as_str) {
+            Some("op") => out.push(json!({"type": "intro", "startTimeOffset": start, "endTimeOffset": end})),
+            Some("ed") => out.push(json!({"type": "credits", "startTimeOffset": start, "endTimeOffset": end, "final": true})),
+            _ => {}
+        }
+    }
+    out
 }

@@ -90,6 +90,12 @@ pub enum SettingsPage {
     ConsentStage(u8),
     /// One playback / account preference's choice list, pushed from Playback or Audio & Subtitles.
     Picker(PickerKind),
+    /// Addons & Home: the Stremio bridge's Home rows and addon switches.
+    Stremio,
+    /// One Home row's switch and place, by its position in the list it was opened from.
+    StremioRow(u8),
+    /// One addon's switches, by its position in the list.
+    StremioAddon(u8),
 }
 
 /// Which preference a [`SettingsPage::Picker`] edits. The parent page (`Playback` for the local ones,
@@ -167,6 +173,9 @@ impl ScreenArg for SettingsPage {
             SettingsPage::ConsentStage(_) => 107,
             SettingsPage::Picker(_) => 112,
             SettingsPage::Appearance => 113,
+            SettingsPage::Stremio => 114,
+            SettingsPage::StremioRow(_) => 115,
+            SettingsPage::StremioAddon(_) => 116,
         })
     }
     fn title(&self) -> Option<&str> {
@@ -200,11 +209,13 @@ impl LogicalState for SettingsPage {
             | SettingsPage::Playback
             | SettingsPage::AudioSubtitles
             | SettingsPage::Appearance
+            | SettingsPage::Stremio
             | SettingsPage::Favourites
             | SettingsPage::Privacy
             | SettingsPage::Legal
             | SettingsPage::About => 0,
-            SettingsPage::Document(i) | SettingsPage::Preview(i) | SettingsPage::ConsentStage(i) => *i,
+            SettingsPage::Document(i) | SettingsPage::Preview(i) | SettingsPage::ConsentStage(i)
+            | SettingsPage::StremioRow(i) | SettingsPage::StremioAddon(i) => *i,
             SettingsPage::Picker(kind) => *kind as u8,
         });
     }
@@ -224,8 +235,12 @@ impl LogicalState for SettingsPage {
             SettingsPage::Preview(_) => "preview",
             SettingsPage::ConsentStage(_) => "stage",
             SettingsPage::Picker(_) => "picker",
+            SettingsPage::Stremio => "addons",
+            SettingsPage::StremioRow(_) => "home-row",
+            SettingsPage::StremioAddon(_) => "addon",
         });
-        if let SettingsPage::Document(i) | SettingsPage::Preview(i) | SettingsPage::ConsentStage(i) = self {
+        if let SettingsPage::Document(i) | SettingsPage::Preview(i) | SettingsPage::ConsentStage(i)
+            | SettingsPage::StremioRow(i) | SettingsPage::StremioAddon(i) = self {
             out.push_str(&format!("[{i}]"));
         }
         if let SettingsPage::Picker(kind) = self {

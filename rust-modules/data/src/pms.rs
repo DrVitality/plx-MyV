@@ -109,6 +109,10 @@ pub struct PmsMovie {
     #[serde(with = "record::blur_bits")]
     pub blur: [[f32; 3]; 4],
     pub has_blur: bool,
+    /// Saved in the account's Stremio library (an episode: its show) — the card menu's Library
+    /// row reads it.
+    #[serde(default)]
+    pub in_library: bool,
     pub kind: c_int, // 0 = movie, 1 = show, 2 = season, 3 = episode, 4 = collection
     pub resume_ms: i64,  // viewOffset — drives the Continue Watching resume bar
     pub show_rk: String, // parent show rk (episode: grandparent; season: parent)
@@ -315,6 +319,7 @@ pub fn parse_item(it: &plx_plex::plex::Metadata, sid: ServerId) -> PmsMovie {
         sec: it.library_section_id,
         ..Default::default()
     };
+    m.in_library = it.in_library;
     m.aired = clean(&it.originally_available_at);
     m.kind = match it.kind.as_str() {
         "show" => 1,

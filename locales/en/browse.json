@@ -2086,5 +2086,13 @@
   "browse.menu.no_streams": {
     "value": "No streams found for this title.",
     "description": "Notice when the stream picker finds nothing to play or cannot reach the addons"
+  },
+  "browse.menu.library_add": {
+    "value": "Add to My Library",
+    "description": "Item menu row: save the title in the Stremio library"
+  },
+  "browse.menu.library_remove": {
+    "value": "Remove from My Library",
+    "description": "Item menu row: take the title out of the Stremio library"
   }
 }

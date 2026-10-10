@@ -60,6 +60,9 @@ pub struct Addon {
 /// using a newer manifest feature still loads.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Manifest {
+    /// The addon's own id ("com.stremio.torrentio.addon"), what the bridge's settings name it by.
+    #[serde(default)]
+    pub id: String,
     #[serde(default)]
     pub name: String,
     #[serde(default)]

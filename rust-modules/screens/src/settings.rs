@@ -458,6 +458,9 @@ fn mount_page(
         }
         SettingsPage::Favourites => Box::new(super::onboard::OnboardScreen::settings(entry, cx.views)),
         SettingsPage::Picker(kind) => Box::new(super::preferences::PickerPage::new(entry, kind)),
+        SettingsPage::Stremio => Box::new(super::stremio_settings::StremioPage::list(entry)),
+        SettingsPage::StremioRow(i) => Box::new(super::stremio_settings::StremioPage::row(entry, i)),
+        SettingsPage::StremioAddon(i) => Box::new(super::stremio_settings::StremioPage::addon(entry, i)),
     }
 }
 
@@ -950,6 +953,8 @@ struct ServerMachineId(String);
 #[derive(Clone, PartialEq, Eq, Debug)]
 enum RootId {
     Favourites,
+    /// Addons & Home (this fork's Stremio bridge).
+    Stremio,
     Playback,
     AudioSubtitles,
     Appearance,
@@ -980,6 +985,7 @@ impl FormId for RootId {
             RootId::Legal => 8,
             RootId::About => 9,
             RootId::Appearance => 10,
+            RootId::Stremio => 11,
             // the base; `root_form` adds the position (`item_keyed`)
             RootId::Plaintext(_) => PLAINTEXT_KEY_BASE,
         })
@@ -1104,6 +1110,14 @@ fn root_form(inputs: &RootInputs) -> Form<RootId, Action, SettingsPage> {
             Row::new(plx_platform::i18n::msg::settings_libraries_title())
                 .detail(plx_platform::i18n::msg::settings_libraries_detail())
                 .value(plx_platform::i18n::msg::settings_libraries_count(inputs.library_count))
+                .chevron(true),
+        )
+        .item(
+            RootId::Stremio,
+            RowKind::Nav(SettingsPage::Stremio),
+            Action::Door,
+            Row::new(plx_platform::i18n::msg::settings_stremio_title())
+                .detail(plx_platform::i18n::msg::settings_stremio_detail())
                 .chevron(true),
         );
     let playback = FormSection::new(plx_platform::i18n::msg::settings_playback_section())

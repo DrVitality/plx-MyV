@@ -1354,5 +1354,105 @@
   "settings.appearance.ground.black": {
     "value": "Black",
     "description": "Background option: true black"
+  },
+  "settings.stremio.title": {
+    "value": "Addons & Home",
+    "description": "Settings row and page title: Stremio addons and Home rows"
+  },
+  "settings.stremio.detail": {
+    "value": "Home rows, and what each addon is used for.",
+    "description": "Settings root row detail"
+  },
+  "settings.stremio.copy": {
+    "value": "Choose the rows Home shows and their order, and what each addon is used for.",
+    "description": "Addons & Home page explanation"
+  },
+  "settings.stremio.loading": {
+    "value": "Loading…",
+    "description": "While the list loads"
+  },
+  "settings.stremio.failed": {
+    "value": "Couldn’t reach Stremio. Check the connection and try again.",
+    "description": "Load or save failed"
+  },
+  "settings.stremio.retry": {
+    "value": "Try again",
+    "description": "Retry row"
+  },
+  "settings.stremio.gone": {
+    "value": "This is no longer available.",
+    "description": "The row or addon left the list"
+  },
+  "settings.stremio.rows_section": {
+    "value": "Home rows",
+    "description": "Section header"
+  },
+  "settings.stremio.addons_section": {
+    "value": "Addons",
+    "description": "Section header"
+  },
+  "settings.stremio.shown": {
+    "value": "On Home",
+    "description": "Row value: shown on Home"
+  },
+  "settings.stremio.hidden": {
+    "value": "Hidden",
+    "description": "Row value: not on Home"
+  },
+  "settings.stremio.on": {
+    "value": "On",
+    "description": "Switch value"
+  },
+  "settings.stremio.off": {
+    "value": "Off",
+    "description": "Switch value"
+  },
+  "settings.stremio.streams": {
+    "value": "Streams",
+    "description": "What an addon is used for"
+  },
+  "settings.stremio.catalogs": {
+    "value": "Catalogs",
+    "description": "What an addon is used for"
+  },
+  "settings.stremio.show_on_home": {
+    "value": "Show on Home",
+    "description": "Home row switch"
+  },
+  "settings.stremio.move_up": {
+    "value": "Move up",
+    "description": "Home row action"
+  },
+  "settings.stremio.move_down": {
+    "value": "Move down",
+    "description": "Home row action"
+  },
+  "settings.stremio.move_top": {
+    "value": "Move to top",
+    "description": "Home row action"
+  },
+  "settings.stremio.move_bottom": {
+    "value": "Move to bottom",
+    "description": "Home row action"
+  },
+  "settings.stremio.position": {
+    "value": "Place on Home:",
+    "description": "Followed by 'N / M'"
+  },
+  "settings.stremio.use_streams": {
+    "value": "Use for streams",
+    "description": "Addon switch"
+  },
+  "settings.stremio.use_streams_detail": {
+    "value": "Ask this addon where titles can be played.",
+    "description": "Addon switch detail"
+  },
+  "settings.stremio.use_catalogs": {
+    "value": "Use for catalogs",
+    "description": "Addon switch"
+  },
+  "settings.stremio.use_catalogs_detail": {
+    "value": "Show this addon’s catalogs on Home and in the libraries.",
+    "description": "Addon switch detail"
   }
 }

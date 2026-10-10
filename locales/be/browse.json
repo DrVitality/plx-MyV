@@ -494,5 +494,7 @@
   "browse.clock.key_changed": "Ключ вашага сервера змяніўся. Злучыце тэлевізар з інтэрнэтам адзін раз, каб праграма магла праверыць яго зноў.",
   "browse.menu.choose_stream": "Выбраць крыніцу",
   "browse.menu.streams_title": "Крыніцы",
-  "browse.menu.no_streams": "Для гэтай назвы крыніц не знойдзена."
+  "browse.menu.no_streams": "Для гэтай назвы крыніц не знойдзена.",
+  "browse.menu.library_add": "Дадаць у маю бібліятэку",
+  "browse.menu.library_remove": "Прыбраць з маёй бібліятэкі"
 }

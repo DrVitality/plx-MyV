@@ -1610,6 +1610,11 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
                 }
             }
         }
+        // the Stremio bridge changed something Home shows (a library save, a Home-row or addon
+        // setting): the same refetch, at once
+        if crate::stremio::take_home_changed() {
+            app.refresh_hubs_at = fr.now | 1;
+        }
         // post-playback home refresh (armed by every exit_player): refetch the hubs so
         // Continue Watching shows the new resume point / next episode; the small delay lets
         // the final timeline PUT land server-side first. The request is worker-only; the

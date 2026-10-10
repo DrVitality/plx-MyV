@@ -480,5 +480,7 @@
   "browse.clock.key_changed": "La clave de tu servidor ha cambiado. Conecta el televisor a internet una vez para que la app pueda comprobarla de nuevo.",
   "browse.menu.choose_stream": "Elegir fuente",
   "browse.menu.streams_title": "Fuentes",
-  "browse.menu.no_streams": "No se encontraron fuentes para este título."
+  "browse.menu.no_streams": "No se encontraron fuentes para este título.",
+  "browse.menu.library_add": "Añadir a Mi biblioteca",
+  "browse.menu.library_remove": "Quitar de Mi biblioteca"
 }
