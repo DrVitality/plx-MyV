@@ -694,7 +694,7 @@
     "description": "browse auth no_servers"
   },
   "browse.auth.no_servers_signed_in_as": {
-    "value": "Signed in as {account}.\nThis Plex account has no server yet.",
+    "value": "Signed in as {account}.\nThis Stremio account has no catalogs yet.",
     "args": {
       "account": "str"
     },
