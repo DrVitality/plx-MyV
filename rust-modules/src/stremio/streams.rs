@@ -280,6 +280,45 @@ pub fn rank(streams: Vec<Stream>) -> Vec<(Stream, Facts, i64)> {
     ranked
 }
 
+/// The viewer's stream preferences (Settings > Video & playback): the highest resolution to offer
+/// (`max_res`, 0 for no cap) and whether only streams that start at once are offered.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Prefs {
+    pub max_res: u32,
+    pub instant_only: bool,
+}
+
+static PREFS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Make `prefs` the ones every later stream list is filtered by.
+pub fn set_prefs(prefs: Prefs) {
+    PREFS.store(prefs.max_res.min(0x7fff_ffff) | if prefs.instant_only { 0x8000_0000 } else { 0 },
+        std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The live preferences.
+pub fn prefs() -> Prefs {
+    let v = PREFS.load(std::sync::atomic::Ordering::Relaxed);
+    Prefs { max_res: v & 0x7fff_ffff, instant_only: v & 0x8000_0000 != 0 }
+}
+
+/// `ranked` narrowed to what `prefs` asks for, keeping the order. Each narrowing applies only
+/// when something survives it: a title whose every stream is 4K still plays under a 1080p cap,
+/// and one with nothing cached still lists its uncached streams, rather than offering nothing.
+pub fn narrow(ranked: Vec<(Stream, Facts, i64)>, prefs: Prefs) -> Vec<(Stream, Facts, i64)> {
+    fn keep(v: Vec<(Stream, Facts, i64)>, ok: impl Fn(&Facts) -> bool) -> Vec<(Stream, Facts, i64)> {
+        if v.iter().any(|(_, f, _)| ok(f)) { v.into_iter().filter(|(_, f, _)| ok(f)).collect() } else { v }
+    }
+    let mut v = ranked;
+    if prefs.max_res > 0 {
+        v = keep(v, |f| f.resolution <= prefs.max_res);
+    }
+    if prefs.instant_only {
+        v = keep(v, |f| f.ready != Ready::Uncached);
+    }
+    v
+}
+
 /// The stream to start without asking: the best one that is ready now and is not a camera copy.
 pub fn best(ranked: &[(Stream, Facts, i64)]) -> Option<usize> {
     ranked.iter().position(|(_, f, _)| f.ready != Ready::Uncached && !f.cam && !f.av1)
@@ -293,6 +332,26 @@ mod tests {
     fn stream(name: &str, detail: &str) -> Stream {
         Stream { addon: "t".into(), name: name.into(), detail: detail.into(),
                  url: Some("https://x".into()), filename: None, size: None }
+    }
+
+    #[test]
+    fn the_viewer_s_caps_narrow_the_list_but_never_empty_it() {
+        let ranked = rank(vec![
+            stream("[RD+] Torrentio\n4k", ""),
+            stream("[RD download] Torrentio\n1080p", ""),
+            stream("[RD+] Torrentio\n720p", ""),
+        ]);
+        let at = |v: &[(Stream, Facts, i64)]| v.iter().map(|(_, f, _)| (f.resolution, f.ready)).collect::<Vec<_>>();
+        assert_eq!(narrow(ranked.clone(), Prefs::default()).len(), 3);
+        let capped = narrow(ranked.clone(), Prefs { max_res: 1080, instant_only: false });
+        assert!(at(&capped).iter().all(|(r, _)| *r <= 1080), "{:?}", at(&capped));
+        let instant = narrow(ranked.clone(), Prefs { max_res: 1080, instant_only: true });
+        assert_eq!(at(&instant), [(720, Ready::Cached)]);
+        // nothing at or under 480: the cap gives way rather than leaving nothing to play
+        assert_eq!(narrow(ranked, Prefs { max_res: 480, instant_only: false }).len(), 3);
+        set_prefs(Prefs { max_res: 720, instant_only: true });
+        assert_eq!(prefs(), Prefs { max_res: 720, instant_only: true });
+        set_prefs(Prefs::default());
     }
 
     #[test]

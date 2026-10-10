@@ -133,7 +133,7 @@ fn every_picker_level_fits_its_column_in_every_language() {
         for kind in [Kind::Playback, Kind::AudioSubtitles, Kind::Appearance] {
             let prefs = AudioPreferences::default();
             let fields: &[PickerKind] = match kind {
-                Kind::Playback => &[PickerKind::Quality, PickerKind::DirectPlay, PickerKind::SubtitleSize, PickerKind::SubtitlePosition, PickerKind::NextEpisode, PickerKind::DeckPress, PickerKind::SkipInterval],
+                Kind::Playback => &[PickerKind::Quality, PickerKind::DirectPlay, PickerKind::SubtitleSize, PickerKind::SubtitlePosition, PickerKind::NextEpisode, PickerKind::DeckPress, PickerKind::SkipInterval, PickerKind::StreamQuality, PickerKind::StreamSource],
                 Kind::AudioSubtitles => &[PickerKind::AudioLanguage, PickerKind::SubtitleMode, PickerKind::SubtitleLanguage, PickerKind::ForcedSubtitles],
                 Kind::Appearance => &[PickerKind::Accent, PickerKind::Ground, PickerKind::Corners, PickerKind::Peek],
             };

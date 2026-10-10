@@ -613,7 +613,8 @@ impl Bridge {
                 }) as Box<dyn FnOnce() -> Vec<Stream> + Send + '_>
             })
             .collect();
-        Ok(rank(parallel(jobs).into_iter().flatten().flatten().collect()))
+        let ranked = rank(parallel(jobs).into_iter().flatten().flatten().collect());
+        Ok(super::super::streams::narrow(ranked, super::super::streams::prefs()))
     }
 
     /// `/stremio/streams/{rk}`: the ranked list, as a viewer would read it, and which one would

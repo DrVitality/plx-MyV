@@ -327,5 +327,16 @@
   "settings.consent.placeholder.random_id": "выпадковы id",
   "settings.consent.placeholder.project_key": "ключ праекта",
   "settings.consent.placeholder.app_version": "версія праграмы",
-  "settings.consent.placeholder.webos_codename_short": "кодавая назва webOS"
+  "settings.consent.placeholder.webos_codename_short": "кодавая назва webOS",
+  "settings.playback.stream_quality": "Якасць крыніцы",
+  "settings.playback.stream_quality.copy": "Найбольшае разрозненне, з якім выбіраецца крыніца. Назва, у якой няма нічога такога ці ніжэй, усё роўна прайграе найлепшую крыніцу.",
+  "settings.playback.stream_quality.best": "Найлепшая",
+  "settings.playback.stream_quality.1080": "Да 1080p",
+  "settings.playback.stream_quality.720": "Да 720p",
+  "settings.playback.stream_source": "Крыніцы",
+  "settings.playback.stream_source.copy": "«Толькі імгненныя» прапануе крыніцы, якія ўжо ёсць у вашым debrid-сэрвісе, каб прайграванне пачыналася адразу. Назва без такіх паказвае астатнія.",
+  "settings.playback.stream_source.any": "Любыя",
+  "settings.playback.stream_source.instant": "Толькі імгненныя",
+  "settings.appearance.accent.silver": "Срэбны",
+  "settings.appearance.ground.black": "Чорны"
 }

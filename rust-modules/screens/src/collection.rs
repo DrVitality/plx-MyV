@@ -28,7 +28,7 @@ use plx_ui::theme;
 use plx_ui::widgets::{self, Art, PageGround, StatusKind, StatusOverlay};
 use plx_ui::{Env, Painter, Rect};
 
-use super::registry::{tile_facts, AppFx, CardKeys, CardPageMemory, CollectionLike, ContentArg,
+use super::registry::{tile_facts, AppFx, CardKeys, CardPageMemory, CollectionLike,
     ContentLike, ContentPanel, ContentReq, PageMemory};
 
 #[cfg(test)]
@@ -773,6 +773,7 @@ impl<H: ContentLike + CollectionLike> Screen<H> for CollectionScreen {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registry::ContentArg;
     use plx_ui::fixture::FixtureMeasure;
     use plx_ui::screen::Step;
     use plx_machine::machine::{FocusRead, Host, InputOwner, PressRead};

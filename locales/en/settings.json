@@ -1310,5 +1310,49 @@
   "settings.consent.placeholder.webos_codename_short": {
     "value": "webOS codename",
     "description": "Placeholder shown inside angle brackets in the data preview, standing for the TV software's release codename."
+  },
+  "settings.playback.stream_quality": {
+    "value": "Stream quality",
+    "description": "Settings row: the highest resolution the stream picker offers"
+  },
+  "settings.playback.stream_quality.copy": {
+    "value": "The highest resolution a stream is picked at. A title with nothing at or under it still plays its best stream.",
+    "description": "Picker explanation for Stream quality"
+  },
+  "settings.playback.stream_quality.best": {
+    "value": "Best available",
+    "description": "Stream quality option: no cap"
+  },
+  "settings.playback.stream_quality.1080": {
+    "value": "Up to 1080p",
+    "description": "Stream quality option"
+  },
+  "settings.playback.stream_quality.720": {
+    "value": "Up to 720p",
+    "description": "Stream quality option"
+  },
+  "settings.playback.stream_source": {
+    "value": "Streams",
+    "description": "Settings row: whether only instantly-starting streams are offered"
+  },
+  "settings.playback.stream_source.copy": {
+    "value": "Instant only offers streams your debrid service already holds, so playback starts at once. A title with none still lists the rest.",
+    "description": "Picker explanation for Streams"
+  },
+  "settings.playback.stream_source.any": {
+    "value": "Any",
+    "description": "Streams option: every stream"
+  },
+  "settings.playback.stream_source.instant": {
+    "value": "Instant only",
+    "description": "Streams option: only debrid-cached streams"
+  },
+  "settings.appearance.accent.silver": {
+    "value": "Silver",
+    "description": "Accent colour option"
+  },
+  "settings.appearance.ground.black": {
+    "value": "Black",
+    "description": "Background option: true black"
   }
 }

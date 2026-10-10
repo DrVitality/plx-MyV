@@ -324,5 +324,16 @@
   "settings.consent.placeholder.random_id": "id aleatorio",
   "settings.consent.placeholder.project_key": "clave del proyecto",
   "settings.consent.placeholder.app_version": "versión de la app",
-  "settings.consent.placeholder.webos_codename_short": "nombre en clave de webOS"
+  "settings.consent.placeholder.webos_codename_short": "nombre en clave de webOS",
+  "settings.playback.stream_quality": "Calidad de fuente",
+  "settings.playback.stream_quality.copy": "La resolución máxima con la que se elige una fuente. Un título sin nada igual o inferior reproduce igualmente su mejor fuente.",
+  "settings.playback.stream_quality.best": "Mejor disponible",
+  "settings.playback.stream_quality.1080": "Hasta 1080p",
+  "settings.playback.stream_quality.720": "Hasta 720p",
+  "settings.playback.stream_source": "Fuentes",
+  "settings.playback.stream_source.copy": "Solo instantáneas ofrece las fuentes que tu servicio debrid ya tiene, para que la reproducción empiece al momento. Un título sin ninguna sigue mostrando el resto.",
+  "settings.playback.stream_source.any": "Cualquiera",
+  "settings.playback.stream_source.instant": "Solo instantáneas",
+  "settings.appearance.accent.silver": "Plata",
+  "settings.appearance.ground.black": "Negro"
 }

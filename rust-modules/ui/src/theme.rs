@@ -1476,10 +1476,10 @@ pub mod appearance {
 
     /// The accent: what a focused control, progress and the ▶ mark are lit in.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum Accent { Crimson, Orange, Gold, Emerald, Teal, Blue, Violet, Pink }
+    pub enum Accent { Crimson, Orange, Gold, Emerald, Teal, Blue, Violet, Pink, Silver }
     impl Accent {
-        pub const LADDER: [Accent; 8] = [Accent::Crimson, Accent::Orange, Accent::Gold, Accent::Emerald,
-            Accent::Teal, Accent::Blue, Accent::Violet, Accent::Pink];
+        pub const LADDER: [Accent; 9] = [Accent::Crimson, Accent::Orange, Accent::Gold, Accent::Emerald,
+            Accent::Teal, Accent::Blue, Accent::Violet, Accent::Pink, Accent::Silver];
         /// `(base, light)`: the focused fill, and the brighter stop thin marks (progress, ▶) use.
         /// Every base carries white ink at a contrast a television reads from the couch.
         pub const fn stops(self) -> ([f32; 4], [f32; 4]) {
@@ -1492,15 +1492,17 @@ pub mod appearance {
                 Accent::Blue => (rgb8(0x1f, 0x5f, 0xd6), rgb8(0x4a, 0x86, 0xf2)),
                 Accent::Violet => (rgb8(0x74, 0x3c, 0xd0), rgb8(0x9a, 0x6a, 0xf0)),
                 Accent::Pink => (rgb8(0xc8, 0x1e, 0x6e), rgb8(0xee, 0x4c, 0x96)),
+                // a cool slate, for a colourless look
+                Accent::Silver => (rgb8(0x5c, 0x66, 0x75), rgb8(0x9c, 0xa8, 0xba)),
             }
         }
     }
 
     /// The ground: the app's background and the surfaces built on it.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum Ground { Charcoal, Graphite, Midnight }
+    pub enum Ground { Charcoal, Graphite, Midnight, Black }
     impl Ground {
-        pub const LADDER: [Ground; 3] = [Ground::Charcoal, Ground::Graphite, Ground::Midnight];
+        pub const LADDER: [Ground; 4] = [Ground::Charcoal, Ground::Graphite, Ground::Midnight, Ground::Black];
         /// Its stops, in [`DEFAULT_GROUND`]'s order.
         const fn stops(self) -> [[f32; 4]; 8] {
             match self {
@@ -1513,6 +1515,10 @@ pub mod appearance {
                 Ground::Midnight => [rgb8(0x0f, 0x10, 0x14), rgb8(0x17, 0x18, 0x1d), rgb8(0x14, 0x15, 0x1a),
                     rgb8(0x10, 0x11, 0x15), rgb8(0x0b, 0x0c, 0x0f), rgb8(0x04, 0x04, 0x05),
                     rgb8(0x16, 0x18, 0x1e), rgb8(0x0e, 0x10, 0x14)],
+                // true black, the surfaces lifted just enough to read as layers (OLED sets)
+                Ground::Black => [rgb8(0x00, 0x00, 0x00), rgb8(0x13, 0x13, 0x15), rgb8(0x10, 0x10, 0x12),
+                    rgb8(0x0b, 0x0b, 0x0c), rgb8(0x06, 0x06, 0x07), rgb8(0x00, 0x00, 0x00),
+                    rgb8(0x14, 0x15, 0x18), rgb8(0x0c, 0x0d, 0x10)],
             }
         }
     }

@@ -1762,4 +1762,5 @@ pub(crate) unsafe fn construct(
 /// the details bubble, all read at the paint door by `plx_ui::theme::appearance`.
 pub(crate) fn apply_appearance(look: plx_plex::plex::session::Appearance) {
     plx_ui::theme::appearance::apply(look.accent, look.ground, look.corners, look.peek);
+    crate::stremio::apply_stream_prefs(look.stream_res, look.stream_source != 0);
 }

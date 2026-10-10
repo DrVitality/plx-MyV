@@ -1412,6 +1412,12 @@ pub struct Appearance {
     pub ground: u8,
     pub corners: u8,
     pub peek: u8,
+    /// The stream picker's resolution cap (Settings > Video & playback > Stream quality): an index
+    /// into the bridge's ladder, 0 = best available. Kept beside the look because it is the same
+    /// kind of install-wide, locally saved choice and travels through the same save.
+    pub stream_res: u8,
+    /// 1 = only streams that start at once (debrid-cached); 0 = any.
+    pub stream_source: u8,
 }
 
 impl Appearance {
@@ -6231,7 +6237,7 @@ mod appearance_tests {
 
     #[test]
     fn a_look_round_trips_through_both_formats() {
-        let look = Appearance { accent: 5, ground: 2, corners: 3, peek: 1 };
+        let look = Appearance { accent: 5, ground: 2, corners: 3, peek: 1, stream_res: 1, stream_source: 1 };
         let session = Session::default().with_appearance(look);
         let round: Session = serde_json::from_str(&serde_json::to_string(&session).unwrap()).unwrap();
         assert_eq!(round.appearance(), look);

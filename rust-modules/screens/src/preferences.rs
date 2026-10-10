@@ -53,6 +53,8 @@ impl PickerKind {
         Self::Ground => plx_platform::i18n::msg::settings_appearance_ground(),
         Self::Corners => plx_platform::i18n::msg::settings_appearance_corners(),
         Self::Peek => plx_platform::i18n::msg::settings_appearance_peek(),
+        Self::StreamQuality => plx_platform::i18n::msg::settings_playback_stream_quality(),
+        Self::StreamSource => plx_platform::i18n::msg::settings_playback_stream_source(),
     }}
     /// What this field's picker says about it under its title. The four account fields share the
     /// account note (it is about where those values are saved); each local one has its own.
@@ -69,11 +71,14 @@ impl PickerKind {
         Self::Ground => plx_platform::i18n::msg::settings_appearance_ground_copy(),
         Self::Corners => plx_platform::i18n::msg::settings_appearance_corners_copy(),
         Self::Peek => plx_platform::i18n::msg::settings_appearance_peek_copy(),
+        Self::StreamQuality => plx_platform::i18n::msg::settings_playback_stream_quality_copy(),
+        Self::StreamSource => plx_platform::i18n::msg::settings_playback_stream_source_copy(),
     }}
     /// The field-list page this field belongs to.
     fn kind(self) -> Kind {
         match self {
-            Self::Quality | Self::DirectPlay | Self::SubtitleSize | Self::SubtitlePosition | Self::NextEpisode | Self::DeckPress | Self::SkipInterval => Kind::Playback,
+            Self::Quality | Self::DirectPlay | Self::SubtitleSize | Self::SubtitlePosition | Self::NextEpisode | Self::DeckPress | Self::SkipInterval
+            | Self::StreamQuality | Self::StreamSource => Kind::Playback,
             Self::AudioLanguage | Self::SubtitleMode | Self::SubtitleLanguage | Self::ForcedSubtitles => Kind::AudioSubtitles,
             Self::Accent | Self::Ground | Self::Corners | Self::Peek => Kind::Appearance,
         }
@@ -302,6 +307,8 @@ impl FormId for RowId {
             Self::Field(PickerKind::Ground) => 1,
             Self::Field(PickerKind::Corners) => 2,
             Self::Field(PickerKind::Peek) => 3,
+            Self::Field(PickerKind::StreamQuality) => 8,
+            Self::Field(PickerKind::StreamSource) => 9,
             Self::Retry => 6,
         })
     }
@@ -411,7 +418,8 @@ impl PreferencesPage {
 /// Which fields `kind`'s list shows: Audio & Subtitles has none until a snapshot has loaded.
 fn fields_of(inputs: &FieldListInputs<'_>) -> &'static [PickerKind] {
     match inputs.kind {
-        Kind::Playback => &[PickerKind::Quality, PickerKind::DirectPlay, PickerKind::SubtitleSize, PickerKind::SubtitlePosition, PickerKind::NextEpisode, PickerKind::DeckPress, PickerKind::SkipInterval],
+        Kind::Playback => &[PickerKind::Quality, PickerKind::DirectPlay, PickerKind::SubtitleSize, PickerKind::SubtitlePosition, PickerKind::NextEpisode, PickerKind::DeckPress, PickerKind::SkipInterval,
+            PickerKind::StreamQuality, PickerKind::StreamSource],
         Kind::AudioSubtitles if inputs.prefs.is_some() => &[PickerKind::AudioLanguage, PickerKind::SubtitleMode, PickerKind::SubtitleLanguage, PickerKind::ForcedSubtitles],
         Kind::Appearance => &[PickerKind::Accent, PickerKind::Ground, PickerKind::Corners, PickerKind::Peek],
         _ => &[],
@@ -433,12 +441,15 @@ fn resolve_value(field: PickerKind, quality: Quality, direct_play: DirectPlayMod
         PickerKind::SubtitleLanguage => Value::Language(prefs.and_then(|p| p.subtitle_language.as_deref()).map(plx_plex::plex::languages::canonical).unwrap_or_default().to_string()),
         PickerKind::SubtitleMode => Value::Mode(prefs.map_or(0, |p| p.subtitle_mode)),
         PickerKind::ForcedSubtitles => Value::Forced(prefs.map_or(0, |p| p.subtitle_forced)),
-        PickerKind::Accent | PickerKind::Ground | PickerKind::Corners | PickerKind::Peek => {
+        PickerKind::Accent | PickerKind::Ground | PickerKind::Corners | PickerKind::Peek
+        | PickerKind::StreamQuality | PickerKind::StreamSource => {
             let look = live_look();
             Value::Look(field, match field {
                 PickerKind::Accent => look.accent,
                 PickerKind::Ground => look.ground,
                 PickerKind::Corners => look.corners,
+                PickerKind::StreamQuality => look.stream_res,
+                PickerKind::StreamSource => look.stream_source,
                 _ => look.peek,
             })
         }
@@ -469,6 +480,13 @@ fn field_options(field: PickerKind, quality: Quality, direct_play: DirectPlayMod
         PickerKind::Ground => look_options(field, &plx_ui::theme::appearance::Ground::LADDER, ground_label),
         PickerKind::Corners => look_options(field, &plx_ui::theme::appearance::Corners::LADDER, corners_label),
         PickerKind::Peek => look_options(field, &plx_ui::theme::appearance::Peek::LADDER, peek_label),
+        PickerKind::StreamQuality => [plx_platform::i18n::msg::settings_playback_stream_quality_best(),
+            plx_platform::i18n::msg::settings_playback_stream_quality_1080(),
+            plx_platform::i18n::msg::settings_playback_stream_quality_720()]
+            .into_iter().enumerate().map(|(i, s)| (s.into(), Value::Look(field, i as u8))).collect(),
+        PickerKind::StreamSource => [plx_platform::i18n::msg::settings_playback_stream_source_any(),
+            plx_platform::i18n::msg::settings_playback_stream_source_instant()]
+            .into_iter().enumerate().map(|(i, s)| (s.into(), Value::Look(field, i as u8))).collect(),
         PickerKind::AudioLanguage | PickerKind::SubtitleLanguage => {
             let mut result = vec![(if field == PickerKind::AudioLanguage { plx_platform::i18n::msg::settings_audio_original() } else { plx_platform::i18n::msg::settings_audio_no_preference() }.into(), Value::Language(String::new()))];
             result.extend(plx_plex::plex::languages::picker()
@@ -558,7 +576,13 @@ fn live_look() -> plx_plex::plex::session::Appearance {
         ground: a::index_of(&a::Ground::LADDER, &a::ground_choice()),
         corners: a::index_of(&a::Corners::LADDER, &a::corners_choice()),
         peek: a::index_of(&a::Peek::LADDER, &a::peek_choice()),
+        // the stream choices have no live mirror in this crate: the session holds them
+        ..stream_choices()
     }
+}
+/// The stored stream choices (the look fields of the result are the session's, not the live ones).
+fn stream_choices() -> plx_plex::plex::session::Appearance {
+    plx_plex::plex::session::peek().appearance()
 }
 /// The live look with `field` set to ladder `index` — the whole record an Appearance pick saves.
 fn look_with(field: PickerKind, index: u8) -> plx_plex::plex::session::Appearance {
@@ -568,6 +592,8 @@ fn look_with(field: PickerKind, index: u8) -> plx_plex::plex::session::Appearanc
         PickerKind::Ground => look.ground = index,
         PickerKind::Corners => look.corners = index,
         PickerKind::Peek => look.peek = index,
+        PickerKind::StreamQuality => look.stream_res = index,
+        PickerKind::StreamSource => look.stream_source = index,
         _ => {}
     }
     look
@@ -586,6 +612,7 @@ fn accent_label(a: plx_ui::theme::appearance::Accent) -> &'static str {
         Accent::Blue => plx_platform::i18n::msg::settings_appearance_accent_blue(),
         Accent::Violet => plx_platform::i18n::msg::settings_appearance_accent_violet(),
         Accent::Pink => plx_platform::i18n::msg::settings_appearance_accent_pink(),
+        Accent::Silver => plx_platform::i18n::msg::settings_appearance_accent_silver(),
     }
 }
 fn ground_label(g: plx_ui::theme::appearance::Ground) -> &'static str {
@@ -594,6 +621,7 @@ fn ground_label(g: plx_ui::theme::appearance::Ground) -> &'static str {
         Ground::Charcoal => plx_platform::i18n::msg::settings_appearance_ground_charcoal(),
         Ground::Graphite => plx_platform::i18n::msg::settings_appearance_ground_graphite(),
         Ground::Midnight => plx_platform::i18n::msg::settings_appearance_ground_midnight(),
+        Ground::Black => plx_platform::i18n::msg::settings_appearance_ground_black(),
     }
 }
 fn corners_label(c: plx_ui::theme::appearance::Corners) -> &'static str {

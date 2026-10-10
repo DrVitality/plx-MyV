@@ -35,6 +35,16 @@ mod streams;
 mod tests;
 
 use std::net::{TcpListener, TcpStream};
+
+/// The viewer's stream preferences, as Settings stores them: `res` an index into
+/// [`STREAM_RES_LADDER`] (0 = no cap), `instant_only` the Streams choice.
+pub fn apply_stream_prefs(res: u8, instant_only: bool) {
+    let max_res = STREAM_RES_LADDER.get(res as usize).copied().unwrap_or(0);
+    streams::set_prefs(streams::Prefs { max_res, instant_only });
+}
+
+/// The resolution caps Settings offers, best first: none, 1080p, 720p.
+pub const STREAM_RES_LADDER: [u32; 3] = [0, 1080, 720];
 use std::sync::Arc;
 
 /// Starts the bridge on its loopback port. Called once at boot, after libcurl is initialised and
