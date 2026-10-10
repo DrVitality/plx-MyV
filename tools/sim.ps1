@@ -196,10 +196,12 @@ export PLXNATIVE_APP_DIR="$assets"
 export PLXNATIVE_WIN=1920x1080
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-x11}"
 # Playback on this computer: the clock sink accepts the demuxed stream and keeps time, and a system
-# ffmpeg paints the picture under the UI (`rust-modules/media/src/player/sim_video.rs`). No sound,
-# and nothing it shows says anything about the television's decoder.
+# ffmpeg paints the picture under the UI (`rust-modules/media/src/player/sim_video.rs`) and ffplay
+# plays the sound (`sim_audio.rs`, through WSLg's PulseAudio). Nothing either does says anything
+# about the television's decoder.
 touch "$runtime/plxnative-clocksink" "$runtime/plxnative-simvideo"
 command -v ffmpeg >/dev/null 2>&1 || echo "No system ffmpeg: the player will keep time but show no picture (run 'sim.ps1 setup')." >&2
+command -v ffplay >/dev/null 2>&1 || echo "No system ffplay: playback will have no sound (run 'sim.ps1 setup')." >&2
 '@
 
 $instanceLocks = @'
