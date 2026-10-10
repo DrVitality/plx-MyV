@@ -819,7 +819,7 @@ impl StreamPickAwait {
 }
 
 /// The landing half of [`StreamPickAwait`]: called every frame while one is waiting.
-pub(crate) fn stream_pick_tick<R: super::playback::PlaybackResources>(
+pub(super) fn stream_pick_tick<R: super::playback::PlaybackResources>(
     ps: &mut plx_media::route::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     pages: &mut plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,

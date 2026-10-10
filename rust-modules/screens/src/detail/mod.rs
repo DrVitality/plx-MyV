@@ -16,6 +16,16 @@ mod related;
 mod season;
 mod section;
 mod trailer;
+
+/// OK on a Related or collection-member card: play it while the press plays (the card-press
+/// preference, as on every other shelf), else open its page. A row the page no longer holds opens.
+fn card_open(sid: plx_plex::plex::ServerId, rk: String, row: Option<&plx_data::pms::PmsMovie>) -> ContentReq {
+    match row {
+        Some(m) => crate::registry::card_press_request(m),
+        None => ContentReq::Push(ContentArg::Detail { sid, rk }),
+    }
+}
+
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -3754,7 +3764,8 @@ impl DetailScreen {
                     .map(|d| related::action(d, local))
                     .unwrap_or(related::Action::None);
                 if let related::Action::OpenDetail(sid, rk) = action {
-                    self.content(fx, ContentReq::Push(ContentArg::Detail { sid, rk }));
+                    let row = self.detail(meta).and_then(|d| d.related.iter().find(|m| m.sid == sid && m.rk == rk));
+                    self.content(fx, card_open(sid, rk, row));
                 }
             }
             Some(Located::Collection(_)) => {
@@ -3763,7 +3774,9 @@ impl DetailScreen {
                     .map(|d| collection::action(d, local))
                     .unwrap_or(related::Action::None);
                 if let related::Action::OpenDetail(sid, rk) = action {
-                    self.content(fx, ContentReq::Push(ContentArg::Detail { sid, rk }));
+                    let row = self.detail(meta)
+                        .and_then(|d| collection::members(d).iter().find(|m| m.sid == sid && m.rk == rk));
+                    self.content(fx, card_open(sid, rk, row));
                 }
             }
             Some(Located::CollectionHeading) => {
@@ -4080,3 +4093,4 @@ mod preview_plane_tests {
         );
     }
 }
+

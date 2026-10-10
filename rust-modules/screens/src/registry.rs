@@ -354,6 +354,16 @@ pub fn card_press_plays(kind: std::os::raw::c_int) -> bool {
     kind != plx_data::pms::KIND_COLLECTION && plx_media::route::deck_press().press_plays()
 }
 
+/// What OK on a content page's card asks for: [`ContentReq::PlayCard`] while the press plays,
+/// else the item's own page.
+pub fn card_press_request(m: &plx_data::pms::PmsMovie) -> ContentReq {
+    if card_press_plays(m.kind) {
+        ContentReq::PlayCard { sid: m.sid, rk: m.rk.clone() }
+    } else {
+        ContentReq::Push(ContentArg::Detail { sid: m.sid, rk: m.rk.clone() })
+    }
+}
+
 /// What a card's details bubble says ([`plx_ui::cards::peek`]): the title, a facts line (year ·
 /// length or seasons · rating), the synopsis, and the foot line saying what OK and a hold do.
 /// `None` for a row that is not a film, show, season or episode (a collection opens its page and
@@ -949,6 +959,11 @@ pub enum ContentReq {
     Push(ContentArg),
     Present(ContentArg),
     Back,
+    /// OK on a card while the press plays ([`card_press_plays`]): start the focused card's item
+    /// the way a Home card's press does (a film or episode plays, a show or season resumes through
+    /// its page). The loop re-reads the page's focused card and acts only when it is still this
+    /// item.
+    PlayCard { sid: plx_plex::plex::ServerId, rk: String },
     Play { play: PlayIntent, resume_ns: i64 },
     /// Start a hero preview. Does not push the player route.
     PreviewStart {

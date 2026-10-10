@@ -140,6 +140,31 @@ impl EpisodesState {
         EpisodesKey::Moved
     }
 
+    /// Where each episode card is drawn now, in screen space — the strip's pointer stops, so a
+    /// Magic Remote click on a card plays it (`select` then `on_ok`) rather than missing the panel
+    /// and closing it.
+    pub fn card_rects(&self, ps: &plx_media::route::PlaybackSession) -> Vec<(usize, Rect)> {
+        let n = plx_media::route::with_queue(ps, |rows| episode_rows(rows).len());
+        let scroll = self.scroll.pos;
+        (0..n)
+            .map(|i| (i, Rect::new(MARGIN_X + i as f32 * (EP_W + EP_GAP) - scroll, EP_TOP, EP_W, EP_H)))
+            .filter(|(_, r)| plx_ui::on_axis(r.x, EP_W, SCR_W, 0.0))
+            .collect()
+    }
+
+    /// The band the strip occupies, which clips its stops.
+    pub fn band() -> Rect {
+        Rect::new(0.0, HEAD_Y - 40.0, SCR_W, EP_TOP + EP_H + 80.0 - (HEAD_Y - 40.0))
+    }
+
+    /// Put the cursor on episode `i` (a pointer click names its card).
+    pub fn select(&mut self, ps: &plx_media::route::PlaybackSession, i: usize) {
+        let n = plx_media::route::with_queue(ps, |rows| episode_rows(rows).len());
+        if i < n {
+            self.set_sel(i);
+        }
+    }
+
     /// OK on the highlighted episode.
     pub fn on_ok(&self, ps: &plx_media::route::PlaybackSession) -> EpisodesKey {
         if playing_index(ps) == Some(self.sel) {

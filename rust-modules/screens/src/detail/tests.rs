@@ -696,7 +696,8 @@ fn the_related_shelf_raises_the_same_open_request() {
     );
     assert!(effects.iter().any(|effect| matches!(
         &effect.fx,
-        Fx::App(AppFx::Content(ContentReq::Push(ContentArg::Detail { rk, .. }))) if rk == "related"
+        Fx::App(AppFx::Content(ContentReq::Push(ContentArg::Detail { rk, .. }) | ContentReq::PlayCard { rk, .. }))
+            if rk == "related"
     )));
     clear();
 }
@@ -716,13 +717,13 @@ fn an_open_request_does_not_outlive_its_page() {
     let (_, first) = step(&mut screen, &press, Some(related::elem(0).unwrap()));
     assert!(first
         .iter()
-        .any(|effect| matches!(&effect.fx, Fx::App(AppFx::Content(ContentReq::Push(_))))));
+        .any(|effect| matches!(&effect.fx, Fx::App(AppFx::Content(ContentReq::Push(_) | ContentReq::PlayCard { .. })))));
     let mut replacement = bare(&_guard, sid, "replacement");
     let (_, replacement_effects) = step(&mut replacement, &press, Some(related::elem(0).unwrap()));
     assert!(
         !replacement_effects
             .iter()
-            .any(|effect| matches!(&effect.fx, Fx::App(AppFx::Content(ContentReq::Push(_))))),
+            .any(|effect| matches!(&effect.fx, Fx::App(AppFx::Content(ContentReq::Push(_) | ContentReq::PlayCard { .. })))),
         "a replacement page cannot inherit an earlier instance's action"
     );
     // Unmount only ENQUEUES its `MetadataCmd::Clear` (a real Bridge applies it on the next
@@ -734,7 +735,7 @@ fn an_open_request_does_not_outlive_its_page() {
     let (_, after) = step(&mut screen, &press, Some(related::elem(0).unwrap()));
     assert!(!after
         .iter()
-        .any(|effect| matches!(&effect.fx, Fx::App(AppFx::Content(ContentReq::Push(_))))));
+        .any(|effect| matches!(&effect.fx, Fx::App(AppFx::Content(ContentReq::Push(_) | ContentReq::PlayCard { .. })))));
     clear();
 }
 
@@ -3455,7 +3456,8 @@ fn ok_on_the_heading_opens_the_collection_and_ok_on_a_member_opens_its_detail() 
     let member = collection::elem(1).unwrap();
     let (_, effects) = step(&mut screen, &ScreenEvent::Activate(member), Some(member));
     assert!(effects.iter().any(|e| matches!(&e.fx,
-        Fx::App(AppFx::Content(ContentReq::Push(ContentArg::Detail { rk, .. }))) if rk == "m2")));
+        Fx::App(AppFx::Content(ContentReq::Push(ContentArg::Detail { rk, .. }) | ContentReq::PlayCard { rk, .. }))
+            if rk == "m2")));
     clear();
 }
 

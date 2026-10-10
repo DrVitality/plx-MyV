@@ -51,7 +51,8 @@ use plx_machine::machine::{
 };
 use plx_appkit::more_menu::{MoreMenuPart, MoreOk};
 use plx_ui::screen::{
-    At, Dir, DrawFrame, FocusSource, Focusable, GroupSpec, HitSource, Part, Placed, RenderStrategy,
+    Activate, At, Dir, DrawFrame, FocusSource, Focusable, GroupSpec, HitSource, Hover, Part, Placed,
+    RenderStrategy,
     Screen, ScreenEvent, Step,
 };
 use plx_appkit::timing_capsule::{CapsuleOut, TimingCapsule};
@@ -878,6 +879,19 @@ impl<H: crate::registry::PlayerLike + crate::registry::MetadataLike> Machine<H> 
             // `PressCommit`, on release — except `Info`, whose `PressCommit` defers instead to
             // the loop's own tvOS dip (`Self::activate`'s doc explains the split).
             ScreenEvent::Activate(elem) => {
+                // a click on an Episodes card: play that episode (the one playing stays put)
+                if let Panel::Episodes(strip) = &mut self.panel {
+                    use plx_appkit::episodes_panel::EpisodesKey;
+                    strip.select(ps, *elem as usize);
+                    match strip.on_ok(ps) {
+                        EpisodesKey::Play(u) => {
+                            self.dismiss(fx);
+                            Self::ask(fx, PlayerReq::PlayEpisode(u));
+                        }
+                        _ => self.moved(fx),
+                    }
+                    return Handled::No;
+                }
                 // the event names the row that was hit (its key for Tracks): seat the panel on
                 // THAT row before `activate` reads the panel's own cursor, so a click never acts
                 // on a neighbour the cursor happened to still hold
@@ -989,9 +1003,25 @@ impl PlayerOverlayScreen {
             Panel::Chapters(p) => ChaptersPart { state: p, entry: self.entry, group: Self::GROUP, count: chapter_count(H::metadata(f.cx)) }.draw(f, Rect::FULL),
             Panel::More(p) => MoreMenuPart { state: p, entry: self.entry, group: Self::GROUP }.draw(f, Rect::FULL),
             // Timing owns its own key ladder and never asks the engine for focus, so it has no
-            // per-row geometry to register — `draw`, below, paints the capsule itself. The
-            // Episodes strip likewise.
-            Panel::Timing(_) | Panel::Episodes(_) => {}
+            // per-row geometry to register — `draw`, below, paints the capsule itself.
+            Panel::Timing(_) => {}
+            // The Episodes strip owns its keys too, but a pointer must still land on a card: each
+            // card is a click target (no hover focus — the strip has no engine group), so a click
+            // plays it (`ScreenEvent::Activate`, below) instead of missing the panel and closing it.
+            Panel::Episodes(p) => {
+                let root = plx_ui::Painter::root();
+                let clip = plx_appkit::episodes_panel::EpisodesState::band();
+                for (i, rect) in p.card_rects(H::session(f.cx)) {
+                    f.stop(root, plx_ui::screen::Stop {
+                        key: plx_machine::machine::FocusKey { entry: self.entry, elem: i as u32 },
+                        rect,
+                        rest_rect: rect,
+                        clip,
+                        hover: Hover::Ignore,
+                        activate: Activate::Direct,
+                    });
+                }
+            }
         }
     }
 }
