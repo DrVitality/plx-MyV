@@ -521,7 +521,7 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
                 let Some(item) = app.bridge.content_focused_item(&app.pages, entry, &ret) else { continue };
                 if item.sid != sid || item.rk != rk || item.rk.is_empty() { continue; }
                 unsafe { activate_card(&mut app.player.session, &mut app.adapters.player, &item, true, HUD_LINGER_MS,
-                    Some(ret), &mut app.pages, &mut app.bridge, &mut app.menu_play_await, now); }
+                    Some(ret), &mut app.pages, &mut app.bridge, &mut app.menu_play_await, fr.now); }
             }
             ContentReq::Present(arg) => {
                 halt_preview(app);
