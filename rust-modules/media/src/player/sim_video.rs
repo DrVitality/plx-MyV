@@ -68,6 +68,9 @@ struct Session {
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 /// Bumped on every reset, so a reader thread from an older session stops publishing.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
+/// The generation whose ffmpeg exited before its first picture (`u64::MAX` = none). Feeding stops
+/// for it: without this every following access unit spawned a fresh child that died the same way.
+static DEAD: AtomicU64 = AtomicU64::new(u64::MAX);
 /// The container's codec as the Load payload named it: `true` = HEVC, else H.264.
 static HEVC: AtomicBool = AtomicBool::new(false);
 /// The clock the frames are presented against — the sink's `Clock::position_ns`.
@@ -127,6 +130,9 @@ pub fn feed(au: &[u8], pts: i64) {
     if !armed() {
         return;
     }
+    if DEAD.load(Relaxed) == GENERATION.load(Relaxed) {
+        return;
+    }
     let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
         *guard = spawn();
@@ -142,6 +148,41 @@ fn ffmpeg_path() -> std::ffi::OsString {
     std::env::var_os("PLXNATIVE_SIM_FFMPEG").unwrap_or_else(|| "ffmpeg".into())
 }
 
+/// The flag that keeps one picture per access unit, in the installed ffmpeg's own spelling.
+///
+/// `-fps_mode` arrived in FFmpeg 5.1; before it the same thing was `-vsync`, which 5.1 deprecated.
+/// A distribution ffmpeg can be either side: Ubuntu 22.04's (the Windows/WSL simulator's) is 4.4,
+/// which rejects `-fps_mode` and exits before its first picture — so the video plane stayed black
+/// under a playback that was otherwise running. Asked once, from `ffmpeg -version`.
+fn sync_args() -> [&'static str; 2] {
+    static ONCE: OnceLock<[&'static str; 2]> = OnceLock::new();
+    *ONCE.get_or_init(|| {
+        let banner = Command::new(ffmpeg_path())
+            .arg("-version")
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default();
+        if has_fps_mode(&banner) { ["-fps_mode", "passthrough"] } else { ["-vsync", "passthrough"] }
+    })
+}
+
+/// Does the ffmpeg whose `-version` banner this is accept `-fps_mode` (5.1 and later)? A banner
+/// with no release number (a git build, `N-…`) is newer than any release that lacks it.
+fn has_fps_mode(banner: &str) -> bool {
+    let Some(version) = banner.split_whitespace().skip_while(|w| *w != "version").nth(1) else {
+        return true;
+    };
+    let version = version.trim_start_matches('n');
+    let mut parts = version.split(|c: char| !c.is_ascii_digit());
+    let (Some(Ok(major)), minor) = (parts.next().map(str::parse::<u32>), parts.next()) else {
+        return true;
+    };
+    let minor = minor.and_then(|m| m.parse::<u32>().ok()).unwrap_or(0);
+    (major, minor) >= (5, 1)
+}
+
 fn spawn() -> Option<Session> {
     let generation = GENERATION.load(Relaxed);
     let scale = format!(
@@ -152,10 +193,13 @@ fn spawn() -> Option<Session> {
         .arg(if HEVC.load(Relaxed) { "hevc" } else { "h264" })
         .args(["-i", "pipe:0", "-an", "-vf"])
         .arg(scale)
-        .args(["-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"])
+        .args(sync_args())
+        .args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        // Kept, not discarded: when the child dies before a picture its first line is the only
+        // account of why (an option this ffmpeg lacks, a stream it cannot decode).
+        .stderr(Stdio::piped())
         .spawn();
     let mut child = match spawned {
         Ok(child) => child,
@@ -164,7 +208,7 @@ fn spawn() -> Option<Session> {
             return None;
         }
     };
-    let (mut stdin, mut stdout) = (child.stdin.take()?, child.stdout.take()?);
+    let (mut stdin, mut stdout, mut stderr) = (child.stdin.take()?, child.stdout.take()?, child.stderr.take()?);
     let (tx, rx) = channel::<Vec<u8>>();
     let pending = Arc::new(Mutex::new(BinaryHeap::new()));
     let writer = std::thread::Builder::new().name("simvideo-in".into()).spawn(move || {
@@ -201,6 +245,13 @@ fn spawn() -> Option<Session> {
             }
             plx_machine::idle::invalidate();
         }
+        if frames == 0 && GENERATION.load(Relaxed) == generation {
+            let mut why = String::new();
+            let _ = stderr.read_to_string(&mut why);
+            let first = why.lines().next().unwrap_or("no message").chars().take(200).collect::<String>();
+            DEAD.store(generation, Relaxed);
+            plx_base::eventlog::log(&format!("simvideo: ffmpeg ended before its first picture: {first}"));
+        }
     });
     if writer.is_err() || reader.is_err() {
         plx_base::eventlog::log("simvideo: could not spawn the pipe threads; no picture this session");
@@ -231,4 +282,22 @@ pub fn composite_under() {
         }
         plx_gfx::gfx::draw_under(tex, 0.0, 0.0, W as f32, H as f32);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_fps_mode;
+
+    #[test]
+    fn the_sync_flag_follows_the_installed_ffmpegs_release() {
+        // Ubuntu 22.04 — the Windows/WSL simulator's — has no `-fps_mode`.
+        assert!(!has_fps_mode("ffmpeg version 4.4.2-0ubuntu0.22.04.1 Copyright (c) 2000-2021"));
+        assert!(!has_fps_mode("ffmpeg version 5.0.1 Copyright"));
+        assert!(has_fps_mode("ffmpeg version 5.1.2 Copyright"));
+        assert!(has_fps_mode("ffmpeg version 7.1 Copyright (c) 2000-2024"));
+        assert!(has_fps_mode("ffmpeg version n6.1.1 Copyright"));
+        // A git build, or a banner this cannot read, is assumed current.
+        assert!(has_fps_mode("ffmpeg version N-117321-g1e1a8f0 Copyright"));
+        assert!(has_fps_mode(""));
+    }
 }
