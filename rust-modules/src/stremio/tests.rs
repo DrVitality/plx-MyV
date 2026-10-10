@@ -435,7 +435,7 @@ fn a_show_page_has_its_seasons_and_episodes_from_the_metadata_provider() {
     assert_eq!(eps.len(), 2);
     assert_eq!(eps[1]["title"], "The Kingsroad");
     assert_eq!(eps[1]["grandparentTitle"], "Game of Thrones");
-    assert!(eps[1]["Media"][0]["Part"][0]["key"].as_str().unwrap().starts_with("/stremio/play/"));
+    assert!(eps[1]["Media"][0]["Part"][0]["key"].as_str().unwrap().starts_with("/library/parts/"));
     let leaves = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{show}/allLeaves"))));
     assert_eq!(leaves["MediaContainer"]["size"], 3);
     let ep = eps[1]["ratingKey"].as_str().unwrap();
@@ -458,7 +458,8 @@ fn a_film_page_has_its_people_and_a_playable_version() {
     assert_eq!(m["duration"], 142 * 60_000);
     assert_eq!(m["Role"][0]["tag"], "Tim Robbins");
     assert_eq!(m["Director"][0]["tag"], "Frank Darabont");
-    assert_eq!(m["Media"][0]["Part"][0]["key"], format!("/stremio/play/{rk}"));
+    let part = &m["Media"][0]["Part"][0];
+    assert_eq!(part["key"], format!("/library/parts/{}/{rk}/file.mkv", part["id"]));
     // A title no metadata provider has is a 404, not an empty page.
     let unknown = Rk::item("movie", "tt9999999").unwrap().encode();
     assert_eq!(b.handle(&authed("GET", &format!("/library/metadata/{unknown}"))).status, 404);
@@ -548,8 +549,13 @@ fn a_film_plays_its_chosen_stream_with_the_tracks_read_from_the_file() {
     assert_eq!(streams.len(), 4, "the file has an English subtitle, so no external one");
     assert_eq!(streams[3]["selected"], true);
 
-    // The part redirects to the cached stream the ranking chose.
+    // The part key is one the player direct-plays: a file name it streams itself (`.mkv`), and
+    // the part id where it reads it from, after `parts` — the id track choices are PUT to.
     let part = media["Part"][0]["key"].as_str().unwrap();
+    assert!(part.ends_with(".mkv"), "{part}: not a file the player streams itself");
+    let id_seg = part.split('/').skip_while(|s| *s != "parts").nth(1);
+    assert_eq!(id_seg, Some(media["Part"][0]["id"].to_string().as_str()));
+    // …and it redirects to the cached stream the ranking chose.
     let played = b.handle(&authed("GET", part));
     assert_eq!(played.status, 302);
     assert_eq!(played.location.as_deref(), Some("https://t/r/2"));

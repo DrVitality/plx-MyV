@@ -148,7 +148,7 @@ pub fn media_from_probe(rk: &str, part_id: i64, p: &Probe, size: Option<u64>, ex
         "videoCodec": video.map_or("", |v| v.codec.as_str()), "videoResolution": resolution_label(h),
         "container": p.container,
         "Part": [{
-            "id": part_id, "key": format!("/stremio/play/{rk}"), "duration": p.duration_ms,
+            "id": part_id, "key": super::catalog::part_key(part_id, rk, p.container), "duration": p.duration_ms,
             "size": size.unwrap_or(0), "container": p.container, "Stream": streams,
         }],
     }])
@@ -238,6 +238,6 @@ mod tests {
         assert_eq!(streams[2]["selected"], true);
         assert_eq!(streams[3]["key"], "/library/streams/9001");
         assert_eq!(streams[3]["selected"], true);
-        assert_eq!(m[0]["Part"][0]["key"], "/stremio/play/mstt1");
+        assert_eq!(m[0]["Part"][0]["key"], "/library/parts/77/mstt1/file.mkv");
     }
 }

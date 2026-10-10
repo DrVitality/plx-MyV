@@ -176,7 +176,8 @@ impl Bridge {
             ["stremio", "art", key] => self.art(key),
             ["stremio", "streams", rk] => self.streams_route(token, rk),
             ["stremio", "choose", rk] => self.choose(req, rk),
-            ["stremio", "play", rk] => self.play(token, rk),
+            // The part URL (`catalog::part_key`): the chosen stream, by redirect.
+            ["library", "parts", _, rk, _] => self.play(token, rk),
             ["video", ":", "transcode", "universal", "decision"] => self.decision(req, token),
             ["playQueues", _] => self.play_queue_again(),
             ["library", "streams", id] => self.subtitle_file(id),

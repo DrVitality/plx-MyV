@@ -6,7 +6,7 @@
 //! ready one is chosen, and the first bytes of that file are read for its tracks
 //! (`super::super::probe`). The result is kept for a few hours, so the page, the player's
 //! decision, its play queue and every seek all agree on one file. The part URL the player opens,
-//! `/stremio/play/{rk}`, answers with a redirect to that stream; the player's own transport follows
+//! `/library/parts/{id}/{rk}/file.mkv` (`catalog::part_key`), answers with a redirect to that stream; the player's own transport follows
 //! it (and the debrid service's next redirect) over HTTPS.
 //!
 //! **Choosing another stream.** `/stremio/choose/{rk}?index=N` (the stream list's order) replaces
@@ -245,7 +245,7 @@ impl Bridge {
         it.pointer("/state/timeOffset").and_then(Value::as_i64).filter(|o| *o > 0)
     }
 
-    /// `/stremio/play/{rk}`: the chosen stream, by redirect.
+    /// `/library/parts/{id}/{rk}/file.mkv`: the chosen stream, by redirect.
     pub(super) fn play(&self, token: &str, rk_s: &str) -> Response {
         let Some(rk) = Rk::decode(rk_s) else { return Response::empty(404) };
         let Some(r) = self.resolved(token, &rk, rk_s, None) else { return Response::empty(404) };

@@ -428,6 +428,18 @@ pub fn title_row(t: &Title, shelf: Shelf<'_>, art: &ArtMap) -> Value {
     row
 }
 
+/// The part URL the player opens for item `rk`: the bridge's play route, spelled the way a media
+/// server spells a file — `/library/parts/{id}/{rk}/file.mkv`.
+///
+/// **The shape is load-bearing, not cosmetic.** The player direct-plays a part only when its key
+/// ends in `.mkv`, `.mp4` or `.m4v` (anything else is sent to the server to be repackaged, which
+/// there is no server here to do), and it reads the part id — the one track choices are PUT to —
+/// from the segment after `parts`. A key that broke either rule played nothing.
+pub fn part_key(part: i64, rk: &str, container: &str) -> String {
+    let ext = if container == "mp4" { "mp4" } else { "mkv" };
+    format!("/library/parts/{part}/{rk}/file.{ext}")
+}
+
 /// The playable stand-in a film or episode carries until a stream is chosen: one version whose
 /// part is the bridge's play route. The stream behind it is picked when it is opened.
 pub fn placeholder_media(rk: &str, minutes: Option<i64>) -> Value {
@@ -435,7 +447,7 @@ pub fn placeholder_media(rk: &str, minutes: Option<i64>) -> Value {
     json!([{
         "id": part, "container": "mkv", "videoCodec": "h264", "audioCodec": "aac",
         "videoResolution": "1080", "duration": minutes.unwrap_or(0) * 60_000,
-        "Part": [{"id": part, "key": format!("/stremio/play/{rk}"), "container": "mkv",
+        "Part": [{"id": part, "key": part_key(part, rk, "mkv"), "container": "mkv",
                   "duration": minutes.unwrap_or(0) * 60_000, "Stream": []}],
     }])
 }
