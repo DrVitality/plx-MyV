@@ -555,7 +555,14 @@ mod evidence_tests {
     use super::*;
     use plx_net::net::{RequestError, RequestFailure, Resp};
 
-    const SWITCH: &str = "https://plex.tv/api/v2/home/users/synthetic/switch";
+    /// A switch URL under [`plex_tv`]'s default — the Stremio bridge — since only a URL on the
+    /// account host moves the reachability memos these tests read.
+    const SWITCH: &str = "http://127.0.0.1:32498/api/v2/home/users/synthetic/switch";
+
+    #[test]
+    fn the_switch_url_is_on_the_account_host() {
+        assert!(SWITCH.starts_with(plex_tv()));
+    }
 
     /// #132: a managed profile's 401 on `/api/v2/home/users` is a verdict about the identity, and
     /// must stay one through the evidence — an incomplete transfer included — while a timeout or
