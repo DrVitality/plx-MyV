@@ -481,8 +481,8 @@ fn field_options(field: PickerKind, quality: Quality, direct_play: DirectPlayMod
         PickerKind::Corners => look_options(field, &plx_ui::theme::appearance::Corners::LADDER, corners_label),
         PickerKind::Peek => look_options(field, &plx_ui::theme::appearance::Peek::LADDER, peek_label),
         PickerKind::StreamQuality => [plx_platform::i18n::msg::settings_playback_stream_quality_best(),
-            plx_platform::i18n::msg::settings_playback_stream_quality_1080(),
-            plx_platform::i18n::msg::settings_playback_stream_quality_720()]
+            plx_platform::i18n::msg::settings_playback_stream_quality_up_to_1080(),
+            plx_platform::i18n::msg::settings_playback_stream_quality_up_to_720()]
             .into_iter().enumerate().map(|(i, s)| (s.into(), Value::Look(field, i as u8))).collect(),
         PickerKind::StreamSource => [plx_platform::i18n::msg::settings_playback_stream_source_any(),
             plx_platform::i18n::msg::settings_playback_stream_source_instant()]

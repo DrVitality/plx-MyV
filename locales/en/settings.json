@@ -1323,11 +1323,11 @@
     "value": "Best available",
     "description": "Stream quality option: no cap"
   },
-  "settings.playback.stream_quality.1080": {
+  "settings.playback.stream_quality.up_to_1080": {
     "value": "Up to 1080p",
     "description": "Stream quality option"
   },
-  "settings.playback.stream_quality.720": {
+  "settings.playback.stream_quality.up_to_720": {
     "value": "Up to 720p",
     "description": "Stream quality option"
   },
