@@ -610,15 +610,16 @@ fn owned_search_result_keys_are_server_scoped_and_survive_same_query_reordering(
     assert_eq!(d.focus(), Some(second), "identity survives the changed catalog order");
     frame(&mut d, &mut rig, AppArg::Search, tick(4), script_key(Key::Ok, tick(4)));
     for i in 5..35 { frame(&mut d, &mut rig, AppArg::Search, tick(i), vec![]); }
+    // OK on a film plays it (the card-press default); the request names the retained item.
     assert!(rig.search_reqs.iter().any(|(_, req, _)| matches!(req,
-        plx_screens::registry::SearchReq::Detail { sid, rk } if *sid == b && rk == "same-local-key")));
+        plx_screens::registry::SearchReq::Play { sid, rk } if *sid == b && rk == "same-local-key")));
     assert!(!rig.search_reqs.iter().any(|(_, req, _)| matches!(req,
-        plx_screens::registry::SearchReq::Detail { sid, .. } if *sid == a)));
+        plx_screens::registry::SearchReq::Play { sid, .. } if *sid == a)));
     let requests = rig.take_search_reqs();
     assert!(!requests.is_empty());
     assert!(rig.take_search_reqs().is_empty(), "requests execute only once");
     let (_, _, ret) = requests.iter().find(|(_, req, _)| matches!(req,
-        plx_screens::registry::SearchReq::Detail { .. })).unwrap();
+        plx_screens::registry::SearchReq::Play { .. })).unwrap();
     let entry = d.nav.top_page().unwrap().id;
     let (selected, opener) = rig.search_selection(&d, entry, ret.focus).unwrap();
     assert!(matches!(selected, plx_data::search::Item::Media(item) if item.sid == b));
@@ -1088,7 +1089,8 @@ fn owned_search_ok_on_a_collection_requests_its_collection_page() {
             if *sid == a && rk == "50007" && *tag == 7))
         .expect("OK on a collection requests its page");
     assert!(!requests.iter().any(|(_, req, _)| matches!(req,
-        plx_screens::registry::SearchReq::Detail { .. })), "never an item detail");
+        plx_screens::registry::SearchReq::Detail { .. } | plx_screens::registry::SearchReq::Play { .. })),
+        "never an item detail or play");
     let entry = d.nav.top_page().unwrap().id;
     let (selected, _) = rig.search_selection(&d, entry, ret.focus).unwrap();
     assert!(matches!(selected, plx_data::search::Item::Collection(c) if c.item.rk == "50007"));

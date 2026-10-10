@@ -9,22 +9,22 @@ impl Drop for Restore {
     }
 }
 
-/// **A durable pick is live and read back by the next load**; the default is Details.
+/// **A durable pick is live and read back by the next load**; the default is Play.
 #[test]
 fn a_durable_pick_is_live_and_persisted() {
     let _g = plx_base::testlock::serial();
     let _session = plx_plex::plex::session::TempSession::new("deck-press-set");
     let _restore = Restore(deck_press());
-    restore_deck_press(DeckPress::Details);
-    assert_eq!(deck_press(), DeckPress::Details, "the shipped default opens the page");
+    restore_deck_press(DeckPress::Play);
+    assert_eq!(deck_press(), DeckPress::Play, "the shipped default plays");
 
-    assert!(set_deck_press(DeckPress::Play));
-    assert_eq!(deck_press(), DeckPress::Play);
-    assert_eq!(plx_plex::plex::session::load().deck_press(), DeckPress::Play);
+    assert!(set_deck_press(DeckPress::Details));
+    assert_eq!(deck_press(), DeckPress::Details);
+    assert_eq!(plx_plex::plex::session::load().deck_press(), DeckPress::Details);
 
     // choosing the default again removes the key from the file
-    assert!(set_deck_press(DeckPress::Details));
-    assert_eq!(plx_plex::plex::session::load().deck_press(), DeckPress::Details);
+    assert!(set_deck_press(DeckPress::Play));
+    assert_eq!(plx_plex::plex::session::load().deck_press(), DeckPress::Play);
 }
 
 /// **A failed write claims nothing**: the live value stays.

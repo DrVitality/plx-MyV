@@ -6400,10 +6400,10 @@ pub fn set_skip_interval(interval: SkipInterval) -> bool {
     saved
 }
 
-/// What OK does on a Continue Watching card — install-wide, like [`NEXT_EPISODE_MODE`]. Read by
-/// every deck's press and draw (Home's and the Library's) and by the item menu when it builds its
-/// rows; `DeckPress::press_plays` is the one question they all ask of it.
-static DECK_PRESS: AtomicU8 = AtomicU8::new(0); // DeckPress::Details's index
+/// What OK does on a card — install-wide, like [`NEXT_EPISODE_MODE`]. Read by every card's press
+/// and draw (Home's, the Library's, Search's) and by the item menu when it builds its rows;
+/// `DeckPress::press_plays` is the one question they all ask of it.
+static DECK_PRESS: AtomicU8 = AtomicU8::new(1); // DeckPress::Play's index — the default
 
 pub fn deck_press() -> DeckPress {
     DeckPress::from_index(DECK_PRESS.load(Ordering::Relaxed))

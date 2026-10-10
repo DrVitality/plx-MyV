@@ -36,6 +36,13 @@ pub(super) fn grid_art(item: &plx_data::pms::PmsMovie) -> Art<'_> {
 
 /// One label construction for the normal and modal-lifted focused grid card.
 pub(super) fn grid_label(item: &plx_data::pms::PmsMovie) -> ui_cards::TileLabel {
+    let mut label = grid_label_text(item);
+    // The ▶ promises that OK plays (`registry::card_press_plays`), on the grid as on a shelf.
+    label.glyph = crate::registry::card_press_plays(item.kind);
+    label
+}
+
+fn grid_label_text(item: &plx_data::pms::PmsMovie) -> ui_cards::TileLabel {
     if item.kind == 3 {
         let name = if item.title.is_empty() || item.title == item.show_title {
             plx_ui::fmt::episode_address(item.season_index as i64, item.ep_index as i64)
@@ -446,7 +453,8 @@ impl<H: Host<Elem = u32>> CardSource<H> for GridSrc<'_, '_> {
     fn overlay(&self, p: Painter, i: usize, tile: &Tile, measure: &dyn Measure) {
         #[cfg(test)] OVERLAID.with(|seen| seen.borrow_mut().push((i, tile.scale)));
         if let Some(item) = self.view.item(i).filter(|item| item.kind == 3) {
-            plx_ui::widgets::still_overlay(p, &tile_facts::of(item), tile.rect, tile.radius, false, measure);
+            plx_ui::widgets::still_overlay(p, &tile_facts::of(item), tile.rect, tile.radius,
+                crate::registry::card_press_plays(item.kind), measure);
         }
     }
     /// Metadata still pages ahead via `LibraryWork::Want`; a slot whose page has not landed draws

@@ -302,6 +302,8 @@ impl SearchScreen {
                     self.remember(fx);
                     fx.push(Fx::App(AppFx::Search(if held {
                         SearchReq::ItemMenu { sid: media.sid, rk: media.rk.clone() }
+                    } else if crate::registry::card_press_plays(media.kind) {
+                        SearchReq::Play { sid: media.sid, rk: media.rk.clone() }
                     } else { SearchReq::Detail { sid: media.sid, rk: media.rk.clone() } })));
                 }
                 // A collection opens its page; it has no item menu, so a hold does the same.

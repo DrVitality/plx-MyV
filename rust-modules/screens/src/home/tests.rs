@@ -1858,7 +1858,7 @@ fn deck_press_is(mode: plx_media::route::DeckPress) -> DeckPressGuard {
 }
 
 #[test]
-fn continue_watching_commit_follows_the_setting_while_an_ordinary_shelf_opens_detail() {
+fn every_shelfs_commit_follows_the_card_press_setting() {
     use plx_media::route::DeckPress;
     let _guard = plx_base::testlock::serial();
     let mut state = plx_data::pms::PmsState::default();
@@ -1876,7 +1876,7 @@ fn continue_watching_commit_follows_the_setting_while_an_ordinary_shelf_opens_de
         assert!(has_home(&play, |r| matches!(r, HomeReq::Play { rk, .. } if rk == "1")));
     }
     {
-        // the default: OK on a deck card opens the page, exactly as on any other shelf
+        // Open details: OK opens the page
         let _press = deck_press_is(DeckPress::Details);
         let detail = commit(&mut s, 2);
         assert!(has_home(&detail, |r| matches!(r, HomeReq::Detail { rk, .. } if rk == "1")));
@@ -1887,23 +1887,26 @@ fn continue_watching_commit_follows_the_setting_while_an_ordinary_shelf_opens_de
         sid: plx_plex::plex::ServerId::UNSET,
         key: "/hubs/recent".into(),
     };
-    let detail = commit(&mut s, 3);
-    assert!(has_home(&detail, |r| matches!(r, HomeReq::Detail { rk, .. } if rk == "1")));
+    // an ordinary shelf follows the same setting: the press plays
+    let play = commit(&mut s, 3);
+    assert!(has_home(&play, |r| matches!(r, HomeReq::Play { rk, .. } if rk == "1")));
 }
 
-/// The amber ▶ promises the press plays, so the deck's title line carries it in Play mode only.
+/// The amber ▶ promises the press plays, so a focused title carries it in Play mode only — and a
+/// collection, whose press only ever opens, never does.
 #[test]
 fn the_deck_title_carries_the_play_glyph_only_while_the_press_plays() {
     use plx_media::route::DeckPress;
     let _guard = plx_base::testlock::serial();
     {
         let _press = deck_press_is(DeckPress::Play);
-        assert!(deck_label(true, "Show").glyph);
-        assert!(!deck_label(false, "Show").glyph, "a shelf that navigates never carries it");
+        assert!(press_label(0, "Film").glyph);
+        assert!(press_label(1, "Show").glyph);
+        assert!(!press_label(plx_data::pms::KIND_COLLECTION, "Box set").glyph);
     }
     let _press = deck_press_is(DeckPress::Details);
-    assert!(!deck_label(true, "Show").glyph);
-    assert!(!deck_label(false, "Show").glyph);
+    assert!(!press_label(0, "Film").glyph);
+    assert!(!press_label(1, "Show").glyph);
 }
 
 #[test]

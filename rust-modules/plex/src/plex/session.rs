@@ -785,7 +785,7 @@ impl Default for CanonicalSessionPreferences {
             subtitle_position: SubtitlePosition::Low,
             next_episode_mode: NextEpisodeMode::Countdown,
             skip_interval: SkipInterval::Seconds10,
-            deck_press: DeckPress::Details,
+            deck_press: DeckPress::Play,
             plaintext_consent: Vec::new(),
             server_key_pins: Vec::new(),
             audio_enhancements: crate::plex::AudioEnhancements::NONE,
@@ -1390,15 +1390,17 @@ impl SkipInterval {
     }
 }
 
-/// What OK does on a Continue Watching card — install-wide, like [`SubtitleTone`]. Absence is
-/// `Details`: OK opens the movie or episode page, exactly as on any other shelf, and the card's
-/// menu leads with Play (and the card draws no amber ▶, which promises a press that plays).
-/// `Play` is what every build before this preference did: OK plays or resumes at once.
+/// What OK does on a movie, show or episode card — on every shelf, grid and search result, not
+/// only Continue Watching (the name is the preference's history) — install-wide, like
+/// [`SubtitleTone`]. Absence is `Play`: OK starts the film, or resumes the show at the episode it
+/// stopped on, and the focused card wears the amber ▶ that promises it. `Details` opens the page
+/// instead, and the card's menu then leads with Play. Either way the menu, opened by holding OK,
+/// has the other.
 #[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeckPress {
-    #[default]
     #[serde(rename = "details")]
     Details,
+    #[default]
     #[serde(rename = "play")]
     Play,
 }
@@ -1417,8 +1419,8 @@ impl DeckPress {
         Self::LADDER.iter().position(|&m| m == self).unwrap_or(0) as u8
     }
 
-    /// Whether a press on a Continue Watching card starts the video — the one fact the deck's
-    /// triangle, its press and its menu's Play row are all derived from.
+    /// Whether a press on a card starts the video — the one fact the cards' triangle, their press
+    /// and their menu's Play row are all derived from.
     pub fn press_plays(self) -> bool {
         self == DeckPress::Play
     }
@@ -2364,7 +2366,8 @@ fn is_default_skip_interval(interval: &SkipInterval) -> bool {
     *interval == SkipInterval::default()
 }
 
-/// The deck-press mode is a preference too: a spelling this build does not know degrades to Details.
+/// The card-press mode is a preference too: a spelling this build does not know degrades to the
+/// default (Play).
 fn de_soft_deck_press<'de, D>(d: D) -> Result<DeckPress, D::Error>
 where
     D: Deserializer<'de>,
@@ -5684,7 +5687,7 @@ mod deck_press_tests {
     use super::*;
 
     #[test]
-    fn absent_or_malformed_is_details() {
+    fn absent_or_malformed_is_the_default_play() {
         for value in [
             serde_json::json!({}),
             serde_json::json!({"deck_press": null}),
@@ -5693,14 +5696,14 @@ mod deck_press_tests {
         ] {
             let session: Session = serde_json::from_value(value.clone())
                 .unwrap_or_else(|e| panic!("{value}: a bad preference must not fail the session: {e}"));
-            assert_eq!(session.deck_press(), DeckPress::Details, "{value}");
+            assert_eq!(session.deck_press(), DeckPress::Play, "{value}");
         }
     }
 
     #[test]
     fn the_default_is_not_serialized() {
         let session = Session::default();
-        assert_eq!(session.deck_press(), DeckPress::Details);
+        assert_eq!(session.deck_press(), DeckPress::Play);
         assert!(!serde_json::to_string(&session).unwrap().contains("deck_press"));
         let prefs = serde_json::to_string(&split_public(&session).unwrap().preferences).unwrap();
         assert!(!prefs.contains("deck_press"), "{prefs}");
@@ -5708,15 +5711,15 @@ mod deck_press_tests {
 
     #[test]
     fn a_pick_round_trips_through_both_formats() {
-        let session = Session::default().with_deck_press(DeckPress::Play);
+        let session = Session::default().with_deck_press(DeckPress::Details);
         let json = serde_json::to_string(&session).unwrap();
         assert!(json.contains("deck_press"), "{json}");
         let round: Session = serde_json::from_str(&json).unwrap();
-        assert_eq!(round.deck_press(), DeckPress::Play);
+        assert_eq!(round.deck_press(), DeckPress::Details);
 
         let (public, protected) = split_canonical(&session).unwrap();
-        assert_eq!(join_canonical(&public, &protected).unwrap().deck_press(), DeckPress::Play);
-        assert_eq!(public_session(&public).deck_press(), DeckPress::Play);
+        assert_eq!(join_canonical(&public, &protected).unwrap().deck_press(), DeckPress::Details);
+        assert_eq!(public_session(&public).deck_press(), DeckPress::Details);
     }
 
     #[test]

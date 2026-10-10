@@ -38,7 +38,13 @@ impl<H: SearchLike> CardSource<H> for RowCards<'_> {
     }
     fn label(&self, i: usize) -> TileLabel {
         match self.items.get(i) {
-            Some(item) => TileLabel::titled(item.title(), &render::subtitle(self.kind, item, self.handle(item))),
+            Some(item) => {
+                let mut label = TileLabel::titled(item.title(), &render::subtitle(self.kind, item, self.handle(item)));
+                // The ▶ promises that OK plays (`registry::card_press_plays`); a person or a
+                // collection never does.
+                label.glyph = matches!(item, Item::Media(media) if crate::registry::card_press_plays(media.kind));
+                label
+            }
             None => TileLabel::default(),
         }
     }
@@ -50,7 +56,8 @@ impl<H: SearchLike> CardSource<H> for RowCards<'_> {
     }
     fn overlay(&self, p: Painter, i: usize, tile: &Tile, measure: &dyn Measure) {
         if let (Kind::Episode, Some(Item::Media(media))) = (self.kind, self.items.get(i)) {
-            plx_ui::widgets::still_overlay(p, &tile_facts::of(media), tile.rect, tile.radius, false, measure);
+            plx_ui::widgets::still_overlay(p, &tile_facts::of(media), tile.rect, tile.radius,
+                crate::registry::card_press_plays(media.kind), measure);
         }
     }
 }

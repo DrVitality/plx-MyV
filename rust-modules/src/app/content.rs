@@ -474,7 +474,7 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
     drain_held_feature(app);
     home_requests(app, fr.now);
     library_requests(app, fr.now);
-    search_requests(app);
+    search_requests(app, fr.now);
     // The player's overlays are surfaces on its own stack, so what they decide reaches the
     // loop the same way every other owned screen's decision does — as requests, drained here,
     // after the dispatcher and before the frame's own arms (`playback::player_requests`).
@@ -713,7 +713,7 @@ fn search_target(item: &plx_data::search::Item, request: &plx_screens::registry:
     }
 }
 
-fn search_requests(app: &mut App) {
+fn search_requests(app: &mut App, now: u32) {
     use plx_screens::registry::SearchReq;
     for (source, request, ret) in app.bridge.take_search_reqs() {
         let MachineId::Instance(instance) = source else { continue };
@@ -738,6 +738,15 @@ fn search_requests(app: &mut App) {
                 let Some((item, _)) = app.bridge.search_selection(&app.pages, entry, ret.focus) else { continue };
                 let Some(target) = search_target(&item, &request) else { continue };
                 bridge::nav_push_with_return(&mut app.pages, target, ret);
+            }
+            // OK on a hit while the press plays: the same start a shelf card's press takes (a film
+            // or episode plays, a show resumes through its page), checked against the retained
+            // selection first like every other request here.
+            SearchReq::Play { sid, rk } => {
+                let Some((plx_data::search::Item::Media(item), _)) = app.bridge.search_selection(&app.pages, entry, ret.focus) else { continue };
+                if item.sid != *sid || item.rk != *rk || item.rk.is_empty() { continue; }
+                unsafe { activate_card(&mut app.player.session, &mut app.adapters.player, &item, true, HUD_LINGER_MS,
+                    Some(ret), &mut app.pages, &mut app.bridge, &mut app.menu_play_await, now); }
             }
             SearchReq::ItemMenu { sid, rk } => {
                 let Some((plx_data::search::Item::Media(item), opener)) = app.bridge.search_selection(&app.pages, entry, ret.focus) else { continue };

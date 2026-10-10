@@ -312,13 +312,13 @@ impl<H: Host<Elem = u32>> CardSource<H> for HubSrc<'_> {
     fn progress(&self, i: usize) -> Option<f32> {
         self.shelf.filter(|shelf| !shelf.landscape).and_then(|_| self.item(i)).and_then(|item| item.resume_frac())
     }
-    /// A landscape shelf's episode still carries its show line, and the Continue Watching deck its
-    /// play mark when a press plays.
+    /// A landscape shelf's episode still carries its show line, and its play mark when a press
+    /// plays.
     fn overlay(&self, p: plx_ui::Painter, i: usize, tile: &Tile, measure: &dyn Measure) {
         let (Some(shelf), Some(item)) = (self.shelf, self.item(i)) else { return };
         if shelf.landscape {
             plx_ui::widgets::still_overlay(p, &tile_facts::of(item), tile.rect, tile.radius,
-                shelf.is_continue && plx_media::route::deck_press().press_plays(), measure);
+                crate::registry::card_press_plays(item.kind), measure);
         }
     }
 }
@@ -343,7 +343,7 @@ pub(super) fn shelf_label(shelf: &plx_data::browse::section_hubs::Shelf, col: us
         return if fact.is_empty() { ui_cards::TileLabel::title(&name) }
         else { ui_cards::TileLabel::titled(&name, &fact) };
     }
-    let mut label = if shelf.is_continue && plx_media::route::deck_press().press_plays() { ui_cards::TileLabel::played(&item.title) }
+    let mut label = if crate::registry::card_press_plays(item.kind) { ui_cards::TileLabel::played(&item.title) }
         else { ui_cards::TileLabel::title(&item.title) };
     label.caption = ui_cards::focused_caption(&tile_facts::of(item), shelf.is_continue);
     label

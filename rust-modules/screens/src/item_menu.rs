@@ -7,13 +7,13 @@
 //! separator between the navigation actions and the state actions. Plex's own version is a
 //! full-screen sheet; that is deliberately not what this is.
 //!
-//! It exists because OK on a Continue Watching tile can **resume immediately** (the Playback
-//! setting [`DeckPress::Play`]; the amber play badge on the card is the affordance that says so).
-//! The hold is the *other* half of that interaction, and until it existed Go-to-Show, per-item
-//! Mark-as-Watched and Play-from-Start had nowhere to live (`docs/parity-gaps.md` §1.2/§1.3, §5a).
-//! Under the default, [`DeckPress::Details`], OK opens the page instead and the deck card's menu
-//! leads with the Play row that press gave up (and drops the Go to Movie / Episode row it now
-//! duplicates).
+//! It exists because OK on a card **plays immediately** (the Playback setting [`DeckPress::Play`],
+//! this fork's default for every card; the amber play badge on the focused card is the affordance
+//! that says so). The hold is the *other* half of that interaction: Go to Movie / Show — the way
+//! to a page at all while OK plays — per-item Mark-as-Watched and Play-from-Start live here
+//! (`docs/parity-gaps.md` §1.2/§1.3, §5a). Under [`DeckPress::Details`] OK opens the page instead
+//! and the menu leads with the Play row that press gave up (and drops the Go to Movie / Episode
+//! row it now duplicates).
 //!
 //! **Every card surface opens it** — a home shelf, the Library browse grid, a Search result shelf,
 //! a person's filmography and the detail page's Related shelf present [`ItemMenuKind::Card`]; the
@@ -240,12 +240,13 @@ fn build(m: &PmsMovie, from_deck: bool) -> ItemForm {
     build_with(m, from_deck, DeckPress::Play, None)
 }
 
-/// `deck_press` is the Continue Watching setting. It changes this menu for a card FROM the deck
-/// only, and only while OK there opens the page ([`DeckPress::Details`]): the menu then leads with
-/// Play (the opening row — the press that used to play now lives here) and drops the row that
-/// navigates to the card's own page (Go to Movie / Episode, and for a show or season its Go to
-/// Show / Season), which is what OK on the card already does. Any other card, and a deck
-/// card while OK plays, gets the menu it always had.
+/// `deck_press` is the card-press setting (what OK does on any card). While OK opens the page
+/// ([`DeckPress::Details`]) the menu leads with Play (the opening row — the press that would have
+/// played lives here) and drops the row that navigates to the card's own page (Go to Movie /
+/// Episode, and for a show or season its Go to Show / Season), which is what OK on the card
+/// already does. While OK plays (the default) the menu keeps its navigation rows — they are how a
+/// page is reached at all — and has no Play row, which would only repeat the press.
+/// `from_deck` still decides the deck-only row ([`Action::RemoveFromDeck`]).
 fn build_with(
     m: &PmsMovie,
     from_deck: bool,
@@ -253,10 +254,10 @@ fn build_with(
     trailer: Option<&plx_data::metadata::Extra>,
 ) -> ItemForm {
     let leaf = m.kind == 0 || m.kind == 3;
-    let opens_details = from_deck && !deck_press.press_plays();
+    let opens_details = !deck_press.press_plays();
     let mut sec = FormSection::new(""); // no header: the card behind the panel IS the title
 
-    // ---- the deck card's own press, when OK no longer plays ----
+    // ---- the card's own press, when OK opens the page instead of playing ----
     // First, so it is where the menu opens. It resumes when there is a resume point and the label
     // says which, in the words the hero's pill uses.
     // A show or season has no resume point of its own, so it says "Play".
@@ -1000,34 +1001,28 @@ mod tests {
             assert_eq!(play[0], nav, "{kind}: {play:?}");
             assert_eq!(l[1..], play[2..], "{kind}: {l:?} vs {play:?}");
             assert!(!play.iter().any(|x| x == "Play" || x == "Continue"), "{play:?}");
-            // off the deck the setting is not consulted
-            assert_eq!(
-                labels(&build_deck(&m, false, DeckPress::Details)),
-                labels(&build_deck(&m, false, DeckPress::Play)),
-                "{kind}"
-            );
+            // the setting covers every card, so off the deck it leads with Play the same way
+            let off = labels(&build_deck(&m, false, DeckPress::Details));
+            assert_eq!(off[0], "Play", "{kind}: {off:?}");
+            assert!(!off.iter().any(|x| x == nav), "{kind}: {off:?}");
         }
     }
 
+    /// **The setting covers every card, on the deck or off it.** While OK plays (the default) a
+    /// menu keeps the navigation rows that are now the only way to a page and offers no Play row;
+    /// while OK opens the page, any card's menu leads with Play instead.
     #[test]
-    fn the_play_mode_and_off_deck_menus_are_unchanged() {
+    fn the_card_press_setting_shapes_every_cards_menu() {
         for kind in [0, 3] {
-            let today = labels(&build(&item(kind, PosterMark::None), true));
-            assert!(!today.iter().any(|l| l == "Play" || l == "Continue"), "{today:?}");
-            assert_eq!(labels(&build_deck(&item(kind, PosterMark::None), true, DeckPress::Play)), today);
-            // off the deck the setting is not consulted at all
-            for mode in DeckPress::LADDER {
-                assert_eq!(
-                    labels(&build_deck(&item(kind, PosterMark::None), false, mode)),
-                    labels(&build(&item(kind, PosterMark::None), false)),
-                    "{kind} {mode:?}"
-                );
+            for from_deck in [true, false] {
+                let play = build_deck(&item(kind, PosterMark::None), from_deck, DeckPress::Play);
+                assert_eq!(labels(&play), labels(&build(&item(kind, PosterMark::None), from_deck)));
+                assert!(play.offers(ItemRow::GoToItem) && !play.offers(ItemRow::Play), "{kind} {from_deck}");
+                let details = build_deck(&item(kind, PosterMark::None), from_deck, DeckPress::Details);
+                assert!(!details.offers(ItemRow::GoToItem) && details.offers(ItemRow::Play), "{kind} {from_deck}");
+                assert_eq!(details.0.opening_key(), Some(ItemRow::Play.key()));
             }
         }
-        let play_mode = build_deck(&item(0, PosterMark::None), true, DeckPress::Play);
-        assert!(play_mode.offers(ItemRow::GoToItem) && !play_mode.offers(ItemRow::Play));
-        let off_deck = build_deck(&item(3, PosterMark::None), false, DeckPress::Details);
-        assert!(off_deck.offers(ItemRow::GoToItem) && !off_deck.offers(ItemRow::Play));
     }
 
     #[test]

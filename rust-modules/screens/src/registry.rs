@@ -212,6 +212,8 @@ pub enum PlayerReq {
 pub enum SearchReq {
     Back,
     Detail { sid: plx_plex::plex::ServerId, rk: String },
+    /// OK on a film, show or episode hit while the press plays ([`card_press_plays`]).
+    Play { sid: plx_plex::plex::ServerId, rk: String },
     Person { sid: plx_plex::plex::ServerId, key: String, guid: String, name: String, thumb: String },
     ItemMenu { sid: plx_plex::plex::ServerId, rk: String },
     /// OK on a Collections-shelf hit. `rk` is the collection's ratingKey (empty for a tag-shaped
@@ -326,6 +328,14 @@ pub struct ItemMenuArg {
     pub anchor: [u32; 4],
     pub loaded_episode: bool,
     pub from_home: bool,
+}
+
+/// Does OK on a card for this item START it (a film or episode plays, a show or season resumes
+/// at the episode it stopped on) rather than open its page — the Playback preference
+/// (`route::deck_press`), for every kind but a collection, which only ever opens. The one answer
+/// a card's press, its ▶ and its menu's Play row are derived from on every screen.
+pub fn card_press_plays(kind: std::os::raw::c_int) -> bool {
+    kind != plx_data::pms::KIND_COLLECTION && plx_media::route::deck_press().press_plays()
 }
 
 /// Which of the three menus this is, and the data its row set is built from.

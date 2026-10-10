@@ -692,16 +692,16 @@
     "description": "Next episode picker option: nothing is shown during the credits and the next episode does not start by itself."
   },
   "settings.playback.deck_press": {
-    "value": "Continue Watching",
-    "description": "Settings row title and picker title: what OK does on a card in the Continue Watching shelf."
+    "value": "Pressing OK on a card",
+    "description": "Settings row title and picker title: what OK does on a movie, show or episode card on any shelf, grid or search result."
   },
   "settings.playback.deck_press.details": {
     "value": "Open details",
-    "description": "Continue Watching picker option (the default): OK on a card opens the movie or episode page."
+    "description": "Card press picker option: OK on a card opens the movie, show or episode page."
   },
   "settings.playback.deck_press.play": {
     "value": "Play",
-    "description": "Continue Watching picker option: OK on a card starts or resumes the video at once."
+    "description": "Card press picker option (the default): OK on a card starts the movie, or resumes the show at its next episode, at once."
   },
   "settings.playback.skip_interval": {
     "value": "Skip interval",
@@ -770,8 +770,8 @@
     "description": "Explanation under the title of the Next episode picker. It names the three options by their picker labels (Up Next countdown, After credits, Off); keep those words identical to settings.playback.next_episode.countdown, .after_credits and .off. Only credits that run to the end of the item trigger the button."
   },
   "settings.playback.deck_press.copy": {
-    "value": "Open details shows the movie or episode page when you press OK on a Continue Watching card. Play starts or resumes it at once. The card's menu, opened by holding OK, always has the other.",
-    "description": "Explanation under the title of the Continue Watching picker. It names the two options by their picker labels (Open details, Play); keep those words identical to settings.playback.deck_press.details and .play."
+    "value": "Play starts a movie, or picks a show up at its next episode, when you press OK on a card. Open details shows its page instead. The card's menu, opened by holding OK, always has the other.",
+    "description": "Explanation under the title of the card press picker. It names the two options by their picker labels (Open details, Play); keep those words identical to settings.playback.deck_press.details and .play."
   },
   "settings.playback.skip_interval.copy": {
     "value": "How far one press of Left or Right jumps in the player.",

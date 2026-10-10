@@ -1455,12 +1455,7 @@ impl HomeScreen {
                 let Some(item) = self.item_at(view, row, col) else {
                     return;
                 };
-                if self
-                    .rows
-                    .get(row)
-                    .is_some_and(|h| h.identity == HomeHubIdentity::ContinueWatching)
-                    && plx_media::route::deck_press().press_plays()
-                {
+                if crate::registry::card_press_plays(item.kind) {
                     let resume_ns =
                         plx_data::metadata::resume_ns(item.resume_ms, item.dur_ns / 1_000_000);
                     (
@@ -2976,11 +2971,11 @@ mod placeholder_tests;
 #[cfg(test)]
 pub(crate) mod cards_harness; // Tier 2 card conformance (cards_conformance_tests.rs)
 
-/// A focused tile's title line. The deck's carries the amber ▶ only while OK on a Continue
-/// Watching card plays (`DeckPress::Play`): the triangle promises the press, so when OK opens the
+/// A focused tile's title line. It carries the amber ▶ only while OK on the card plays
+/// ([`crate::registry::card_press_plays`]): the triangle promises the press, so when OK opens the
 /// page there is none (`widgets::still_line`'s rule).
-fn deck_label(is_deck: bool, title: &str) -> ui_cards::TileLabel {
-    if is_deck && plx_media::route::deck_press().press_plays() {
+fn press_label(kind: std::os::raw::c_int, title: &str) -> ui_cards::TileLabel {
+    if crate::registry::card_press_plays(kind) {
         ui_cards::TileLabel::played(title)
     } else {
         ui_cards::TileLabel::title(title)
@@ -3037,7 +3032,7 @@ impl<H: HomeLike> CardSource<H> for HomeCards<'_> {
     fn label(&self, i: usize) -> ui_cards::TileLabel {
         let Some(item) = self.item(i) else { return ui_cards::TileLabel::default() };
         let continue_watching = self.home.rows[self.row].identity == HomeHubIdentity::ContinueWatching;
-        let mut label = deck_label(continue_watching, &item.title);
+        let mut label = press_label(item.kind, &item.title);
         label.caption = ui_cards::focused_caption(&tile_facts::of(item), continue_watching);
         label
     }
