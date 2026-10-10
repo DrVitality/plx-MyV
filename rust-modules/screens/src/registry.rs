@@ -245,6 +245,8 @@ pub enum HomeTab {
     Movies,
     Shows,
     Search,
+    /// The Anime library's pill (`SecKind::Anime`), drawn after TV Shows.
+    Anime,
 }
 
 /// Addressed bootstrap/diagnostic intentions. They use the same owned step and focus engine as

@@ -198,7 +198,7 @@ impl Bridge {
         let all = library::shelves(&addons);
         let rows: Vec<Value> = library::libraries(&all)
             .into_iter()
-            .map(|lib| json!({"key": lib.key().to_string(), "type": lib.wire(), "title": lib.title(),
+            .map(|lib| json!({"key": lib.key().to_string(), "type": lib.section_type(), "title": lib.title(),
                               "agent": "tv.plex.agents.movie", "scanner": "Plex Movie",
                               "language": "en-US", "refreshing": false, "allowSync": false}))
             .collect();

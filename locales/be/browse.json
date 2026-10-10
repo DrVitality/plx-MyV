@@ -123,6 +123,7 @@
   },
   "browse.peek.hint_play": "OK — прайграць · утрымлівайце OK — больш",
   "browse.peek.hint_details": "OK — адкрыць · утрымлівайце OK — больш",
+  "browse.kind.anime": "Анімэ",
   "browse.detail.seasons": {
     "one": "{count} сезон",
     "few": "{count} сезоны",

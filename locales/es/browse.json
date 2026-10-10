@@ -120,6 +120,7 @@
   },
   "browse.peek.hint_play": "OK reproduce · mantén OK para más",
   "browse.peek.hint_details": "OK abre · mantén OK para más",
+  "browse.kind.anime": "Anime",
   "browse.detail.seasons": {
     "one": "{count} temporada",
     "many": "{count} temporadas",

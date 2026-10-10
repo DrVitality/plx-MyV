@@ -339,7 +339,7 @@ impl LibraryType {
     pub fn offered(kind: SecKind) -> &'static [LibraryType] {
         match kind {
             SecKind::Movie => &[Self::Primary, Self::Collections],
-            SecKind::Show => &[Self::Primary, Self::Seasons, Self::Episodes, Self::Collections],
+            SecKind::Show | SecKind::Anime => &[Self::Primary, Self::Seasons, Self::Episodes, Self::Collections],
         }
     }
 
@@ -351,6 +351,7 @@ impl LibraryType {
         match (self, kind) {
             (Self::Primary, SecKind::Movie) => plx_platform::i18n::msg::browse_kind_movies_in(locale),
             (Self::Primary, SecKind::Show) => plx_platform::i18n::msg::browse_kind_tv_shows_in(locale),
+            (Self::Primary, SecKind::Anime) => plx_platform::i18n::msg::browse_kind_anime_in(locale),
             (Self::Seasons, _) => plx_platform::i18n::msg::browse_kind_seasons_in(locale),
             (Self::Episodes, _) => plx_platform::i18n::msg::browse_kind_episodes_in(locale),
             (Self::Collections, _) => plx_platform::i18n::msg::browse_kind_collections_in(locale),
@@ -363,7 +364,7 @@ impl LibraryType {
     pub fn empty_readout(self, kind: SecKind, library: &str) -> String {
         match (self, kind) {
             (Self::Primary, SecKind::Movie) => plx_platform::i18n::msg::browse_library_no_movies(library),
-            (Self::Primary, SecKind::Show) => plx_platform::i18n::msg::browse_library_no_shows(library),
+            (Self::Primary, SecKind::Show | SecKind::Anime) => plx_platform::i18n::msg::browse_library_no_shows(library),
             (Self::Seasons, _) => plx_platform::i18n::msg::browse_library_no_seasons(library),
             (Self::Episodes, _) => plx_platform::i18n::msg::browse_library_no_episodes(library),
             (Self::Collections, _) => plx_platform::i18n::msg::browse_library_no_collections(library),
@@ -376,7 +377,7 @@ impl LibraryType {
     pub fn plex_type(self, kind: SecKind) -> Option<i64> {
         match (self, kind) {
             (Self::Primary, SecKind::Movie) => None,
-            (Self::Primary, SecKind::Show) => Some(2),
+            (Self::Primary, SecKind::Show | SecKind::Anime) => Some(2),
             (Self::Seasons, _) => Some(3),
             (Self::Episodes, _) => Some(4),
             (Self::Collections, _) => Some(18),
@@ -698,7 +699,7 @@ impl SecState {
         }
         if self.unwatched {
             let key = match (section_kind, self.library_type) {
-                (SecKind::Show, LibraryType::Primary | LibraryType::Seasons) => "unwatchedLeaves",
+                (SecKind::Show | SecKind::Anime, LibraryType::Primary | LibraryType::Seasons) => "unwatchedLeaves",
                 _ => "unwatched",
             };
             filters.push((key.into(), "1".into()));
@@ -2884,6 +2885,11 @@ fn project_sections(mc: &plx_plex::plex::MediaContainer) -> Vec<(i64, String, Se
 pub enum SecKind {
     Movie,
     Show,
+    /// Anime: a library of shows (and the odd film) that has its own tab beside TV Shows. It is
+    /// browsed exactly as a show library is — the same levels, filters and sorts — and differs
+    /// only in its name and its pill. The wire type is `anime` (the Stremio bridge's anime
+    /// library); its ITEMS are ordinary `show` / `movie` rows.
+    Anime,
 }
 
 impl SecKind {
@@ -2895,6 +2901,7 @@ impl SecKind {
         match s {
             "movie" => Some(SecKind::Movie),
             "show" => Some(SecKind::Show),
+            "anime" => Some(SecKind::Anime),
             _ => None,
         }
     }
@@ -2906,6 +2913,7 @@ impl SecKind {
         match self {
             SecKind::Movie => "movie",
             SecKind::Show => "show",
+            SecKind::Anime => "anime",
         }
     }
     /// The same thing as a standalone label ("Films"), for a row whose count has not landed yet.
@@ -2913,6 +2921,15 @@ impl SecKind {
         match self {
             SecKind::Movie => plx_platform::i18n::msg::browse_kind_films(),
             SecKind::Show => plx_platform::i18n::msg::browse_kind_tv_shows_sentence(),
+            SecKind::Anime => plx_platform::i18n::msg::browse_kind_anime(),
+        }
+    }
+    /// The kind's slot in per-kind tables (the strip order, [`TAB_KINDS`]).
+    pub const fn index(self) -> usize {
+        match self {
+            SecKind::Movie => 0,
+            SecKind::Show => 1,
+            SecKind::Anime => 2,
         }
     }
 }
@@ -2931,7 +2948,7 @@ pub const PLAYS_SORT_KEY: &str = "viewCount";
 /// rather than silently inheriting `true`.
 fn kind_offers_plays_sort(kind: SecKind) -> bool {
     match kind {
-        SecKind::Movie | SecKind::Show => true,
+        SecKind::Movie | SecKind::Show | SecKind::Anime => true,
     }
 }
 
@@ -3009,7 +3026,7 @@ fn activate_source_of(_i: usize) {
 
 /// Every type this product has a pill for, in strip order. A pill is only DRAWN when the
 /// favourite set can fill it — see [`tab_kinds`] — so this is the vocabulary, not the strip.
-pub const TAB_KINDS: [SecKind; 2] = [SecKind::Movie, SecKind::Show];
+pub const TAB_KINDS: [SecKind; 3] = [SecKind::Movie, SecKind::Show, SecKind::Anime];
 
 // ---- favourites: the ONE control, it governs the WHOLE APP, and it is PER PROFILE ------------
 //
@@ -3114,7 +3131,7 @@ fn count_line(count: i64, kind: SecKind) -> String {
     if count >= 0 {
         match kind {
             SecKind::Movie => plx_platform::i18n::msg::browse_person_films(count),
-            SecKind::Show => plx_platform::i18n::msg::browse_person_shows(count),
+            SecKind::Show | SecKind::Anime => plx_platform::i18n::msg::browse_person_shows(count),
         }
     } else {
         kind.plural().to_string()

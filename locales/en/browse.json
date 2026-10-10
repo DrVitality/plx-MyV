@@ -470,6 +470,10 @@
     "value": "OK opens · hold OK for more",
     "description": "Foot line of the details bubble beside a focused card when OK opens the item's page (the Open details setting); holding OK opens its menu."
   },
+  "browse.kind.anime": {
+    "value": "Anime",
+    "description": "Top tab and library-type label for the Anime library (shows and films from anime catalogs)."
+  },
   "browse.detail.seasons": {
     "value": {
       "one": "{count} season",

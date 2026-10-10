@@ -645,6 +645,7 @@ impl Bridge {
         match tab {
             HomeTab::Movies => self.directory.view().preferred(plx_data::browse::SecKind::Movie).is_some(),
             HomeTab::Shows => self.directory.view().preferred(plx_data::browse::SecKind::Show).is_some(),
+            HomeTab::Anime => self.directory.view().preferred(plx_data::browse::SecKind::Anime).is_some(),
             _ => true,
         }
     }
@@ -2858,13 +2859,18 @@ pub(crate) fn nav_tab(
                     Pill::Search => HomeTab::Search,
                     Pill::Section(plx_data::browse::SecKind::Movie) => HomeTab::Movies,
                     Pill::Section(plx_data::browse::SecKind::Show) => HomeTab::Shows,
+                    Pill::Section(plx_data::browse::SecKind::Anime) => HomeTab::Anime,
                 };
                 rig.home_command(HomeCmd::FocusStrip(want));
             }
             AppArg::Home
         }
-        HomeTab::Movies | HomeTab::Shows => {
-            let kind = if tab == HomeTab::Movies { plx_data::browse::SecKind::Movie } else { plx_data::browse::SecKind::Show };
+        HomeTab::Movies | HomeTab::Shows | HomeTab::Anime => {
+            let kind = match tab {
+                HomeTab::Movies => plx_data::browse::SecKind::Movie,
+                HomeTab::Anime => plx_data::browse::SecKind::Anime,
+                _ => plx_data::browse::SecKind::Show,
+            };
             rig.enter_library(kind);
             if d.top_arg() != Some(&AppArg::Library) { rig.aim_library(kind); }
             AppArg::Library

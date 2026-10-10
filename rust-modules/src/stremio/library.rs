@@ -54,6 +54,15 @@ impl Lib {
         }
     }
 
+    /// The library's own type in the sections list: `anime` gives Anime its own tab beside TV
+    /// Shows (`SecKind::Anime`), while its items stay [`wire`](Self::wire) — shows and films.
+    pub fn section_type(self) -> &'static str {
+        match self {
+            Lib::Anime => "anime",
+            other => other.wire(),
+        }
+    }
+
     /// The library a title of Stremio type `stype` and id `id` belongs to.
     pub fn of_title(stype: &str, id: &str) -> Lib {
         if super::catalog::is_anime(stype, id) {

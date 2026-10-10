@@ -369,7 +369,8 @@ fn the_libraries_are_movies_shows_and_anime() {
     let summary: Vec<(&str, &str, &str)> = dirs.iter()
         .map(|d| (d["key"].as_str().unwrap(), d["type"].as_str().unwrap(), d["title"].as_str().unwrap()))
         .collect();
-    assert_eq!(summary, vec![("1", "movie", "Movies"), ("2", "show", "TV Shows"), ("3", "show", "Anime")]);
+    // Anime is its own library type, so the app gives it a tab of its own.
+    assert_eq!(summary, vec![("1", "movie", "Movies"), ("2", "show", "TV Shows"), ("3", "anime", "Anime")]);
 }
 
 #[test]
