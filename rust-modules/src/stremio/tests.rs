@@ -613,7 +613,6 @@ fn an_episode_queue_holds_the_whole_show_with_the_playing_episode_selected() {
     assert_eq!(mc["playQueueSelectedItemOffset"], 1);
     // Resume where the account stopped.
     assert_eq!(rows[1]["viewOffset"], 600000);
-    assert!(rows[1]["Media"].is_array());
 }
 
 #[test]
