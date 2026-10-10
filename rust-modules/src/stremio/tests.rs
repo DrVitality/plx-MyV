@@ -132,6 +132,12 @@ fn authed(method: &str, target: &str) -> Request {
     Request::new(method, target, &[("X-Plex-Token", KEY)])
 }
 
+/// Is `hub` the bridge's listing `n` — a linked shelf whose page lists the whole of it?
+fn is_listing(hub: &Value, n: &str) -> bool {
+    hub["key"] == format!("/library/collections/stremio-{n}/children")
+        && hub["hubIdentifier"].as_str().is_some_and(|id| id.starts_with("custom.collection.") && id.ends_with(&format!(".stremio-{n}")))
+}
+
 fn metas(rows: Value) -> Value {
     json!({ "metas": rows })
 }
@@ -420,7 +426,7 @@ fn a_library_shelf_is_each_of_its_catalogs_and_home_leads_with_continue_watching
     assert_eq!(hubs.len(), 5, "Continue Watching, a shelf from each library, My Library: {hubs:?}");
     // My Library: what the account saved (not removed), marked as saved
     let mine = hubs.last().unwrap();
-    assert_eq!(mine["hubIdentifier"], "stremio.library");
+    assert!(is_listing(mine, "library"), "{mine}");
     let titles: Vec<&str> = mine["Metadata"].as_array().unwrap().iter().map(|r| r["title"].as_str().unwrap()).collect();
     assert!(titles.contains(&"Game of Thrones") && titles.contains(&"The Godfather"), "{titles:?}");
     assert!(!titles.contains(&"The Shawshank Redemption"), "a removed item is not saved");
@@ -445,7 +451,7 @@ fn home_rows_follow_the_viewers_switches_and_order() {
     assert_eq!(after["rows"][1]["shown"], false);
     let home = json_of(&b.handle(&authed("GET", "/hubs")));
     let hubs = home["MediaContainer"]["Hub"].as_array().unwrap();
-    assert_eq!(hubs[0]["hubIdentifier"], "stremio.library");
+    assert!(is_listing(&hubs[0], "library"));
     assert!(hubs.iter().all(|h| h["hubIdentifier"] != "home.continue"), "a hidden row is not on Home");
     assert!(super::take_home_changed(), "the app is told to refetch Home");
 }
@@ -898,13 +904,13 @@ fn coming_soon_lists_the_next_unreleased_episode_of_a_saved_show() {
     let b = bridge_with(s);
     let home = json_of(&b.handle(&authed("GET", "/hubs")));
     let hubs = home["MediaContainer"]["Hub"].as_array().unwrap();
-    let soon_hub = hubs.iter().find(|h| h["hubIdentifier"] == "stremio.coming_soon").expect("a Coming Soon row");
+    let soon_hub = hubs.iter().find(|h| is_listing(h, "coming_soon")).expect("a Coming Soon row");
     let rows = soon_hub["Metadata"].as_array().unwrap();
     assert_eq!(rows.len(), 1, "one card per show");
     let line = rows[0]["summary"].as_str().unwrap();
     assert!(line.starts_with("S1 · E2 · Airs "), "{line}");
     // the episode that already aired is New Episodes', not Coming Soon's
-    assert!(hubs.iter().any(|h| h["hubIdentifier"] == "stremio.new_episodes"));
+    assert!(hubs.iter().any(|h| is_listing(h, "new_episodes")));
 }
 
 #[test]
@@ -1010,8 +1016,42 @@ fn picked_for_you_follows_the_genres_of_what_was_watched_and_skips_what_is_known
     let b = bridge_with(s);
     let home = json_of(&b.handle(&authed("GET", "/hubs")));
     let hubs = home["MediaContainer"]["Hub"].as_array().unwrap();
-    let mine = hubs.iter().find(|h| h["hubIdentifier"] == "stremio.for_you").expect("a Picked for You row");
+    let mine = hubs.iter().find(|h| is_listing(h, "for_you")).expect("a Picked for You row");
     let titles: Vec<&str> = mine["Metadata"].as_array().unwrap().iter().map(|r| r["title"].as_str().unwrap()).collect();
     assert_eq!(titles, ["Succession"], "what was watched is not suggested back");
-    assert_eq!(hubs[1]["hubIdentifier"], "stremio.for_you", "it follows Continue Watching");
+    assert!(is_listing(&hubs[1], "for_you"), "it follows Continue Watching");
+}
+
+#[test]
+fn a_shelf_heading_opens_the_whole_catalog_as_one_scrolling_listing() {
+    let b = content_bridge();
+    let movies = json_of(&b.handle(&authed("GET", "/hubs/sections/1")));
+    let hub = &movies["MediaContainer"]["Hub"][0];
+    let id = hub["hubIdentifier"].as_str().unwrap();
+    assert!(id.starts_with("custom.collection.1.stremio-"), "a linked shelf of the Movies library: {id}");
+    assert!(hub.get("size").is_none(), "no count is claimed for a catalog");
+    let key = hub["key"].as_str().unwrap();
+    let rk = key.trim_start_matches("/library/collections/").trim_end_matches("/children");
+    let head = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{rk}"))));
+    assert_eq!(head["MediaContainer"]["Metadata"][0]["type"], "collection");
+    assert_eq!(head["MediaContainer"]["Metadata"][0]["title"], "Popular · Movies");
+    let page = json_of(&b.handle(&authed("GET", &format!("{key}?X-Plex-Container-Start=0&X-Plex-Container-Size=60"))));
+    assert_eq!(page["MediaContainer"]["Metadata"][0]["title"], "The Shawshank Redemption");
+    assert_eq!(page["MediaContainer"]["Metadata"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn search_offers_every_result_on_its_own_scrolling_page() {
+    let b = content_bridge();
+    let found = json_of(&b.handle(&authed("GET", "/hubs/search?query=alien&limit=5")));
+    let hubs = found["MediaContainer"]["Hub"].as_array().unwrap();
+    let all = hubs.iter().find(|h| h["type"] == "collection").expect("an all-results card");
+    let card = &all["Metadata"][0];
+    assert_eq!(card["title"], "All movies · alien");
+    let rk = card["ratingKey"].as_str().unwrap();
+    let head = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{rk}"))));
+    assert_eq!(head["MediaContainer"]["Metadata"][0]["title"], "All movies · alien");
+    let page = json_of(&b.handle(&authed("GET", &format!("/library/collections/{rk}/children?X-Plex-Container-Start=0&X-Plex-Container-Size=60"))));
+    assert_eq!(page["MediaContainer"]["Metadata"][0]["title"], "Alien");
+    assert_eq!(page["MediaContainer"]["totalSize"], 1);
 }

@@ -26,6 +26,10 @@ const SEARCH_CATALOGS: usize = 2;
 /// Pages of a catalog fetched at most to serve one request.
 const MAX_PAGES: usize = 10;
 
+/// The ratingKey prefix of a **listing** — a shelf (or a search's results) opened as its own page,
+/// served as a media-server collection so the app's collection page scrolls through all of it.
+pub(super) const LISTING: &str = "stremio-";
+
 /// Search suggestions taken from each of the movie and show catalogs.
 const SUGGESTIONS_PER_LIB: usize = 3;
 
@@ -364,6 +368,7 @@ impl Bridge {
         let all = self.shelves(&addons);
         let mut hubs = self.hubs_for(&addons, &all, &shelves_of(&all, lib));
         hubs.extend(self.genre_hubs(&addons, &all, lib));
+        link_listings(&mut hubs, lib.key());
         Response::json(200, &container(json!({"size": hubs.len(), "Hub": hubs})))
     }
 
@@ -627,6 +632,7 @@ impl Bridge {
                 }
             }
         }
+        link_listings(&mut hubs, 0);
         Response::json(200, &container(json!({"size": hubs.len(), "Hub": hubs})))
     }
 
@@ -866,6 +872,7 @@ impl Bridge {
             return Response::json(200, &container(json!({"Hub": []})));
         }
         let mut hubs = Vec::new();
+        let mut listings = Vec::new();
         for (stype, wire) in [("movie", "movie"), ("series", "show")] {
             let catalogs: Vec<(usize, usize)> =
                 library::search_catalogs(&addons, stype).into_iter()
@@ -892,8 +899,20 @@ impl Bridge {
                 .iter()
                 .map(|t| catalog::title_row(t, row_shelf(Lib::of_title(&t.stype, &t.id)), &self.art))
                 .collect();
+            // every result, scrolled through on its own page: a collection card at the end
+            if !titles.is_empty() {
+                let rk = format!("{LISTING}q-{}-{}", &stype[..1], hex(&query));
+                let thumb = titles.iter().find_map(|t| t.poster.as_deref()).map(|u| self.art.path(u));
+                let label = if wire == "movie" { "All movies" } else { "All shows" };
+                listings.push(json!({"ratingKey": rk, "key": format!("/library/collections/{rk}/children"),
+                    "type": "collection", "subtype": wire, "title": format!("{label} · {query}"), "thumb": thumb}));
+            }
             hubs.push(json!({"title": wire, "type": wire, "hubIdentifier": wire,
                              "size": rows.len(), "Metadata": rows}));
+        }
+        if !listings.is_empty() {
+            hubs.push(json!({"title": "collection", "type": "collection", "hubIdentifier": "collection",
+                             "size": listings.len(), "Metadata": listings}));
         }
         Response::json(200, &container(json!({"size": hubs.len(), "Hub": hubs})))
     }
@@ -1427,4 +1446,125 @@ fn watched_at_all(it: &Value) -> bool {
     let n = |k: &str| it.pointer(k).and_then(Value::as_i64).unwrap_or(0);
     n("/state/timesWatched") > 0 || n("/state/flaggedWatched") > 0 || n("/state/timeOffset") > 0
         || n("/state/timeWatched") > 0 || it.pointer("/state/watched").and_then(Value::as_str).is_some_and(|w| !w.is_empty())
+}
+
+/// Every bridge shelf on a hubs answer becomes a **linked** shelf: a promoted collection hub
+/// (`custom.collection.{section}.{rk}.{rk}`, listing `/library/collections/{rk}/children`), so
+/// its heading opens the whole shelf on its own page, read as one long grid that loads as it is
+/// scrolled. Its `size` is dropped: a catalog has no count to state, and the heading would
+/// otherwise announce the twenty cards on the shelf as the whole of it.
+fn link_listings(hubs: &mut [Value], section: i64) {
+    for hub in hubs.iter_mut() {
+        let Some(n) = hub.get("key").and_then(Value::as_str).and_then(|k| k.strip_prefix("/hubs/stremio/")).map(str::to_string) else {
+            continue;
+        };
+        let rk = format!("{LISTING}{n}");
+        let sec = if section != 0 {
+            section
+        } else {
+            hub.pointer("/Metadata/0/librarySectionID").and_then(Value::as_i64).unwrap_or(0)
+        };
+        hub["key"] = json!(format!("/library/collections/{rk}/children"));
+        hub["hubIdentifier"] = json!(format!("custom.collection.{sec}.{rk}.{rk}"));
+        if let Some(obj) = hub.as_object_mut() {
+            obj.remove("size");
+        }
+    }
+}
+
+/// Lower-case hex of a text's bytes (a search query inside a ratingKey).
+fn hex(text: &str) -> String {
+    text.bytes().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The text back from [`hex`].
+fn unhex(h: &str) -> Option<String> {
+    if h.len() % 2 != 0 {
+        return None;
+    }
+    let bytes: Option<Vec<u8>> = (0..h.len()).step_by(2).map(|i| u8::from_str_radix(h.get(i..i + 2)?, 16).ok()).collect();
+    String::from_utf8(bytes?).ok()
+}
+
+impl Bridge {
+    /// `GET /library/metadata/stremio-…`: a listing's header, as a collection row.
+    pub(super) fn listing_header(&self, token: &str, rk: &str) -> Response {
+        let Some(title) = self.listing_title(token, rk.trim_start_matches(LISTING)) else {
+            return Response::empty(404);
+        };
+        Response::json(200, &container(json!({"size": 1, "Metadata": [{
+            "ratingKey": rk, "key": format!("/library/collections/{rk}/children"),
+            "type": "collection", "title": title, "summary": "",
+        }]})))
+    }
+
+    /// `GET /library/collections/stremio-…/children`: a listing's rows, a window at a time (the
+    /// collection page asks for the next window as the grid scrolls toward its end).
+    pub(super) fn listing_children(&self, req: &Request, token: &str, rk: &str) -> Response {
+        let Some(n) = rk.strip_prefix(LISTING) else { return Response::empty(404) };
+        if let Some(rest) = n.strip_prefix("q-") {
+            return self.search_listing(req, token, rest);
+        }
+        self.shelf_page(req, token, n)
+    }
+
+    /// What a listing is called.
+    fn listing_title(&self, token: &str, n: &str) -> Option<String> {
+        let own = match n {
+            "library" => Some("My Library"),
+            "new_episodes" => Some("New Episodes"),
+            "coming_soon" => Some("Coming Soon"),
+            "for_you" => Some("Picked for You"),
+            _ => None,
+        };
+        if let Some(t) = own {
+            return Some(t.to_string());
+        }
+        if let Some(rest) = n.strip_prefix("q-") {
+            let (kind, q) = rest.split_once('-')?;
+            let label = if kind == "m" { "All movies" } else { "All shows" };
+            return Some(format!("{label} · {}", unhex(q)?));
+        }
+        let addons = self.addons(token).ok()?;
+        let all = self.shelves(&addons);
+        if let Some((s, g)) = n.strip_prefix('g').and_then(|r| r.split_once('-')) {
+            let s = all.get(s.parse::<usize>().ok()?).copied()?;
+            let g = g.parse::<usize>().ok()?;
+            return self.library_genres(&addons, &all, s.lib).into_iter()
+                .find(|(gn, gi, _)| all.get(*gn) == Some(&s) && *gi == g)
+                .map(|(_, _, name)| format!("{name} · {}", s.lib.title()));
+        }
+        let s = all.get(n.parse::<usize>().ok()?).copied()?;
+        Some(format!("{} · {}", shelf_title(&addons, &all, s), s.lib.title()))
+    }
+
+    /// Every result of a search of one kind (`m` or `s`, then the query in [`hex`]), windowed.
+    fn search_listing(&self, req: &Request, token: &str, rest: &str) -> Response {
+        let Some((kind, q)) = rest.split_once('-') else { return Response::empty(404) };
+        let (Some(query), stype) = (unhex(q), if kind == "m" { "movie" } else { "series" }) else {
+            return Response::empty(404);
+        };
+        let addons = match self.addons(token) {
+            Ok(addons) => addons,
+            Err(e) => return api_failure(e),
+        };
+        let catalogs: Vec<(usize, usize)> = library::search_catalogs(&addons, stype).into_iter()
+            .filter(|(a, _)| self.with_config(|c| c.addon_on(&addons[*a], super::super::api::Resource::Catalog)))
+            .collect();
+        let q = query.as_str();
+        let addons_ref = &addons;
+        let jobs: Vec<Box<dyn FnOnce() -> Vec<Title> + Send + '_>> = catalogs.iter()
+            .map(|&(a, c)| Box::new(move || self.catalog_page(&addons_ref[a], (a, c), 0, Some(q)))
+                as Box<dyn FnOnce() -> Vec<Title> + Send + '_>)
+            .collect();
+        let mut seen = std::collections::HashSet::new();
+        let rows: Vec<Value> = parallel(jobs).into_iter().flatten().flatten()
+            .filter(|t| seen.insert(t.id.clone()))
+            .map(|t| catalog::title_row(&t, row_shelf(Lib::of_title(&t.stype, &t.id)), &self.art))
+            .collect();
+        let (start, size) = window(req, 60);
+        let page: Vec<Value> = rows.iter().skip(start).take(size).cloned().collect();
+        Response::json(200, &container(json!({"size": page.len(), "totalSize": rows.len(), "offset": start,
+                                              "Metadata": page})))
+    }
 }
