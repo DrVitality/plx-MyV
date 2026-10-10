@@ -1,6 +1,28 @@
 {
- "generated": "2026-10-10T04:39:03Z",
- "metrics": [],
+ "generated": "2026-10-10T04:39:45Z",
+ "metrics": [
+  {
+   "change30_pct": null,
+   "change7_pct": null,
+   "d30": null,
+   "delta30": null,
+   "delta7": null,
+   "group": "ci",
+   "id": "pr_wait",
+   "kind": "wait",
+   "label": "PR CI wait",
+   "n_now": 1,
+   "n_prev": 0,
+   "now": 382,
+   "prev7": null,
+   "shown": true,
+   "state": "new",
+   "state30": "new",
+   "threshold_abs": 90.0,
+   "threshold_pct": 25.0,
+   "unit": "s"
+  }
+ ],
  "regressions": [],
  "schema": 2,
  "slowest_ci": [],
