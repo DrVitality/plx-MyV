@@ -994,3 +994,24 @@ fn search_suggests_the_top_of_the_movie_and_show_catalogs() {
     let terms: Vec<&str> = got["terms"].as_array().unwrap().iter().map(|t| t.as_str().unwrap()).collect();
     assert_eq!(terms, ["The Shawshank Redemption", "The Godfather", "Game of Thrones"]);
 }
+
+#[test]
+fn picked_for_you_follows_the_genres_of_what_was_watched_and_skips_what_is_known() {
+    let mut s = content_scripted();
+    s.addons[0].manifest.catalogs[1].extra.push(ExtraProp { name: "genre".into(), is_required: false,
+        options: vec!["Drama".into(), "Comedy".into()] });
+    s.pages.insert("https://v3-cinemeta.example/meta/series/tt0944947.json".into(), json!({"meta": {
+        "id": "tt0944947", "type": "series", "name": "Game of Thrones", "genres": ["Drama", "Fantasy"],
+        "videos": [{"id": "tt0944947:1:1", "season": 1, "episode": 1}]}}));
+    s.pages.insert("https://v3-cinemeta.example/catalog/series/top/genre=Drama.json".into(), metas(json!([
+        {"id": "tt0944947", "type": "series", "name": "Game of Thrones"},
+        {"id": "tt7660850", "type": "series", "name": "Succession"},
+    ])));
+    let b = bridge_with(s);
+    let home = json_of(&b.handle(&authed("GET", "/hubs")));
+    let hubs = home["MediaContainer"]["Hub"].as_array().unwrap();
+    let mine = hubs.iter().find(|h| h["hubIdentifier"] == "stremio.for_you").expect("a Picked for You row");
+    let titles: Vec<&str> = mine["Metadata"].as_array().unwrap().iter().map(|r| r["title"].as_str().unwrap()).collect();
+    assert_eq!(titles, ["Succession"], "what was watched is not suggested back");
+    assert_eq!(hubs[1]["hubIdentifier"], "stremio.for_you", "it follows Continue Watching");
+}

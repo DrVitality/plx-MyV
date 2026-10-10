@@ -6,8 +6,8 @@
 //! preferences it already holds. A missing or unreadable file is the defaults; a write that fails
 //! keeps the change for this run and is logged.
 //!
-//! **Home rows.** Every row Home can show has a stable id: the three of the bridge's own
-//! (`continue`, `new_episodes`, `library`) and one per catalog (`addon|type|catalog`). The
+//! **Home rows.** Every row Home can show has a stable id: the bridge's own (`continue`,
+//! `for_you`, `new_episodes`, `coming_soon`, `library`) and one per catalog (`addon|type|catalog`). The
 //! stored list is the viewer's order and switches; a row it does not name (an addon installed
 //! since) takes its default place and default switch after them. [`Config::home_rows`] is that
 //! merge, and a move or a switch writes the merged list back whole, so the stored order is always
@@ -26,6 +26,7 @@ pub(super) const ROW_CONTINUE: &str = "continue";
 pub(super) const ROW_NEW_EPISODES: &str = "new_episodes";
 pub(super) const ROW_LIBRARY: &str = "library";
 pub(super) const ROW_COMING_SOON: &str = "coming_soon";
+pub(super) const ROW_FOR_YOU: &str = "for_you";
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub(super) struct RowPref {
@@ -74,6 +75,8 @@ pub(super) enum HomeRow {
     Continue,
     NewEpisodes,
     ComingSoon,
+    /// Picked for you: titles like what the account watched ([`super::content`]'s `for_you_rows`).
+    ForYou,
     Library,
     /// A catalog: its index in the bridge's shelf list.
     Shelf(usize),
@@ -124,6 +127,7 @@ impl Config {
     pub fn home_rows(&self, addons: &[Addon], shelves: &[Shelf]) -> Vec<(String, HomeRow, bool)> {
         let mut defaults: Vec<(String, HomeRow, bool)> = vec![
             (ROW_CONTINUE.into(), HomeRow::Continue, true),
+            (ROW_FOR_YOU.into(), HomeRow::ForYou, true),
             (ROW_NEW_EPISODES.into(), HomeRow::NewEpisodes, true),
             (ROW_COMING_SOON.into(), HomeRow::ComingSoon, true),
         ];

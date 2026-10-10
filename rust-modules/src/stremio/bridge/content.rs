@@ -29,6 +29,13 @@ const MAX_PAGES: usize = 10;
 /// Search suggestions taken from each of the movie and show catalogs.
 const SUGGESTIONS_PER_LIB: usize = 3;
 
+/// Watched titles Picked for You learns from, most recent first.
+const FOR_YOU_FROM: usize = 12;
+/// Genres per library Picked for You asks its catalogs for.
+const FOR_YOU_GENRES: usize = 2;
+/// Cards on Picked for You.
+const FOR_YOU_ROWS: usize = 30;
+
 /// Continue Watching cards resolved ahead of a press.
 const WARM_CONTINUE: usize = 3;
 
@@ -435,6 +442,7 @@ impl Bridge {
             "library" => Some(self.library_rows(token, usize::MAX)),
             "new_episodes" => Some(self.new_episode_rows(token, &addons)),
             "coming_soon" => Some(self.coming_soon_rows(token, &addons)),
+            "for_you" => Some(self.for_you_rows(token, &addons)),
             _ => None,
         };
         // a genre shelf: `g{shelf}-{genre}`, paged through the catalog with its genre chosen
@@ -577,6 +585,14 @@ impl Bridge {
                         let rows = self.continue_rows(token, SHELF_ROWS);
                         hubs.push(json!({"title": "Continue Watching", "type": "mixed",
                                          "hubIdentifier": "home.continue", "key": "/hubs/continueWatching",
+                                         "size": rows.len(), "Metadata": rows}));
+                    }
+                }
+                HomeRow::ForYou => {
+                    let rows = self.for_you_rows(token, &addons);
+                    if !rows.is_empty() {
+                        hubs.push(json!({"title": "Picked for You", "type": "mixed",
+                                         "hubIdentifier": "stremio.for_you", "key": "/hubs/stremio/for_you",
                                          "size": rows.len(), "Metadata": rows}));
                     }
                 }
@@ -1227,6 +1243,7 @@ impl Bridge {
                     super::config::HomeRow::NewEpisodes => ("New Episodes".to_string(), "Shows in your library".to_string()),
                     super::config::HomeRow::Library => ("My Library".to_string(), "What you saved".to_string()),
                     super::config::HomeRow::ComingSoon => ("Coming Soon".to_string(), "Next episodes of your shows".to_string()),
+                    super::config::HomeRow::ForYou => ("Picked for You".to_string(), "Like what you watched".to_string()),
                     super::config::HomeRow::Shelf(n) => {
                         let s = all[n];
                         (shelf_title(&addons, &all, s), format!("{} · {}", s.lib.title(), addons[s.addon].manifest.name.trim()))
@@ -1316,4 +1333,98 @@ impl Bridge {
         }
         Response::json(200, &json!({"terms": terms}))
     }
+}
+
+impl Bridge {
+    /// **Picked for You**: titles like what the account watched. Its most recently watched titles
+    /// ([`FOR_YOU_FROM`]) are read for their genres, weighted toward the latest; each library's top
+    /// genres ([`FOR_YOU_GENRES`]) are asked of that library's catalog that offers a genre choice;
+    /// the answers are interleaved, and anything already in the account's library (watched,
+    /// saved or started) is left out. Empty when nothing has been watched, or no catalog filters
+    /// by genre.
+    pub(super) fn for_you_rows(&self, token: &str, addons: &[Addon]) -> Vec<Value> {
+        let items = self.library_items(token);
+        let known: std::collections::HashSet<String> = items.iter()
+            .filter_map(|it| it.get("_id").and_then(Value::as_str).map(str::to_string))
+            .collect();
+        let mut watched: Vec<&Value> = items.iter().filter(|it| watched_at_all(it)).collect();
+        watched.sort_by(|a, b| {
+            let at = |v: &Value| v.pointer("/state/lastWatched").and_then(Value::as_str).unwrap_or("").to_string();
+            at(b).cmp(&at(a))
+        });
+        let wanted: Vec<(String, String)> = watched.iter()
+            .filter_map(|it| Some((it.get("type")?.as_str()?.to_string(), it.get("_id")?.as_str()?.to_string())))
+            .filter(|(stype, _)| stype != "other")
+            .take(FOR_YOU_FROM)
+            .collect();
+        if wanted.is_empty() {
+            return Vec::new();
+        }
+        let jobs: Vec<Box<dyn FnOnce() -> Option<Title> + Send + '_>> = wanted.iter()
+            .map(|(stype, id)| Box::new(move || self.title(addons, stype, id)) as Box<dyn FnOnce() -> Option<Title> + Send + '_>)
+            .collect();
+        let titles: Vec<Title> = parallel(jobs).into_iter().flatten().flatten().collect();
+        // genre weights per library: the latest watch counts most
+        let mut weights: Vec<(Lib, String, usize)> = Vec::new();
+        let n = titles.len();
+        for (rank, t) in titles.iter().enumerate() {
+            let lib = Lib::of_title(&t.stype, &t.id);
+            for g in &t.genres {
+                match weights.iter_mut().find(|(l, name, _)| *l == lib && name.eq_ignore_ascii_case(g)) {
+                    Some(w) => w.2 += n - rank,
+                    None => weights.push((lib, g.clone(), n - rank)),
+                }
+            }
+        }
+        weights.sort_by(|a, b| b.2.cmp(&a.2));
+        let all = self.shelves(addons);
+        let mut asks: Vec<(Shelf, String)> = Vec::new();
+        for lib in Lib::ALL {
+            // the library's first catalog with a genre choice, and its genres as it spells them
+            let Some((s, offered)) = shelves_of(&all, lib).into_iter().find_map(|(_, s)| {
+                let c = &addons[s.addon].manifest.catalogs[s.catalog];
+                let e = c.extra.iter().find(|e| e.name == "genre" && !e.options.is_empty())?;
+                Some((s, e.options.clone()))
+            }) else { continue };
+            for (_, g, _) in weights.iter().filter(|(l, _, _)| *l == lib) {
+                if asks.iter().filter(|(a, _)| a.lib == lib).count() >= FOR_YOU_GENRES {
+                    break;
+                }
+                if let Some(spelled) = offered.iter().find(|o| o.eq_ignore_ascii_case(g)) {
+                    asks.push((s, spelled.clone()));
+                }
+            }
+        }
+        let jobs: Vec<Box<dyn FnOnce() -> Vec<Title> + Send + '_>> = asks.iter()
+            .map(|(s, g)| {
+                let s = *s;
+                Box::new(move || self.catalog_page_in(&addons[s.addon], (s.addon, s.catalog), 0, None, Some(g.as_str())))
+                    as Box<dyn FnOnce() -> Vec<Title> + Send + '_>
+            })
+            .collect();
+        let pages: Vec<Vec<Title>> = parallel(jobs).into_iter().map(Option::unwrap_or_default).collect();
+        let mut seen = known;
+        let mut out = Vec::new();
+        let longest = pages.iter().map(Vec::len).max().unwrap_or(0);
+        'fill: for i in 0..longest {
+            for page in &pages {
+                let Some(t) = page.get(i) else { continue };
+                if !seen.insert(t.id.clone()) {
+                    continue;
+                }
+                out.push(catalog::title_row(t, row_shelf(Lib::of_title(&t.stype, &t.id)), &self.art));
+                if out.len() >= FOR_YOU_ROWS {
+                    break 'fill;
+                }
+            }
+        }
+        out
+    }
+}
+
+/// Has the account watched any of this library item: finished it, or got some way in?
+fn watched_at_all(it: &Value) -> bool {
+    let n = |k: &str| it.pointer(k).and_then(Value::as_i64).unwrap_or(0);
+    n("/state/timesWatched") > 0 || n("/state/flaggedWatched") > 0 || n("/state/timeOffset") > 0
+        || n("/state/timeWatched") > 0 || it.pointer("/state/watched").and_then(Value::as_str).is_some_and(|w| !w.is_empty())
 }
