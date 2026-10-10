@@ -178,8 +178,7 @@ impl Bridge {
             }
         }
         let streams = self.ranked_streams(token, rk).ok()?;
-        let wanted = self.play.choice.lock().unwrap_or_else(|e| e.into_inner()).get(rk_s).copied();
-        let chosen = wanted.filter(|i| *i < streams.len()).or_else(|| best(&streams));
+        let chosen = self.chosen_index(rk_s, &streams);
         let part = catalog::part_id(rk_s);
         let media = match chosen.map(|i| &streams[i]) {
             Some((s, f, _)) => {
@@ -221,6 +220,13 @@ impl Bridge {
         }
         memo.insert(rk_s.to_string(), r.clone());
         Some(r)
+    }
+
+    /// Which of `streams` plays for `rk_s`: the viewer's choice while it names one of them, else
+    /// the best.
+    pub(super) fn chosen_index(&self, rk_s: &str, streams: &[(super::super::streams::Stream, super::super::streams::Facts, i64)]) -> Option<usize> {
+        let wanted = self.play.choice.lock().unwrap_or_else(|e| e.into_inner()).get(rk_s).copied();
+        wanted.filter(|i| *i < streams.len()).or_else(|| best(streams))
     }
 
     /// Forgets a resolved choice, so the next request resolves it again.
@@ -433,7 +439,7 @@ impl Bridge {
         let Some(n) = req.query("index").and_then(|v| v.parse::<usize>().ok()) else { return Response::empty(400) };
         self.play.choice.lock().unwrap_or_else(|e| e.into_inner()).insert(rk_s.to_string(), n);
         self.forget(rk_s);
-        Response::json(200, &json!({"chosen": n}))
+        Response::json(200, &container(json!({"chosen": n})))
     }
 
     /// `/:/timeline`: a progress report, written to the account's Stremio library.

@@ -175,6 +175,7 @@ impl Bridge {
             ["library", "metadata", rk, "allLeaves"] => self.all_leaves(token, rk),
             ["stremio", "art", key] => self.art(key),
             ["stremio", "streams", rk] => self.streams_route(token, rk),
+            ["stremio", "choices", rk] => self.choices(token, rk),
             ["stremio", "choose", rk] => self.choose(req, rk),
             // The part URL (`catalog::part_key`): the chosen stream, by redirect.
             ["library", "parts", _, rk, _] => self.play(token, rk),

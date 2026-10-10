@@ -134,6 +134,18 @@ pub struct ItemMenuReq {
     pub item: Option<plx_data::pms::PmsMovie>,
     pub loaded_episode: bool,
     pub from_home: bool,
+    /// Where the menu hung (its host page, that page's focused element, the anchor rect), so a
+    /// follow-up menu — the stream picker after *Choose stream* — opens in the same place.
+    pub origin: MenuOrigin,
+}
+
+/// Where an item menu hangs: [`ItemMenuArg`]'s `host`, `focus` and `anchor`, carried on its
+/// request so the app can present a second menu over the same card.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MenuOrigin {
+    pub host: plx_machine::machine::EntryId,
+    pub focus: Option<plx_machine::machine::FocusKey<u32>>,
+    pub anchor: [u32; 4],
 }
 
 /// **What a player overlay asks for**, once its own `step` has decided.
@@ -407,6 +419,38 @@ pub enum ItemMenuKind {
     Episode { mark: plx_ui::widgets::PosterMark },
     /// The detail page's season tabs.
     Season { mark: plx_ui::widgets::PosterMark },
+    /// The stream picker for a film or episode card: one row per stream its addons offer, opened
+    /// from that card's menu once the list has arrived (`Action::ChooseStream`). `row` is the card
+    /// it was opened on, so a pick plays that very item.
+    Streams {
+        row: Box<plx_data::pms::PmsMovie>,
+        choices: std::sync::Arc<[StreamChoice]>,
+    },
+}
+
+/// One stream in the picker: its place in the bridge's ranked list (what a choice names), the
+/// picker line, the addon and file, and whether it is the one that plays now.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StreamChoice {
+    pub index: i64,
+    pub label: String,
+    pub detail: String,
+    pub playing: bool,
+}
+
+impl StreamChoice {
+    /// The picker rows of a `/stremio/choices` answer (`plx_plex` reads it as a container).
+    pub fn from_container(mc: &plx_plex::plex::MediaContainer) -> Vec<StreamChoice> {
+        mc.metadata
+            .iter()
+            .map(|m| StreamChoice {
+                index: m.index,
+                label: m.title.clone(),
+                detail: m.summary.clone(),
+                playing: m.index == mc.offset,
+            })
+            .collect()
+    }
 }
 
 /// **Identity, not contents.** `PmsMovie` is a wire DTO with no `PartialEq` of its own, and one
@@ -421,6 +465,8 @@ impl PartialEq for ItemMenuKind {
                 da == db && a.sid == b.sid && a.rk == b.rk && a.kind == b.kind,
             (Self::Episode { mark: a }, Self::Episode { mark: b }) => a == b,
             (Self::Season { mark: a }, Self::Season { mark: b }) => a == b,
+            (Self::Streams { row: a, choices: ca }, Self::Streams { row: b, choices: cb }) =>
+                a.sid == b.sid && a.rk == b.rk && ca == cb,
             _ => false,
         }
     }
@@ -444,6 +490,10 @@ impl plx_machine::machine::LogicalState for ItemMenuArg {
             ItemMenuKind::Card { row, from_deck } => { c.u32(0).bool(*from_deck).u32(row.kind as u32); }
             ItemMenuKind::Episode { mark } => { c.u32(1).u32(*mark as u32); }
             ItemMenuKind::Season { mark } => { c.u32(2).u32(*mark as u32); }
+            ItemMenuKind::Streams { choices, .. } => {
+                c.u32(3).u32(choices.len() as u32);
+                for ch in choices.iter() { c.u32(ch.index as u32).bool(ch.playing); }
+            }
         }
         c.u32(self.host.0);
         c.option(self.focus, |c, key| { c.u32(key.entry.0).u32(key.elem); });

@@ -2279,6 +2279,12 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
             menu_play_tick(&mut app.player.session, &mut app.adapters.player,
                 &mut app.pages, &mut app.bridge, &mut app.menu_play_await, fr.now);
         }
+        // The stream picker's answer (its list to present, or its choice made and the item to
+        // play), for the same route-unconditional reason.
+        if app.bridge.stream_pick.is_some() {
+            crate::app::input::stream_pick_tick(&mut app.player.session, &mut app.adapters.player,
+                &mut app.pages, &mut app.bridge, &mut super::playback::LivePlaybackResources, fr.now);
+        }
         // Server-side view-state WRITES (Mark as Watched / Unwatched, Remove from Deck): send
         // the next queued one, land the last one's answer and kick the refresh it owes. Route-
         // unconditional for the same reason as the two pumps around it — the user can walk off

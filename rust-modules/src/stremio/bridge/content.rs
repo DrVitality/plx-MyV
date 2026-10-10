@@ -638,4 +638,69 @@ impl Bridge {
             .collect();
         Response::json(200, &json!({"streams": rows}))
     }
+
+    /// `/stremio/choices/{rk}`: the streams a viewer can pick from, in the media server's shape so
+    /// the app reads it with its ordinary client: one `Metadata` row per playable stream, `index`
+    /// its place in the ranked list (what `/stremio/choose` takes), `title` the line a picker
+    /// shows ("2160p · HDR · Cached · 18.2 GB"), `summary` the addon and file name. The container's
+    /// `offset` is the index that plays now (the viewer's choice, else the best), -1 for none.
+    /// No URL leaves the bridge: a debrid link carries the service's key.
+    pub(super) fn choices(&self, token: &str, rk_s: &str) -> Response {
+        let Some(rk) = Rk::decode(rk_s) else { return Response::empty(404) };
+        let ranked = match self.ranked_streams(token, &rk) {
+            Ok(r) => r,
+            Err(r) => return r,
+        };
+        let chosen = self.chosen_index(rk_s, &ranked);
+        let rows: Vec<Value> = ranked
+            .iter()
+            .enumerate()
+            .filter(|(_, (s, _, _))| s.url.is_some())
+            .map(|(i, (s, f, _))| {
+                let file = s.filename.as_deref().unwrap_or(s.name.as_str());
+                json!({
+                    "ratingKey": rk_s, "key": format!("/stremio/choose/{rk_s}?index={i}"),
+                    "type": "clip", "index": i, "title": choice_label(f),
+                    "summary": format!("{} — {}", s.addon, file.lines().next().unwrap_or(file)),
+                })
+            })
+            .collect();
+        Response::json(200, &container(json!({
+            "size": rows.len(), "offset": chosen.map_or(-1, |i| i as i64), "Metadata": rows,
+        })))
+    }
+}
+
+/// One stream as a picker line: resolution, picture, readiness, size — the facts a viewer chooses
+/// by, in that order, and only the ones the release says.
+fn choice_label(f: &super::super::streams::Facts) -> String {
+    use super::super::streams::Ready;
+    let mut parts: Vec<String> = Vec::new();
+    parts.push(match f.resolution {
+        2160 => "4K".to_string(),
+        0 => "SD".to_string(),
+        r => format!("{r}p"),
+    });
+    if f.dv_only {
+        parts.push("Dolby Vision".into());
+    } else if f.hdr {
+        parts.push("HDR".into());
+    }
+    if f.remux {
+        parts.push("Remux".into());
+    }
+    if f.hevc {
+        parts.push("HEVC".into());
+    } else if f.av1 {
+        parts.push("AV1".into());
+    }
+    parts.push(match f.ready {
+        Ready::Cached => "Instant".into(),
+        Ready::Uncached => "Not cached".into(),
+        Ready::Direct => "Direct".into(),
+    });
+    if let Some(gb) = f.size_gb {
+        parts.push(if gb >= 1.0 { format!("{gb:.1} GB") } else { format!("{:.0} MB", gb * 1024.0) });
+    }
+    parts.join(" · ")
 }

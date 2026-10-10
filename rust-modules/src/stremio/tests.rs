@@ -504,6 +504,25 @@ fn a_films_streams_are_ranked_and_the_cached_one_is_picked() {
     assert!(rows.iter().all(|r| r.get("url").is_none()), "no debrid link leaves the bridge");
 }
 
+#[test]
+fn the_stream_picker_lists_playable_streams_and_names_the_one_that_plays() {
+    let b = content_bridge();
+    let rk = Rk::item("movie", "tt0111161").unwrap().encode();
+    let got = json_of(&b.handle(&authed("GET", &format!("/stremio/choices/{rk}"))));
+    let mc = &got["MediaContainer"];
+    let rows = mc["Metadata"].as_array().expect("rows");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(mc["offset"], 0, "the best stream plays until the viewer picks another");
+    assert!(rows[0]["title"].as_str().unwrap().contains("Instant"), "{}", rows[0]["title"]);
+    assert!(rows.iter().all(|r| !r.to_string().contains("http")), "no stream link leaves the bridge");
+    // choosing the second one makes it the one that plays
+    let chose = b.handle(&authed("GET", &format!("/stremio/choose/{rk}?index=1")));
+    assert_eq!(chose.status, 200);
+    assert!(json_of(&chose).get("MediaContainer").is_some(), "the app's client reads a container");
+    let again = json_of(&b.handle(&authed("GET", &format!("/stremio/choices/{rk}"))));
+    assert_eq!(again["MediaContainer"]["offset"], 1);
+}
+
 // ---------------------------------------------------------------- playback
 
 /// An EBML element.

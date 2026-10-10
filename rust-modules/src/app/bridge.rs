@@ -357,6 +357,8 @@ pub(crate) struct Bridge {
     /// …and what the item context menu asked, drained by `content::content_requests` — which holds
     /// the route, the trail and the playback session's `&mut` that its dispatch needs.
     item_menu_reqs: Vec<plx_screens::registry::ItemMenuReq>,
+    /// The stream picker between a press and its answer (`input::stream_pick_tick`).
+    pub(crate) stream_pick: Option<super::input::StreamPickAwait>,
     #[cfg(test)]
     keyboard_calls: Vec<bool>,
     #[cfg(test)]
@@ -562,6 +564,7 @@ impl Bridge {
             search_reqs: Vec::new(),
             player_reqs: Vec::new(),
             item_menu_reqs: Vec::new(),
+            stream_pick: None,
             #[cfg(test)]
             keyboard_calls: Vec::new(),
             #[cfg(test)]

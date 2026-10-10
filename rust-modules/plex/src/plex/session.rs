@@ -6223,7 +6223,7 @@ mod appearance_tests {
         let session = Session::default();
         assert!(session.appearance().is_default());
         assert!(!serde_json::to_string(&session).unwrap().contains("appearance"));
-        for value in [serde_json::json!({"appearance": "blue"}), serde_json::json!({"appearance": [1, 2]})] {
+        for value in [serde_json::json!({"appearance": "blue"}), serde_json::json!({"appearance": 7})] {
             let s: Session = serde_json::from_value(value.clone()).unwrap_or_else(|e| panic!("{value}: {e}"));
             assert!(s.appearance().is_default(), "{value}");
         }
