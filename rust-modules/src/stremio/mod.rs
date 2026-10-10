@@ -74,6 +74,7 @@ pub fn start() {
         }
     };
     let bridge = Arc::new(bridge::Bridge::new(Box::new(api::Live), port));
+    bridge.share();
     let started = plx_base::task::spawn("stremio-bridge", move || {
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };

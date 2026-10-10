@@ -77,6 +77,14 @@ pub struct Bridge {
     /// The viewer's Home rows, addon switches and per-show stream memory ([`config`]).
     config: Mutex<config::Config>,
     config_path: Option<std::path::PathBuf>,
+    /// Each addon host's last answer: whether it answered, and how long it took.
+    health: Mutex<HashMap<String, (bool, Duration)>>,
+    /// The bridge itself, for background work (warming a stream); set by [`Bridge::share`].
+    me: std::sync::OnceLock<std::sync::Weak<Bridge>>,
+    /// Items being resolved in the background, so a second warm-up waits for none.
+    warming: Mutex<std::collections::HashSet<String>>,
+    /// Whether this run has served Home from the saved copy yet.
+    home_cache_served: std::sync::atomic::AtomicBool,
 }
 
 fn container(fields: Value) -> Value {
@@ -122,6 +130,44 @@ impl Bridge {
             play: play::PlayState::default(),
             config: Mutex::new(config::load(config::path().as_ref())),
             config_path: config::path(),
+            health: Mutex::new(HashMap::new()),
+            me: std::sync::OnceLock::new(),
+            warming: Mutex::new(std::collections::HashSet::new()),
+            home_cache_served: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Lets the bridge start background work on itself (the server calls it once).
+    pub fn share(self: &Arc<Self>) {
+        let _ = self.me.set(Arc::downgrade(self));
+    }
+
+    /// The host part of an addon or resource URL (`https://host`), what health is kept by.
+    fn host_of(url: &str) -> String {
+        url.splitn(4, '/').take(3).collect::<Vec<_>>().join("/")
+    }
+
+    fn note_health(&self, url: &str, ok: bool, took: Duration) {
+        let mut health = self.health.lock().unwrap_or_else(|e| e.into_inner());
+        if health.len() > 64 {
+            health.clear();
+        }
+        health.insert(Self::host_of(url), (ok, took));
+    }
+
+    /// Resolve the film or episode `rk_s` in the background, so pressing play finds it ready.
+    fn warm(&self, token: &str, rk_s: String) {
+        let Some(me) = self.me.get().and_then(std::sync::Weak::upgrade) else { return };
+        if !self.warming.lock().unwrap_or_else(|e| e.into_inner()).insert(rk_s.clone()) {
+            return;
+        }
+        let token = token.to_string();
+        let spawned = plx_base::task::spawn("stremio-warm", move || {
+            me.warm_resolve(&token, &rk_s);
+            me.warming.lock().unwrap_or_else(|e| e.into_inner()).remove(&rk_s);
+        });
+        if spawned.is_none() {
+            self.warming.lock().unwrap_or_else(|e| e.into_inner()).clear();
         }
     }
 
@@ -190,6 +236,7 @@ impl Bridge {
             [":", "timeline"] => self.timeline(req, token),
             [":", "scrobble"] => self.scrobble(req, token, true),
             [":", "unscrobble"] => self.scrobble(req, token, false),
+            ["actions", "removeFromContinueWatching"] => self.remove_from_continue(req, token),
             _ => Response::json(200, &container(json!({}))),
         }
     }

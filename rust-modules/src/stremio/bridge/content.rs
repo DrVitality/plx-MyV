@@ -26,6 +26,18 @@ const SEARCH_CATALOGS: usize = 2;
 /// Pages of a catalog fetched at most to serve one request.
 const MAX_PAGES: usize = 10;
 
+/// Continue Watching cards resolved ahead of a press.
+const WARM_CONTINUE: usize = 3;
+
+/// Where last run's Home is kept (`None` in tests).
+fn home_cache_path() -> Option<std::path::PathBuf> {
+    if cfg!(test) { None } else { Some(plx_base::paths::persistent_state_root().join("stremio-home.json")) }
+}
+
+/// Genre shelves per library.
+const GENRE_SHELVES: usize = 8;
+/// How far ahead Coming Soon looks, in days.
+const COMING_SOON_DAYS: i64 = 60;
 /// Cards on Home's My Library row.
 const LIBRARY_ROWS: usize = 40;
 /// How recent an episode New Episodes shows, in days.
@@ -49,6 +61,16 @@ fn iso_day(days_ago: i64) -> String {
         - days_ago * 86_400;
     let (y, m, d) = plx_net::net::civil_date(secs);
     format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// `2026-10-14` as `Oct 14`.
+fn pretty_day(day: &str) -> String {
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let mut parts = day.split('-').skip(1);
+    match (parts.next().and_then(|m| m.parse::<usize>().ok()), parts.next().and_then(|d| d.parse::<u32>().ok())) {
+        (Some(m @ 1..=12), Some(d)) => format!("{} {d}", MONTHS[m - 1]),
+        _ => day.to_string(),
+    }
 }
 
 /// Runs `jobs` side by side and returns their results in order. A job whose thread the OS refuses
@@ -151,7 +173,10 @@ impl Bridge {
                 }
             }
         }
-        let body = self.stremio.fetch(url)?;
+        let started = std::time::Instant::now();
+        let fetched = self.stremio.fetch(url);
+        self.note_health(url, fetched.is_ok(), started.elapsed());
+        let body = fetched?;
         let value: Value = serde_json::from_slice(&body).map_err(|_| ApiError::Unavailable)?;
         let value = Arc::new(value);
         let mut memo = self.json.lock().unwrap_or_else(|e| e.into_inner());
@@ -167,12 +192,24 @@ impl Bridge {
 
     /// One page of a shelf's catalog, starting `skip` titles in (or a search for `query`).
     fn catalog_page(&self, addon: &Addon, s: (usize, usize), skip: usize, query: Option<&str>) -> Vec<Title> {
+        self.catalog_page_in(addon, s, skip, query, None)
+    }
+
+    /// [`catalog_page`](Self::catalog_page), narrowed to one of the catalog's genres.
+    fn catalog_page_in(&self, addon: &Addon, s: (usize, usize), skip: usize, query: Option<&str>,
+                       genre: Option<&str>) -> Vec<Title> {
         let catalog = &addon.manifest.catalogs[s.1];
-        let extra = match (query, skip) {
-            (Some(q), _) => format!("/search={}", segment(q)),
-            (None, 0) => String::new(),
-            (None, n) => format!("/skip={n}"),
-        };
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(q) = query {
+            parts.push(format!("search={}", segment(q)));
+        }
+        if let Some(g) = genre {
+            parts.push(format!("genre={}", segment(g)));
+        }
+        if skip > 0 && query.is_none() {
+            parts.push(format!("skip={skip}"));
+        }
+        let extra = if parts.is_empty() { String::new() } else { format!("/{}", parts.join("&")) };
         let url = format!("{}/catalog/{}/{}{extra}.json", addon.base_url(),
             segment(&catalog.kind), segment(&catalog.id));
         let Ok(v) = self.fetch_json(&url) else { return Vec::new() };
@@ -290,8 +327,48 @@ impl Bridge {
             Err(e) => return api_failure(e),
         };
         let all = self.shelves(&addons);
-        let hubs = self.hubs_for(&addons, &all, &shelves_of(&all, lib));
+        let mut hubs = self.hubs_for(&addons, &all, &shelves_of(&all, lib));
+        hubs.extend(self.genre_hubs(&addons, &all, lib));
         Response::json(200, &container(json!({"size": hubs.len(), "Hub": hubs})))
+    }
+
+    /// The genres a library is browsed by: the first of its catalogs that offers a `genre`
+    /// choice, and its first [`GENRE_SHELVES`] genres. `(shelf number, genre index, genre)`.
+    fn library_genres(&self, addons: &[Addon], all: &[Shelf], lib: Lib) -> Vec<(usize, usize, String)> {
+        shelves_of(all, lib)
+            .into_iter()
+            .find_map(|(n, s)| {
+                let c = &addons[s.addon].manifest.catalogs[s.catalog];
+                let genres = &c.extra.iter().find(|e| e.name == "genre" && !e.options.is_empty())?.options;
+                Some(genres.iter().take(GENRE_SHELVES).enumerate().map(|(g, name)| (n, g, name.clone())).collect())
+            })
+            .unwrap_or_default()
+    }
+
+    /// A shelf per genre, after a library's catalog shelves.
+    fn genre_hubs(&self, addons: &[Addon], all: &[Shelf], lib: Lib) -> Vec<Value> {
+        let genres = self.library_genres(addons, all, lib);
+        let jobs: Vec<Box<dyn FnOnce() -> Vec<Title> + Send + '_>> = genres
+            .iter()
+            .map(|(n, _, g)| {
+                let s = all[*n];
+                Box::new(move || self.catalog_page_in(&addons[s.addon], (s.addon, s.catalog), 0, None, Some(g.as_str())))
+                    as Box<dyn FnOnce() -> Vec<Title> + Send + '_>
+            })
+            .collect();
+        parallel(jobs)
+            .into_iter()
+            .zip(&genres)
+            .filter_map(|(titles, (n, g, name))| {
+                let titles: Vec<Title> = titles.filter(|t| !t.is_empty())?.into_iter().take(SHELF_ROWS).collect();
+                let rows = self.rows(&titles, lib);
+                Some(json!({
+                    "title": name, "type": lib.wire(),
+                    "hubIdentifier": format!("stremio.genre.{n}.{g}"), "key": format!("/hubs/stremio/g{n}-{g}"),
+                    "more": true, "size": rows.len(), "Metadata": rows,
+                }))
+            })
+            .collect()
     }
 
     /// The hubs for `shelves`, fetched side by side; an empty shelf is left out.
@@ -329,8 +406,25 @@ impl Bridge {
         let own = match n {
             "library" => Some(self.library_rows(token, usize::MAX)),
             "new_episodes" => Some(self.new_episode_rows(token, &addons)),
+            "coming_soon" => Some(self.coming_soon_rows(token, &addons)),
             _ => None,
         };
+        // a genre shelf: `g{shelf}-{genre}`, paged through the catalog with its genre chosen
+        if let Some((n, g)) = n.strip_prefix('g').and_then(|r| r.split_once('-')) {
+            let all = self.shelves(&addons);
+            let (Some(s), Some(g)) = (n.parse::<usize>().ok().and_then(|n| all.get(n).copied()), g.parse::<usize>().ok()) else {
+                return Response::empty(404);
+            };
+            let Some((_, _, genre)) = self.library_genres(&addons, &all, s.lib).into_iter().find(|(gn, gi, _)| all.get(*gn) == Some(&s) && *gi == g) else {
+                return Response::empty(404);
+            };
+            let (start, _) = window(req, 60);
+            let titles = self.catalog_page_in(&addons[s.addon], (s.addon, s.catalog), start, None, Some(&genre));
+            let rows = self.rows(&titles, s.lib);
+            let total = if rows.is_empty() { start } else { start + rows.len() + 1 };
+            return Response::json(200, &container(json!({"size": rows.len(), "totalSize": total, "offset": start,
+                                                         "Metadata": rows})));
+        }
         if let Some(rows) = own {
             let (start, size) = window(req, 60);
             let page: Vec<Value> = rows.iter().skip(start).take(size).cloned().collect();
@@ -354,6 +448,73 @@ impl Bridge {
     /// Home: the rows the viewer switched on, in their order (Settings > Addons & Home; by
     /// default Continue Watching, New Episodes, the first shelves of each library, My Library).
     pub(super) fn home_hubs(&self, req: &Request, token: &str) -> Response {
+        let whole = req.query("excludeContinueWatching") != Some("1");
+        // the first Home of a run: last run's, at once, while the app is told to fetch it fresh
+        // the saved copy is the account's own: its first line says whose (a hash, never the key)
+        let owner = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            token.hash(&mut h);
+            format!("{:016x}\n", h.finish())
+        };
+        if whole && !self.home_cache_served.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            let saved = home_cache_path().and_then(|p| std::fs::read(p).ok());
+            if let Some(body) = saved.as_deref().and_then(|b| b.strip_prefix(owner.as_bytes())).filter(|b| !b.is_empty()) {
+                super::super::note_home_changed();
+                return Response { status: 200, content_type: "application/json", body: body.to_vec(), location: None };
+            }
+        }
+        let response = self.home_hubs_fresh(req, token);
+        if whole && response.status == 200 {
+            if let Some(p) = home_cache_path() {
+                let tmp = p.with_extension("json.tmp");
+                let mut saved = owner.into_bytes();
+                saved.extend_from_slice(&response.body);
+                if std::fs::write(&tmp, &saved).is_ok() {
+                    let _ = std::fs::rename(&tmp, &p);
+                }
+            }
+            // the first few things on Continue Watching, ready before they are pressed
+            for rk in self.continue_targets(token, WARM_CONTINUE) {
+                self.warm(token, rk);
+            }
+        }
+        response
+    }
+
+    /// The films and episodes the first `n` Continue Watching cards would play.
+    fn continue_targets(&self, token: &str, n: usize) -> Vec<String> {
+        let mut rows = self.continue_rows(token, n);
+        rows.truncate(n);
+        let items = self.library_items(token);
+        rows.iter()
+            .filter_map(|r| r.get("ratingKey")?.as_str().map(str::to_string))
+            .filter_map(|rk_s| match Rk::decode(&rk_s)? {
+                Rk::Item { kind: catalog::Kind::Movie, .. } => Some(rk_s),
+                Rk::Item { stype, id, .. } => {
+                    let it = items.iter().find(|it| it.get("_id").and_then(Value::as_str) == Some(id.as_str()))?;
+                    let video = it.pointer("/state/video_id").and_then(Value::as_str)?.to_string();
+                    Some(Rk::Episode { stype, id, video }.encode())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The episode a show's Play starts: where the account stopped, else the first episode.
+    fn next_up(&self, token: &str, t: &Title) -> Option<String> {
+        let items = self.library_items(token);
+        let stopped = items.iter()
+            .find(|it| it.get("_id").and_then(Value::as_str) == Some(t.id.as_str()))
+            .and_then(|it| it.pointer("/state/video_id").and_then(Value::as_str))
+            .filter(|v| t.videos.iter().any(|e| e.video == *v))
+            .map(str::to_string);
+        stopped.or_else(|| {
+            t.seasons().into_iter().find(|s| *s > 0).and_then(|s| t.episodes(s).first().map(|e| e.video.clone()))
+        })
+    }
+
+    fn home_hubs_fresh(&self, req: &Request, token: &str) -> Response {
         use super::config::HomeRow;
         let addons = match self.addons(token) {
             Ok(addons) => addons,
@@ -395,6 +556,14 @@ impl Bridge {
                     if !rows.is_empty() {
                         hubs.push(json!({"title": "New Episodes", "type": "episode",
                                          "hubIdentifier": "stremio.new_episodes", "key": "/hubs/stremio/new_episodes",
+                                         "size": rows.len(), "Metadata": rows}));
+                    }
+                }
+                HomeRow::ComingSoon => {
+                    let rows = self.coming_soon_rows(token, &addons);
+                    if !rows.is_empty() {
+                        hubs.push(json!({"title": "Coming Soon", "type": "show",
+                                         "hubIdentifier": "stremio.coming_soon", "key": "/hubs/stremio/coming_soon",
                                          "size": rows.len(), "Metadata": rows}));
                     }
                 }
@@ -454,13 +623,17 @@ impl Bridge {
         Some(row)
     }
 
-    /// New Episodes: for each show the account saved, its newest episode released within the
-    /// last [`NEW_EPISODE_DAYS`] days, newest first.
-    pub(super) fn new_episode_rows(&self, token: &str, addons: &[Addon]) -> Vec<Value> {
+    /// The full metas of the shows the account saved (most recently changed first, at most
+    /// [`NEW_EPISODE_SHOWS`]), fetched side by side.
+    fn saved_show_titles(&self, token: &str, addons: &[Addon]) -> Vec<Title> {
         let items = self.library_items(token);
-        let shows: Vec<(String, String)> = items
-            .iter()
-            .filter(|it| is_saved(it))
+        let mut saved: Vec<&Value> = items.iter().filter(|it| is_saved(it)).collect();
+        saved.sort_by(|a, b| {
+            let at = |v: &Value| v.get("_mtime").and_then(Value::as_str).unwrap_or("").to_string();
+            at(b).cmp(&at(a))
+        });
+        let shows: Vec<(String, String)> = saved
+            .into_iter()
             .filter_map(|it| {
                 let stype = it.get("type")?.as_str()?;
                 let id = it.get("_id")?.as_str()?;
@@ -471,17 +644,22 @@ impl Bridge {
             })
             .take(NEW_EPISODE_SHOWS)
             .collect();
-        let (today, since) = (iso_day(0), iso_day(NEW_EPISODE_DAYS));
         let jobs: Vec<Box<dyn FnOnce() -> Option<Title> + Send + '_>> = shows
             .iter()
             .map(|(stype, id)| {
                 Box::new(move || self.title(addons, stype, id)) as Box<dyn FnOnce() -> Option<Title> + Send + '_>
             })
             .collect();
-        let mut found: Vec<(String, Value)> = parallel(jobs)
+        parallel(jobs).into_iter().flatten().flatten().collect()
+    }
+
+    /// New Episodes: for each show the account saved, its newest episode released within the
+    /// last [`NEW_EPISODE_DAYS`] days, newest first.
+    pub(super) fn new_episode_rows(&self, token: &str, addons: &[Addon]) -> Vec<Value> {
+        let (today, since) = (iso_day(0), iso_day(NEW_EPISODE_DAYS));
+        let mut found: Vec<(String, Value)> = self
+            .saved_show_titles(token, addons)
             .into_iter()
-            .flatten()
-            .flatten()
             .filter_map(|t| {
                 let e = t.videos.iter()
                     .filter(|e| e.season > 0 && e.released.as_deref().is_some_and(|d| d >= since.as_str() && d <= today.as_str()))
@@ -493,6 +671,31 @@ impl Bridge {
             })
             .collect();
         found.sort_by(|a, b| b.0.cmp(&a.0));
+        found.into_iter().map(|(_, row)| row).collect()
+    }
+
+    /// Coming Soon: for each saved show, its next episode not yet out (within
+    /// [`COMING_SOON_DAYS`]), soonest first, its air date as the line under it.
+    pub(super) fn coming_soon_rows(&self, token: &str, addons: &[Addon]) -> Vec<Value> {
+        let (today, until) = (iso_day(0), iso_day(-COMING_SOON_DAYS));
+        let mut found: Vec<(String, Value)> = self
+            .saved_show_titles(token, addons)
+            .into_iter()
+            .filter_map(|t| {
+                let e = t.videos.iter()
+                    .filter(|e| e.season > 0 && e.released.as_deref().is_some_and(|d| d > today.as_str() && d <= until.as_str()))
+                    .min_by(|a, b| a.released.cmp(&b.released).then((a.season, a.episode).cmp(&(b.season, b.episode))))?;
+                let lib = Lib::of_title(&t.stype, &t.id);
+                // the SHOW's card (the episode is not out, so there is nothing to play): its line
+                // says which episode, and when
+                let mut row = catalog::title_row(&t, row_shelf(lib), &self.art);
+                let day = e.released.clone().unwrap_or_default();
+                row["summary"] = json!(format!("S{} · E{} · Airs {}", e.season, e.episode, pretty_day(&day)));
+                row["stremioInLibrary"] = json!(true);
+                Some((day, row))
+            })
+            .collect();
+        found.sort_by(|a, b| a.0.cmp(&b.0));
         found.into_iter().map(|(_, row)| row).collect()
     }
 
@@ -688,6 +891,10 @@ impl Bridge {
                 if let Some(deck) = self.on_deck(token, &t, shelf) {
                     row["OnDeck"] = deck;
                 }
+                // the episode Play would start, resolved while the page is read
+                if let Some(e) = self.next_up(token, &t) {
+                    self.warm(token, Rk::Episode { stype: t.stype.clone(), id: t.id.clone(), video: e }.encode());
+                }
                 row
             }
             Rk::Season { season, .. } => {
@@ -864,7 +1071,7 @@ impl Bridge {
 
 /// One stream as a picker line: resolution, picture, readiness, size — the facts a viewer chooses
 /// by, in that order, and only the ones the release says.
-fn choice_label(f: &super::super::streams::Facts) -> String {
+pub(super) fn choice_label(f: &super::super::streams::Facts) -> String {
     use super::super::streams::Ready;
     let mut parts: Vec<String> = Vec::new();
     parts.push(match f.resolution {
@@ -986,6 +1193,7 @@ impl Bridge {
                     super::config::HomeRow::Continue => ("Continue Watching".to_string(), "What you are watching".to_string()),
                     super::config::HomeRow::NewEpisodes => ("New Episodes".to_string(), "Shows in your library".to_string()),
                     super::config::HomeRow::Library => ("My Library".to_string(), "What you saved".to_string()),
+                    super::config::HomeRow::ComingSoon => ("Coming Soon".to_string(), "Next episodes of your shows".to_string()),
                     super::config::HomeRow::Shelf(n) => {
                         let s = all[n];
                         (shelf_title(&addons, &all, s), format!("{} · {}", s.lib.title(), addons[s.addon].manifest.name.trim()))
@@ -1004,14 +1212,48 @@ impl Bridge {
                 if catalogs { does.push("catalogs"); }
                 if a.has(Resource::Meta) { does.push("details"); }
                 if a.has(Resource::Subtitles) { does.push("subtitles"); }
+                let health = self.health.lock().unwrap_or_else(|e| e.into_inner())
+                    .get(&Self::host_of(a.base_url())).copied();
+                let status = match health {
+                    Some((true, took)) => format!(" · answered in {:.1} s", took.as_secs_f64()),
+                    Some((false, _)) => " · not answering".to_string(),
+                    None => String::new(),
+                };
                 self.with_config(|c| json!({
                     "id": super::config::addon_id(a), "name": a.manifest.name.trim(),
-                    "detail": does.join(", "),
+                    "detail": format!("{}{status}", does.join(", ")),
                     "streams": streams.then(|| c.addon_on(a, Resource::Stream)),
                     "catalogs": catalogs.then(|| c.addon_on(a, Resource::Catalog)),
                 }))
             })
             .collect();
         Response::json(200, &json!({"rows": rows, "addons": list}))
+    }
+}
+
+impl Bridge {
+    /// `PUT /actions/removeFromContinueWatching?ratingKey=…`: the item leaves Continue Watching —
+    /// its position is cleared (a temporary entry is dropped), its saved state kept.
+    pub(super) fn remove_from_continue(&self, req: &Request, token: &str) -> Response {
+        let Some(rk) = req.query("ratingKey").and_then(Rk::decode) else { return Response::empty(400) };
+        let (_, id) = rk.show();
+        let items = self.library_items(token);
+        let Some(existing) = items.iter().find(|it| it.get("_id").and_then(Value::as_str) == Some(id)) else {
+            return Response::empty(200);
+        };
+        let mut it = existing.clone();
+        it["state"]["timeOffset"] = json!(0);
+        if it.get("temp").and_then(Value::as_bool).unwrap_or(false) {
+            it["removed"] = json!(true);
+        }
+        it["_mtime"] = json!(super::play::now_iso());
+        match self.stremio.library_put(token, &[it]) {
+            Ok(()) => {
+                *self.library.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                super::super::note_home_changed();
+                Response::empty(200)
+            }
+            Err(e) => api_failure(e),
+        }
     }
 }

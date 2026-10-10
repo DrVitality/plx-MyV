@@ -176,6 +176,9 @@ pub struct ExtraProp {
     pub name: String,
     #[serde(rename = "isRequired", default)]
     pub is_required: bool,
+    /// The values the addon offers for it (a `genre` extra's genres).
+    #[serde(default)]
+    pub options: Vec<String>,
 }
 
 impl Catalog {

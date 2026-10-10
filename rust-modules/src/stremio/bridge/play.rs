@@ -183,6 +183,19 @@ impl Bridge {
         })
     }
 
+    /// Resolve `rk_s` ahead of a press — only when its first pick could start at once, so a
+    /// warm-up never asks a debrid service to start fetching a torrent nobody chose to play.
+    pub(super) fn warm_resolve(&self, token: &str, rk_s: &str) {
+        let Some(rk) = Rk::decode(rk_s) else { return };
+        if self.play.resolved.lock().unwrap_or_else(|e| e.into_inner()).get(rk_s).is_some_and(|r| r.at.elapsed() < RESOLVED_TTL) {
+            return;
+        }
+        let Ok(streams) = self.ranked_streams(token, &rk) else { return };
+        if self.chosen_index(rk_s, &streams).is_some_and(|i| fallback_ok(&streams[i].1)) {
+            let _ = self.resolved(token, &rk, rk_s, None);
+        }
+    }
+
     /// The resolved choice for a film or episode, from the memo when fresh.
     pub(super) fn resolved(&self, token: &str, rk: &Rk, rk_s: &str, minutes: Option<i64>) -> Option<Arc<Resolved>> {
         if matches!(rk, Rk::Season { .. }) || matches!(rk, Rk::Item { kind: catalog::Kind::Show, .. }) {
@@ -253,6 +266,14 @@ impl Bridge {
             None => json!([]),
         };
         let mut media = media;
+        // the Track information panel's header: which addon, which release
+        if let (Some(i), Some(part)) = (chosen, media.pointer_mut("/0/Part/0")) {
+            let s = &streams[i].0;
+            let release = s.filename.clone()
+                .or_else(|| s.detail.lines().next().map(str::to_string))
+                .unwrap_or_default();
+            part["file"] = json!(format!("{} · {release}", s.addon));
+        }
         // subtitles installed from a search, kept across re-reads of the item
         let installed = self.play.installed.lock().unwrap_or_else(|e| e.into_inner()).get(rk_s).cloned().unwrap_or_default();
         for sub in &installed {
@@ -405,6 +426,13 @@ impl Bridge {
             Rk::Season { .. } => return Err(Response::empty(404)),
         };
         if let Some(r) = self.resolved(token, rk, rk_s, t.minutes) {
+            // what will play, said before the press: the first line of the synopsis
+            let ready = match r.chosen.map(|i| &r.streams[i].1) {
+                Some(f) => format!("Ready to play: {}", super::content::choice_label(f)),
+                None => "No stream can start right now.".to_string(),
+            };
+            let summary = row.get("summary").and_then(Value::as_str).unwrap_or("").to_string();
+            row["summary"] = json!(if summary.is_empty() { ready } else { format!("{ready}\n\n{summary}") });
             if let Some(obj) = row.as_object_mut() {
                 if r.media.as_array().is_some_and(|m| !m.is_empty()) {
                     // The file's own duration, when it said one, beats the listing's runtime.
@@ -636,7 +664,7 @@ impl Bridge {
     /// or AniSkip has nothing for the episode; the stand-in credits marker then stays.
     fn anime_skips(&self, id: &str, episode: i64, duration_ms: i64) -> Option<Vec<Value>> {
         let mal = self.mal_id(id)?;
-        let url = format!("https://api.aniskip.com/v2/skip-times/{mal}/{episode}?types%5B%5D=op&types%5B%5D=ed&episodeLength={}",
+        let url = format!("https://api.aniskip.com/v2/skip-times/{mal}/{episode}?types%5B%5D=op&types%5B%5D=ed&types%5B%5D=recap&episodeLength={}",
             duration_ms / 1000);
         let v = self.fetch_json(&url).ok()?;
         let markers = aniskip_markers(&v, duration_ms);
@@ -666,7 +694,10 @@ pub(super) fn aniskip_markers(v: &Value, duration_ms: i64) -> Vec<Value> {
         return Vec::new();
     }
     let mut out = Vec::new();
-    for r in v.get("results").and_then(Value::as_array).into_iter().flatten() {
+    let results: Vec<&Value> = v.get("results").and_then(Value::as_array).into_iter().flatten().collect();
+    // a recap is skipped like an opening, when the episode has no opening of its own
+    let has_op = results.iter().any(|r| r.get("skipType").and_then(Value::as_str) == Some("op"));
+    for r in results {
         let (Some(start), Some(end)) = (r.pointer("/interval/startTime").and_then(Value::as_f64),
                                         r.pointer("/interval/endTime").and_then(Value::as_f64)) else { continue };
         let (start, end) = ((start * 1000.0) as i64, ((end * 1000.0) as i64).min(duration_ms));
@@ -675,6 +706,7 @@ pub(super) fn aniskip_markers(v: &Value, duration_ms: i64) -> Vec<Value> {
         }
         match r.get("skipType").and_then(Value::as_str) {
             Some("op") => out.push(json!({"type": "intro", "startTimeOffset": start, "endTimeOffset": end})),
+            Some("recap") if !has_op => out.push(json!({"type": "intro", "startTimeOffset": start, "endTimeOffset": end})),
             Some("ed") => out.push(json!({"type": "credits", "startTimeOffset": start, "endTimeOffset": end, "final": true})),
             _ => {}
         }

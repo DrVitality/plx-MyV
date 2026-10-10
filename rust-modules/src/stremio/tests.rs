@@ -92,9 +92,9 @@ fn addon(url: &str, name: &str, resources: Value, types: &[&str], prefixes: Opti
 
 fn cinemeta() -> Addon {
     let mut search = catalog("movie", "top", Some("Popular"));
-    search.extra = vec![ExtraProp { name: "search".into(), is_required: false }];
+    search.extra = vec![ExtraProp { name: "search".into(), is_required: false, options: Vec::new() }];
     let mut series_search = catalog("series", "top", Some("Popular"));
-    series_search.extra = vec![ExtraProp { name: "search".into(), is_required: false }];
+    series_search.extra = vec![ExtraProp { name: "search".into(), is_required: false, options: Vec::new() }];
     addon(CINEMETA, "Cinemeta", json!(["catalog", "meta"]), &["movie", "series"], Some(&["tt"]),
           vec![search, series_search])
 }
@@ -106,7 +106,7 @@ fn kitsu() -> Addon {
 
 fn torrentio() -> Addon {
     let mut downloads = catalog("other", "realdebrid", Some("RD downloads"));
-    downloads.extra = vec![ExtraProp { name: "skip".into(), is_required: false }];
+    downloads.extra = vec![ExtraProp { name: "skip".into(), is_required: false, options: Vec::new() }];
     addon("https://torrentio.example/manifest.json", "Torrentio",
           json!(["stream", {"name": "catalog", "types": ["other"]}]), &["movie", "series", "anime"],
           Some(&["tt", "kitsu"]), vec![downloads])
@@ -841,4 +841,99 @@ impl Stremio for Recording {
     fn fetch_range(&self, url: &str, from: u64, len: u64) -> Result<Vec<u8>, ApiError> {
         self.inner.fetch_range(url, from, len)
     }
+}
+
+// ---------------------------------------------------------------- conveniences
+
+/// `days` from today as `YYYY-MM-DD` (negative = ago).
+fn day_from_today(days: i64) -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64 + days * 86_400;
+    let (y, m, d) = plx_net::net::civil_date(secs);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+#[test]
+fn a_film_page_says_what_will_play_and_the_track_panel_names_the_release() {
+    let b = playback_bridge();
+    let rk = Rk::item("movie", "tt0111161").unwrap().encode();
+    let detail = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{rk}"))));
+    let m = &detail["MediaContainer"]["Metadata"][0];
+    let summary = m["summary"].as_str().unwrap();
+    assert!(summary.starts_with("Ready to play: 1080p"), "{summary}");
+    assert!(summary.contains("Instant"), "{summary}");
+    let file = m["Media"][0]["Part"][0]["file"].as_str().unwrap();
+    assert!(file.starts_with("Torrentio · Shawshank.1080p"), "{file}");
+    assert!(!file.contains("http"), "no stream link in the panel");
+}
+
+#[test]
+fn a_library_has_genre_shelves_from_its_catalogs_genre_choice() {
+    let mut s = content_scripted();
+    let cat = &mut s.addons[0].manifest.catalogs[0];
+    cat.extra.push(ExtraProp { name: "genre".into(), is_required: false,
+                               options: vec!["Action".into(), "Drama".into()] });
+    s.pages.insert("https://v3-cinemeta.example/catalog/movie/top/genre=Action.json".into(), metas(json!([
+        {"id": "tt0172495", "type": "movie", "name": "Gladiator"}])));
+    let b = bridge_with(s);
+    let movies = json_of(&b.handle(&authed("GET", "/hubs/sections/1")));
+    let hubs = movies["MediaContainer"]["Hub"].as_array().unwrap();
+    let action = hubs.iter().find(|h| h["title"] == "Action").expect("an Action shelf");
+    assert_eq!(action["Metadata"][0]["title"], "Gladiator");
+    assert!(hubs.iter().all(|h| h["title"] != "Drama"), "a genre with nothing in it is left out");
+    let page = json_of(&b.handle(&authed("GET", action["key"].as_str().unwrap())));
+    assert_eq!(page["MediaContainer"]["Metadata"][0]["title"], "Gladiator");
+}
+
+#[test]
+fn coming_soon_lists_the_next_unreleased_episode_of_a_saved_show() {
+    let mut s = content_scripted();
+    let (aired, soon, later) = (day_from_today(-3), day_from_today(5), day_from_today(12));
+    s.pages.insert("https://v3-cinemeta.example/meta/series/tt0944947.json".into(), json!({"meta": {
+        "id": "tt0944947", "type": "series", "name": "Game of Thrones",
+        "videos": [
+            {"id": "tt0944947:1:1", "season": 1, "episode": 1, "released": format!("{aired}T00:00:00.000Z")},
+            {"id": "tt0944947:1:2", "season": 1, "episode": 2, "released": format!("{soon}T00:00:00.000Z")},
+            {"id": "tt0944947:1:3", "season": 1, "episode": 3, "released": format!("{later}T00:00:00.000Z")},
+        ]}}));
+    let b = bridge_with(s);
+    let home = json_of(&b.handle(&authed("GET", "/hubs")));
+    let hubs = home["MediaContainer"]["Hub"].as_array().unwrap();
+    let soon_hub = hubs.iter().find(|h| h["hubIdentifier"] == "stremio.coming_soon").expect("a Coming Soon row");
+    let rows = soon_hub["Metadata"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "one card per show");
+    let line = rows[0]["summary"].as_str().unwrap();
+    assert!(line.starts_with("S1 · E2 · Airs "), "{line}");
+    // the episode that already aired is New Episodes', not Coming Soon's
+    assert!(hubs.iter().any(|h| h["hubIdentifier"] == "stremio.new_episodes"));
+}
+
+#[test]
+fn removing_from_continue_watching_rewinds_the_item_as_stremio_does() {
+    let s = content_scripted();
+    let written = std::sync::Arc::new(Mutex::new(Vec::<Value>::new()));
+    let b = Bridge::new(Box::new(Recording { inner: s, written: written.clone() }), 32498);
+    let show = Rk::item("series", "tt0944947").unwrap().encode();
+    let r = b.handle(&authed("PUT", &format!("/actions/removeFromContinueWatching?ratingKey={show}")));
+    assert_eq!(r.status, 200);
+    let w = written.lock().unwrap();
+    assert_eq!(w.len(), 1);
+    assert_eq!(w[0]["_id"], "tt0944947");
+    assert_eq!(w[0]["state"]["timeOffset"], 0);
+    assert_eq!(w[0]["state"]["video_id"], "tt0944947:1:2", "the show still knows where it was");
+    assert_eq!(w[0]["removed"], false, "a saved show stays saved");
+}
+
+#[test]
+fn an_aniskip_recap_is_skipped_like_an_opening_only_when_there_is_none() {
+    let recap_only = json!({"found": true, "results": [
+        {"interval": {"startTime": 0.0, "endTime": 60.0}, "skipType": "recap"}]});
+    let m = super::bridge::aniskip_markers_for_test(&recap_only, 1_420_000);
+    assert_eq!(m.len(), 1);
+    assert_eq!(m[0]["type"], "intro");
+    let both = json!({"found": true, "results": [
+        {"interval": {"startTime": 0.0, "endTime": 60.0}, "skipType": "recap"},
+        {"interval": {"startTime": 90.0, "endTime": 180.0}, "skipType": "op"}]});
+    let m = super::bridge::aniskip_markers_for_test(&both, 1_420_000);
+    assert_eq!(m.len(), 1);
+    assert_eq!(m[0]["startTimeOffset"], 90_000);
 }

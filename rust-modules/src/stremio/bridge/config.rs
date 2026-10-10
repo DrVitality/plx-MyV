@@ -25,6 +25,7 @@ pub(super) const DEFAULT_HOME_PER_LIB: usize = 2;
 pub(super) const ROW_CONTINUE: &str = "continue";
 pub(super) const ROW_NEW_EPISODES: &str = "new_episodes";
 pub(super) const ROW_LIBRARY: &str = "library";
+pub(super) const ROW_COMING_SOON: &str = "coming_soon";
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub(super) struct RowPref {
@@ -72,6 +73,7 @@ pub(super) struct Config {
 pub(super) enum HomeRow {
     Continue,
     NewEpisodes,
+    ComingSoon,
     Library,
     /// A catalog: its index in the bridge's shelf list.
     Shelf(usize),
@@ -123,6 +125,7 @@ impl Config {
         let mut defaults: Vec<(String, HomeRow, bool)> = vec![
             (ROW_CONTINUE.into(), HomeRow::Continue, true),
             (ROW_NEW_EPISODES.into(), HomeRow::NewEpisodes, true),
+            (ROW_COMING_SOON.into(), HomeRow::ComingSoon, true),
         ];
         // the first catalogs of each library, in library order, as Home always showed them
         let mut rest = Vec::new();
