@@ -1634,8 +1634,9 @@ impl Bridge {
             .filter_map(|g| offered.iter().find(|o| o.eq_ignore_ascii_case(g)).cloned())
             .take(2)
             .collect();
+        let addons_ref: &[Addon] = &addons;
         let jobs: Vec<Box<dyn FnOnce() -> Vec<Title> + Send + '_>> = genres.iter()
-            .map(|g| Box::new(move || self.catalog_page_in(&addons[s.addon], (s.addon, s.catalog), 0, None, Some(g.as_str())))
+            .map(|g| Box::new(move || self.catalog_page_in(&addons_ref[s.addon], (s.addon, s.catalog), 0, None, Some(g.as_str())))
                 as Box<dyn FnOnce() -> Vec<Title> + Send + '_>)
             .collect();
         let pages: Vec<Vec<Title>> = parallel(jobs).into_iter().map(Option::unwrap_or_default).collect();
