@@ -127,6 +127,8 @@ pub enum PickerKind {
     StreamQuality,
     /// Video & playback: any stream, or only those that start at once.
     StreamSource,
+    /// Video & playback: skip a marked intro on its own, or offer the button.
+    SkipIntros,
 }
 
 impl SettingsPage {
@@ -146,7 +148,7 @@ impl PickerKind {
     pub fn parent(self) -> SettingsPage {
         match self {
             PickerKind::Quality | PickerKind::DirectPlay | PickerKind::SubtitleSize | PickerKind::SubtitlePosition | PickerKind::NextEpisode | PickerKind::DeckPress | PickerKind::SkipInterval
-            | PickerKind::StreamQuality | PickerKind::StreamSource => SettingsPage::Playback,
+            | PickerKind::StreamQuality | PickerKind::StreamSource | PickerKind::SkipIntros => SettingsPage::Playback,
             PickerKind::AudioLanguage | PickerKind::SubtitleMode | PickerKind::SubtitleLanguage | PickerKind::ForcedSubtitles => SettingsPage::AudioSubtitles,
             PickerKind::Accent | PickerKind::Ground | PickerKind::Corners | PickerKind::Peek => SettingsPage::Appearance,
         }

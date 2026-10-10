@@ -912,6 +912,90 @@ fn present_stream_picker(
     super::bridge::open_item_menu(pages, arg);
 }
 
+/// **The player's Change stream page, its list**: fetched on a worker once per item played (the
+/// bridge already ranked the streams to start it, so the answer is quick) and published to the
+/// More menu (`more_menu::set_streams`), which shows the row once it is there.
+pub(super) fn player_streams_fetch(ps: &plx_media::route::PlaybackSession) {
+    let rk = plx_media::route::cur_rk(ps);
+    if rk.is_empty() || plx_appkit::more_menu::streams_rk() == rk {
+        return;
+    }
+    // claimed now, so the next frame does not ask again
+    plx_appkit::more_menu::set_streams(&rk, Some(Vec::new()), None);
+    let Some(client) = plx_plex::plex::client_for(plx_media::route::cur_sid(ps)) else {
+        plx_appkit::more_menu::set_streams(&rk, None, None);
+        return;
+    };
+    let worker_rk = rk.clone();
+    let started = plx_base::task::spawn_off_frame("player streams", move |_| {
+        let listed = client.stream_choices(&worker_rk).map(|mc| plx_screens::registry::StreamChoice::from_container(&mc));
+        // a newer item may have claimed the list since; its answer is the one that stands
+        if plx_appkit::more_menu::streams_rk() != worker_rk {
+            return;
+        }
+        match listed {
+            Some(choices) if !choices.is_empty() => {
+                let playing = choices.iter().find(|c| c.playing).and_then(|c| u16::try_from(c.index).ok());
+                let rows = choices.into_iter()
+                    .filter_map(|c| Some(plx_appkit::more_menu::StreamRow {
+                        index: u16::try_from(c.index).ok()?, label: c.label, detail: c.detail }))
+                    .collect();
+                plx_appkit::more_menu::set_streams(&worker_rk, Some(rows), playing);
+            }
+            _ => plx_appkit::more_menu::set_streams(&worker_rk, None, None),
+        }
+        plx_machine::present::wake_from_worker();
+    });
+    if !started {
+        plx_appkit::more_menu::set_streams(&rk, None, None);
+    }
+}
+
+/// **A Change stream pick**: record it with the bridge on a worker. `None` when there is no server
+/// or the worker was refused (logged).
+pub(super) fn start_player_stream(ps: &plx_media::route::PlaybackSession, index: u16) -> Option<std::sync::mpsc::Receiver<bool>> {
+    let rk = plx_media::route::cur_rk(ps);
+    let client = plx_plex::plex::client_for(plx_media::route::cur_sid(ps))?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let started = plx_base::task::spawn_off_frame("player stream", move |_| {
+        let _ = tx.send(client.choose_stream(&rk, i64::from(index)));
+        plx_machine::present::wake_from_worker();
+    });
+    if !started {
+        plx_base::eventlog::log("player stream: the worker was refused");
+        return None;
+    }
+    Some(rx)
+}
+
+/// The landing half of [`start_player_stream`]: once the bridge has the pick, the item playing is
+/// resolved again at the position on screen — the same request, now redirected to the new stream.
+pub(super) fn player_stream_tick(
+    ps: &mut plx_media::route::PlaybackSession,
+    pa: &mut plx_media::player::adapter::PlayerAdapter,
+    bridge: &mut super::bridge::Bridge,
+) {
+    let Some(rx) = bridge.player_stream.as_ref() else { return };
+    match rx.try_recv() {
+        Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        Ok(true) => {
+            bridge.player_stream = None;
+            plx_base::eventlog::log("player stream: switching");
+            if super::playback::retry_failed_playback(ps, pa, bridge.metadata_mut(), None) {
+                // the list's checkmark follows the new stream on its next fetch
+                plx_appkit::more_menu::set_streams("", Some(Vec::new()), None);
+            } else {
+                notify(plx_platform::i18n::msg::browse_menu_no_streams());
+            }
+        }
+        Ok(false) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            bridge.player_stream = None;
+            plx_base::eventlog::log("player stream: the choice could not be recorded");
+            notify(plx_platform::i18n::msg::browse_menu_no_streams());
+        }
+    }
+}
+
 /// A one-line notice through the television's own toast, off the frame thread (an LS2 call).
 fn notify(message: &str) {
     let message = message.to_owned();

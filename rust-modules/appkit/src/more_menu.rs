@@ -89,7 +89,62 @@ pub enum Action {
     /// as in `account_menu` because the account menu is unreachable during playback, and playback
     /// is what a Cloud Test Lab session is usually reproducing.
     SendDiagnostics,
+    /// play the item from another of its streams — the bridge's ranked index ([`StreamRow::index`])
+    /// — at the same position
+    PickStream(u16),
 }
+
+/// One stream the **Streams page** lists (the Stremio bridge's `/stremio/choices`): its place in the
+/// bridge's ranked list, which is what a choice names, and its two lines.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StreamRow {
+    pub index: u16,
+    pub label: String,
+    pub detail: String,
+}
+
+/// The streams of the item playing, as the app last fetched them. The app sets it from a worker's
+/// answer ([`set_streams`]); the menu reads it each frame and rebuilds when `rev` moves, so a list
+/// that lands while the page is open appears.
+struct Streams {
+    rk: String,
+    rows: Vec<StreamRow>,
+    playing: Option<u16>,
+    /// The item has no streams to offer (not a Stremio item, or the list could not be read): the
+    /// root shows no Change stream row.
+    none: bool,
+    rev: u32,
+}
+
+static STREAMS: std::sync::Mutex<Streams> =
+    std::sync::Mutex::new(Streams { rk: String::new(), rows: Vec::new(), playing: None, none: false, rev: 0 });
+
+/// Publish the streams of the item `rk`: `Some(rows)` (empty while they are being fetched), or
+/// `None` when it has none to offer.
+pub fn set_streams(rk: &str, rows: Option<Vec<StreamRow>>, playing: Option<u16>) {
+    let mut g = STREAMS.lock().unwrap_or_else(|e| e.into_inner());
+    g.rk = rk.to_string();
+    g.none = rows.is_none();
+    g.rows = rows.unwrap_or_default();
+    g.playing = playing;
+    g.rev = g.rev.wrapping_add(1);
+}
+
+/// The item the published streams belong to.
+pub fn streams_rk() -> String {
+    STREAMS.lock().unwrap_or_else(|e| e.into_inner()).rk.clone()
+}
+
+/// The published streams for the item `ps` is playing: `(revision, rows, playing)`, `None` when
+/// there are none to offer for it.
+fn streams_for(ps: &plx_media::route::PlaybackSession) -> Option<(u32, Vec<StreamRow>, Option<u16>)> {
+    let g = STREAMS.lock().unwrap_or_else(|e| e.into_inner());
+    let rk = plx_media::route::cur_rk(ps);
+    (!rk.is_empty() && g.rk == rk && !g.none).then(|| (g.rev, g.rows.clone(), g.playing))
+}
+
+/// Streams rows listed at most.
+const STREAM_ROWS: usize = 60;
 
 /// **A drill-in page of the More menu** — the form's `Dest`. The root is the empty page stack, not
 /// a value of this type (`docs/player-submenus.md`).
@@ -98,6 +153,8 @@ pub enum MorePage {
     /// The playback-quality ladder: one checked-rung row per rung ([`MoreRow::Act`] of a
     /// [`Action::SetQuality`]).
     Quality,
+    /// The item's other streams ([`Action::PickStream`]), the playing one checked.
+    Streams,
 }
 
 impl MorePage {
@@ -105,6 +162,7 @@ impl MorePage {
     fn title(self) -> String {
         match self {
             Self::Quality => plx_platform::i18n::msg::widgets_menu_quality().to_string(),
+            Self::Streams => plx_platform::i18n::msg::widgets_menu_streams().to_string(),
         }
     }
 
@@ -112,6 +170,7 @@ impl MorePage {
     fn code(self) -> u32 {
         match self {
             Self::Quality => 1,
+            Self::Streams => 2,
         }
     }
 }
@@ -122,6 +181,8 @@ impl MorePage {
 pub enum MoreRow {
     /// The root's Quality row ([`MorePage::Quality`]): reads out the current rung.
     OpenQuality,
+    /// The root's Change stream row ([`MorePage::Streams`]).
+    OpenStreams,
     Act(Action),
 }
 
@@ -159,6 +220,8 @@ pub struct MoreMenuState {
     forced: bool,
     /// The rung the root's Quality row reads out and the Quality page checks, as of the last build.
     current: plx_media::route::Quality,
+    /// The published streams' revision the form was built from ([`set_streams`]).
+    streams_rev: u32,
     /// The pages pushed above the root, outermost first (empty = the root): each remembers the row
     /// that opened it and the scroll it was left at ([`page_stack`]).
     pages: PageStack<MorePage, MoreRow>,
@@ -185,6 +248,7 @@ impl FormId for Action {
             Action::SetQuality(Quality::P720) => 14,
             Action::SetQuality(Quality::P720Low) => 15,
             Action::SetQuality(Quality::P480) => 16,
+            Action::PickStream(i) => 100 + u32::from(*i),
         })
     }
 }
@@ -194,6 +258,7 @@ impl FormId for MoreRow {
         match self {
             // free in `Action`'s key space (0..=2 and 10..=16)
             MoreRow::OpenQuality => RowKey(3),
+            MoreRow::OpenStreams => RowKey(4),
             MoreRow::Act(a) => a.key(),
         }
     }
@@ -225,7 +290,37 @@ fn root_form(
         Action::None,
         Row::new(plx_platform::i18n::msg::widgets_menu_quality()).value(current.label()),
     );
-    Form::new().section(quality).section(options)
+    let streams = FormSection::new("").item_if(
+        streams_for(ps).is_some(),
+        MoreRow::OpenStreams,
+        RowKind::Nav(MorePage::Streams),
+        Action::None,
+        Row::new(plx_platform::i18n::msg::widgets_menu_streams()),
+    );
+    Form::new().section(quality).section(streams).section(options)
+}
+
+/// The Streams PAGE: one checked row per stream, the playing one checked; while the list is being
+/// fetched, one row that says so (it commits nothing).
+fn streams_form(ps: &plx_media::route::PlaybackSession) -> MoreForm {
+    let (_, rows, playing) = streams_for(ps).unwrap_or((0, Vec::new(), None));
+    if rows.is_empty() {
+        return Form::new().section(FormSection::new("").item(
+            MoreRow::Act(Action::None),
+            RowKind::Button,
+            Action::None,
+            // placeholder-exempt: a dimmed menu row the table draws; the page is rebuilt with the streams when they land
+            Row::new(plx_platform::i18n::msg::widgets_menu_streams_loading()).dim(true),
+        ));
+    }
+    let sec = rows.iter().take(STREAM_ROWS).fold(FormSection::new(""), |sec, r| {
+        let a = Action::PickStream(r.index);
+        let row = Row::new(r.label.clone()).server_label().detail(r.detail.clone()).server_detail();
+        sec.choice(MoreRow::Act(a), a, row, |id| {
+            playing.is_some_and(|p| *id == MoreRow::Act(Action::PickStream(p)))
+        })
+    });
+    Form::new().section(sec)
 }
 
 /// The Quality PAGE: one checked-rung row per rung of `rows`, the current one checked.
@@ -254,7 +349,8 @@ impl MoreMenuState {
         form.table.compact = true; // a short action list — BODY labels, like the profile menu
         form.table.min_panel_w = theme::layout::PLAYER_MENU_MIN_W;
         form.set_or_open(root_form(ps, &rows, forced, current), None);
-        let mut st = MoreMenuState { form, rows, forced, current, pages: PageStack::new(), motion: PanelMotion::new() };
+        let streams_rev = streams_for(ps).map_or(0, |s| s.0);
+        let mut st = MoreMenuState { form, rows, forced, current, streams_rev, pages: PageStack::new(), motion: PanelMotion::new() };
         // A quality entry (the failure screen's OK) opens straight on the Quality page with the
         // active rung focused, no slide: the viewer is fixing a bad decision, not browsing. Under
         // Force Direct Play there is no ladder, so it is the ordinary root.
@@ -281,6 +377,7 @@ impl MoreMenuState {
     fn page_form(&self, ps: &plx_media::route::PlaybackSession, page: MorePage) -> MoreForm {
         match page {
             MorePage::Quality => quality_form(ps, &self.rows, self.current),
+            MorePage::Streams => streams_form(ps),
         }
     }
 
@@ -289,6 +386,7 @@ impl MoreMenuState {
     fn page_initial(&self, page: MorePage) -> Option<MoreRow> {
         match page {
             MorePage::Quality => Some(MoreRow::Act(Action::SetQuality(self.current))),
+            MorePage::Streams => STREAMS.lock().unwrap_or_else(|e| e.into_inner()).playing.map(|p| MoreRow::Act(Action::PickStream(p))),
         }
     }
 
@@ -361,20 +459,26 @@ impl MoreMenuState {
         rows: Vec<Action>,
         current: plx_media::route::Quality,
     ) -> bool {
-        if forced == self.forced && rows == self.rows && current == self.current {
+        let rev = streams_for(ps).map_or(0, |s| s.0);
+        if forced == self.forced && rows == self.rows && current == self.current && rev == self.streams_rev {
             return false;
         }
         self.rows = rows;
         self.forced = forced;
         self.current = current;
+        self.streams_rev = rev;
         if let Some(first) = self.pages.first().copied() {
-            if quality_offered(&self.rows, self.forced) {
-                let page = self.pages.top().unwrap_or(MorePage::Quality);
+            let page = self.pages.top().unwrap_or(MorePage::Quality);
+            let offered = match page {
+                MorePage::Quality => quality_offered(&self.rows, self.forced),
+                MorePage::Streams => streams_for(ps).is_some(),
+            };
+            if offered {
                 let fallback = self.page_initial(page);
                 let form = self.page_form(ps, page);
                 self.form.refresh_with(form, None, fallback.as_ref());
             } else {
-                // the ladder is gone under the viewer: back to the root, restoring the opener and
+                // the page's rows are gone under the viewer: back to the root, restoring the opener and
                 // scroll the stack saved at its first push
                 self.pages.clear();
                 let form = root_form(ps, &self.rows, self.forced, self.current);
@@ -640,6 +744,8 @@ fn label(a: Action) -> std::borrow::Cow<'static, str> {
         // the picker's leading mark (see this module's doc)
         Action::SetQuality(q) => q.label().into(),
         Action::SendDiagnostics => plx_platform::i18n::msg::widgets_menu_diagnostics().into(),
+        // a stream row draws its own line ([`streams_form`]); this is only a fallback
+        Action::PickStream(_) => plx_platform::i18n::msg::widgets_menu_streams().into(),
         Action::None => "".into(),
     }
 }
@@ -671,7 +777,7 @@ fn is_on(a: Action) -> bool {
     match a {
         Action::ToggleStats => stats_on(),
         // a rung is not a switch — see `row_for`, which gives it the leading mark instead
-        Action::SetQuality(_) | Action::SendDiagnostics | Action::None => false,
+        Action::SetQuality(_) | Action::SendDiagnostics | Action::PickStream(_) | Action::None => false,
     }
 }
 
@@ -1110,7 +1216,8 @@ mod tests {
     #[test]
     fn every_key_is_distinct_and_below_the_band() {
         let mut all: Vec<MoreRow> = plx_media::route::QUALITY_LADDER.iter().map(|q| MoreRow::Act(Action::SetQuality(*q))).collect();
-        all.extend([MoreRow::OpenQuality, MoreRow::Act(Action::ToggleStats), MoreRow::Act(Action::SendDiagnostics)]);
+        all.extend([MoreRow::OpenQuality, MoreRow::OpenStreams, MoreRow::Act(Action::ToggleStats), MoreRow::Act(Action::SendDiagnostics)]);
+        all.extend((0..STREAM_ROWS as u16).map(|i| MoreRow::Act(Action::PickStream(i))));
         let mut keys: Vec<u32> = all.iter().map(|a| a.key().0).collect();
         keys.sort_unstable();
         keys.dedup();
@@ -1272,6 +1379,7 @@ mod focus_tests {
             rows: Vec::new(),
             forced: false,
             current: plx_media::route::Quality::Auto,
+            streams_rev: 0,
             pages: PageStack::new(),
             motion: PanelMotion::new(),
         }

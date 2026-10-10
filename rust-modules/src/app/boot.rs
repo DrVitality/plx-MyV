@@ -1763,4 +1763,5 @@ pub(crate) unsafe fn construct(
 pub(crate) fn apply_appearance(look: plx_plex::plex::session::Appearance) {
     plx_ui::theme::appearance::apply(look.accent, look.ground, look.corners, look.peek);
     crate::stremio::apply_stream_prefs(look.stream_res, look.stream_source != 0);
+    super::playback::set_auto_skip_intros(look.skip_intros != 0);
 }

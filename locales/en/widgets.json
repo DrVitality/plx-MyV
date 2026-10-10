@@ -19,6 +19,14 @@
     "value": "Quality",
     "description": "Option or section label in the player overflow menu."
   },
+  "widgets.menu.streams": {
+    "value": "Change stream",
+    "description": "Player overflow menu row and page title: play this from another of its streams"
+  },
+  "widgets.menu.streams_loading": {
+    "value": "Finding streams\u2026",
+    "description": "Player overflow menu: the stream list is still being fetched"
+  },
   "widgets.menu.stats": {
     "value": "Stats for nerds",
     "description": "Option or section label in the player overflow menu."

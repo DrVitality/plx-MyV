@@ -55,6 +55,7 @@ impl PickerKind {
         Self::Peek => plx_platform::i18n::msg::settings_appearance_peek(),
         Self::StreamQuality => plx_platform::i18n::msg::settings_playback_stream_quality(),
         Self::StreamSource => plx_platform::i18n::msg::settings_playback_stream_source(),
+        Self::SkipIntros => plx_platform::i18n::msg::settings_playback_skip_intros(),
     }}
     /// What this field's picker says about it under its title. The four account fields share the
     /// account note (it is about where those values are saved); each local one has its own.
@@ -73,12 +74,13 @@ impl PickerKind {
         Self::Peek => plx_platform::i18n::msg::settings_appearance_peek_copy(),
         Self::StreamQuality => plx_platform::i18n::msg::settings_playback_stream_quality_copy(),
         Self::StreamSource => plx_platform::i18n::msg::settings_playback_stream_source_copy(),
+        Self::SkipIntros => plx_platform::i18n::msg::settings_playback_skip_intros_copy(),
     }}
     /// The field-list page this field belongs to.
     fn kind(self) -> Kind {
         match self {
             Self::Quality | Self::DirectPlay | Self::SubtitleSize | Self::SubtitlePosition | Self::NextEpisode | Self::DeckPress | Self::SkipInterval
-            | Self::StreamQuality | Self::StreamSource => Kind::Playback,
+            | Self::StreamQuality | Self::StreamSource | Self::SkipIntros => Kind::Playback,
             Self::AudioLanguage | Self::SubtitleMode | Self::SubtitleLanguage | Self::ForcedSubtitles => Kind::AudioSubtitles,
             Self::Accent | Self::Ground | Self::Corners | Self::Peek => Kind::Appearance,
         }
@@ -309,6 +311,7 @@ impl FormId for RowId {
             Self::Field(PickerKind::Peek) => 3,
             Self::Field(PickerKind::StreamQuality) => 8,
             Self::Field(PickerKind::StreamSource) => 9,
+            Self::Field(PickerKind::SkipIntros) => 10,
             Self::Retry => 6,
         })
     }
@@ -419,7 +422,7 @@ impl PreferencesPage {
 fn fields_of(inputs: &FieldListInputs<'_>) -> &'static [PickerKind] {
     match inputs.kind {
         Kind::Playback => &[PickerKind::Quality, PickerKind::DirectPlay, PickerKind::SubtitleSize, PickerKind::SubtitlePosition, PickerKind::NextEpisode, PickerKind::DeckPress, PickerKind::SkipInterval,
-            PickerKind::StreamQuality, PickerKind::StreamSource],
+            PickerKind::StreamQuality, PickerKind::StreamSource, PickerKind::SkipIntros],
         Kind::AudioSubtitles if inputs.prefs.is_some() => &[PickerKind::AudioLanguage, PickerKind::SubtitleMode, PickerKind::SubtitleLanguage, PickerKind::ForcedSubtitles],
         Kind::Appearance => &[PickerKind::Accent, PickerKind::Ground, PickerKind::Corners, PickerKind::Peek],
         _ => &[],
@@ -442,7 +445,7 @@ fn resolve_value(field: PickerKind, quality: Quality, direct_play: DirectPlayMod
         PickerKind::SubtitleMode => Value::Mode(prefs.map_or(0, |p| p.subtitle_mode)),
         PickerKind::ForcedSubtitles => Value::Forced(prefs.map_or(0, |p| p.subtitle_forced)),
         PickerKind::Accent | PickerKind::Ground | PickerKind::Corners | PickerKind::Peek
-        | PickerKind::StreamQuality | PickerKind::StreamSource => {
+        | PickerKind::StreamQuality | PickerKind::StreamSource | PickerKind::SkipIntros => {
             let look = live_look();
             Value::Look(field, match field {
                 PickerKind::Accent => look.accent,
@@ -450,6 +453,7 @@ fn resolve_value(field: PickerKind, quality: Quality, direct_play: DirectPlayMod
                 PickerKind::Corners => look.corners,
                 PickerKind::StreamQuality => look.stream_res,
                 PickerKind::StreamSource => look.stream_source,
+                PickerKind::SkipIntros => look.skip_intros,
                 _ => look.peek,
             })
         }
@@ -483,6 +487,9 @@ fn field_options(field: PickerKind, quality: Quality, direct_play: DirectPlayMod
         PickerKind::StreamQuality => [plx_platform::i18n::msg::settings_playback_stream_quality_best(),
             plx_platform::i18n::msg::settings_playback_stream_quality_up_to_1080(),
             plx_platform::i18n::msg::settings_playback_stream_quality_up_to_720()]
+            .into_iter().enumerate().map(|(i, s)| (s.into(), Value::Look(field, i as u8))).collect(),
+        PickerKind::SkipIntros => [plx_platform::i18n::msg::settings_playback_skip_intros_button(),
+            plx_platform::i18n::msg::settings_playback_skip_intros_auto()]
             .into_iter().enumerate().map(|(i, s)| (s.into(), Value::Look(field, i as u8))).collect(),
         PickerKind::StreamSource => [plx_platform::i18n::msg::settings_playback_stream_source_any(),
             plx_platform::i18n::msg::settings_playback_stream_source_instant()]
@@ -594,6 +601,7 @@ fn look_with(field: PickerKind, index: u8) -> plx_plex::plex::session::Appearanc
         PickerKind::Peek => look.peek = index,
         PickerKind::StreamQuality => look.stream_res = index,
         PickerKind::StreamSource => look.stream_source = index,
+        PickerKind::SkipIntros => look.skip_intros = index,
         _ => {}
     }
     look

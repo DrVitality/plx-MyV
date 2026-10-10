@@ -1347,6 +1347,22 @@
     "value": "Instant only",
     "description": "Streams option: only debrid-cached streams"
   },
+  "settings.playback.skip_intros": {
+    "value": "Skip intros",
+    "description": "Settings row: whether intros and recaps are skipped on their own"
+  },
+  "settings.playback.skip_intros.copy": {
+    "value": "Automatically jumps past an intro (or an anime recap) the moment it starts, where the episode marks one. Otherwise a Skip Intro button is offered.",
+    "description": "Picker explanation for Skip intros"
+  },
+  "settings.playback.skip_intros.button": {
+    "value": "Show a button",
+    "description": "Skip intros option: offer the Skip Intro button"
+  },
+  "settings.playback.skip_intros.auto": {
+    "value": "Automatically",
+    "description": "Skip intros option: skip without asking"
+  },
   "settings.appearance.accent.silver": {
     "value": "Silver",
     "description": "Accent colour option"

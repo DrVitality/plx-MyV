@@ -4,6 +4,8 @@
   "widgets.diagnostics.failed": "Не ўдалося даслаць дыягностыку",
   "widgets.menu.options": "Параметры",
   "widgets.menu.quality": "Якасць",
+  "widgets.menu.streams": "Змяніць крыніцу",
+  "widgets.menu.streams_loading": "Шукаем крыніцы…",
   "widgets.menu.stats": "Статыстыка",
   "widgets.menu.diagnostics": "Даслаць дыягностыку",
   "widgets.badge.forced": "ПРЫМУСОВЫЯ",

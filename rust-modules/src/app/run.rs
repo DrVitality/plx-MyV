@@ -1677,6 +1677,17 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
                 if let Some((kind, start)) = offer {
                     log(&format!("marker offer: {kind:?} at {}s", start / 1000));
                 }
+                // Skip intros > Automatically: the same act as pressing Skip Intro, once per
+                // segment (the segment is retired first, so the landing does not offer it again).
+                if super::playback::auto_skip_intros() {
+                    if let plx_appkit::player_hud::ControlSlot::Skip(pr) = fr.ctrl {
+                        if let (plx_data::metadata::MarkerKind::Intro, plx_appkit::skip_pill::SkipAction::Seek(ns)) = (pr.kind, pr.action) {
+                            app.bridge.metadata_mut().run(plx_data::stores::metadata::MetadataCmd::MarkSkipped(pr.marker));
+                            super::playback::request_seek(ns);
+                            log("marker auto-skip: intro");
+                        }
+                    }
+                }
                 // A segment beginning puts the HUD ON SCREEN and offers the row — the timer,
                 // the DISMISSAL and the ring in one act, because raising the timer alone left
                 // the tile behind a transport nobody drew. `HudState::raise_for_offer` is where
@@ -2289,6 +2300,13 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         if app.bridge.stream_pick.is_some() {
             crate::app::input::stream_pick_tick(&mut app.player.session, &mut app.adapters.player,
                 &mut app.pages, &mut app.bridge, &mut super::playback::LivePlaybackResources, fr.now);
+        }
+        // The player's Change stream page: its list fetched once per item, and a pick's landing.
+        if fr.player {
+            crate::app::input::player_streams_fetch(&app.player.session);
+        }
+        if app.bridge.player_stream.is_some() {
+            crate::app::input::player_stream_tick(&mut app.player.session, &mut app.adapters.player, &mut app.bridge);
         }
         // Server-side view-state WRITES (Mark as Watched / Unwatched, Remove from Deck): send
         // the next queued one, land the last one's answer and kick the refresh it owes. Route-

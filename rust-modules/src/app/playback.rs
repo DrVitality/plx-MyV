@@ -72,6 +72,18 @@ pub(crate) fn frames() -> i32 {
 pub(crate) fn seek_pending() -> i64 {
     plx_media::player::seek_pending()
 }
+/// Settings > Video & playback > Skip intros, as last applied (`boot::apply_appearance`).
+static AUTO_SKIP_INTROS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn set_auto_skip_intros(on: bool) {
+    AUTO_SKIP_INTROS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether a marked intro is skipped the moment it is offered, rather than offered as a button.
+pub(crate) fn auto_skip_intros() -> bool {
+    AUTO_SKIP_INTROS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 #[inline]
 pub(crate) fn request_seek(x: i64) {
     plx_media::player::request_seek(x)
@@ -128,6 +140,11 @@ pub(crate) fn apply_more_action(ps: &mut plx_media::route::PlaybackSession, pa: 
         // Lab builds only. Nothing about playback changes: the snapshot is taken and the toast
         // reports, over whatever the player is doing.
         plx_appkit::more_menu::Action::SendDiagnostics => crate::lab::request_upload("menu", ps),
+        // Change stream: the bridge records the pick on a worker; `input::player_stream_tick` then
+        // resolves the item again at the position on screen.
+        plx_appkit::more_menu::Action::PickStream(index) => {
+            bridge.player_stream = super::input::start_player_stream(ps, index);
+        }
         plx_appkit::more_menu::Action::None => {}
     }
 }

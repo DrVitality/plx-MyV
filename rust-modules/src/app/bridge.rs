@@ -359,6 +359,9 @@ pub(crate) struct Bridge {
     item_menu_reqs: Vec<plx_screens::registry::ItemMenuReq>,
     /// The stream picker between a press and its answer (`input::stream_pick_tick`).
     pub(crate) stream_pick: Option<super::input::StreamPickAwait>,
+    /// A stream switch asked from the player's More menu, until the bridge has recorded it
+    /// (`input::player_stream_tick`): then the item is resolved again at the same position.
+    pub(crate) player_stream: Option<std::sync::mpsc::Receiver<bool>>,
     #[cfg(test)]
     keyboard_calls: Vec<bool>,
     #[cfg(test)]
@@ -565,6 +568,7 @@ impl Bridge {
             player_reqs: Vec::new(),
             item_menu_reqs: Vec::new(),
             stream_pick: None,
+            player_stream: None,
             #[cfg(test)]
             keyboard_calls: Vec::new(),
             #[cfg(test)]
