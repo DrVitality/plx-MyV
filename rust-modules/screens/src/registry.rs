@@ -474,6 +474,9 @@ pub fn card_peek(m: &plx_data::pms::PmsMovie) -> Option<plx_ui::cards::Peek> {
     if !m.rating.is_empty() {
         facts.push(m.rating.clone());
     }
+    if m.audience > 0.0 {
+        facts.push(plx_platform::i18n::msg::browse_peek_imdb(&format!("{:.1}", m.audience)));
+    }
     let hint = if card_press_plays(m.kind) {
         plx_platform::i18n::msg::browse_peek_hint_play()
     } else {

@@ -118,6 +118,7 @@
     "many": "{count} créditos · Más recientes primero.",
     "other": "{count} créditos · Más recientes primero."
   },
+  "browse.peek.imdb": "IMDb {score}",
   "browse.peek.hint_play": "OK reproduce · mantén OK para más",
   "browse.peek.hint_details": "OK abre · mantén OK para más",
   "browse.kind.anime": "Anime",

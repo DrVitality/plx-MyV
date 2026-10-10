@@ -113,6 +113,10 @@ pub struct PmsMovie {
     /// row reads it. Not recorded: it is the bridge's live answer, re-read on every fetch.
     #[serde(skip)]
     pub in_library: bool,
+    /// The audience score the row carries (`audienceRating`, 0–10; IMDb's, from the Stremio
+    /// bridge), 0 when none. Not recorded, like [`Self::in_library`]: the card bubble reads it live.
+    #[serde(skip)]
+    pub audience: f32,
     pub kind: c_int, // 0 = movie, 1 = show, 2 = season, 3 = episode, 4 = collection
     pub resume_ms: i64,  // viewOffset — drives the Continue Watching resume bar
     pub show_rk: String, // parent show rk (episode: grandparent; season: parent)
@@ -320,6 +324,7 @@ pub fn parse_item(it: &plx_plex::plex::Metadata, sid: ServerId) -> PmsMovie {
         ..Default::default()
     };
     m.in_library = it.in_library;
+    m.audience = it.audience_rating as f32;
     m.aired = clean(&it.originally_available_at);
     m.kind = match it.kind.as_str() {
         "show" => 1,

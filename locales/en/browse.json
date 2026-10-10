@@ -462,6 +462,13 @@
     },
     "description": "browse person credits"
   },
+  "browse.peek.imdb": {
+    "value": "IMDb {score}",
+    "description": "Details bubble facts line: the title's IMDb score, e.g. IMDb 8.1",
+    "args": {
+      "score": "str"
+    }
+  },
   "browse.peek.hint_play": {
     "value": "OK plays · hold OK for more",
     "description": "Foot line of the details bubble that opens beside a focused card: pressing OK plays the item, holding OK opens its menu (with Go to Movie / Show)."

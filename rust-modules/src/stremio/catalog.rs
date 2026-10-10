@@ -413,7 +413,8 @@ pub fn title_row(t: &Title, shelf: Shelf<'_>, art: &ArtMap) -> Value {
     insert(&mut row, "year", t.year.map(|y| json!(y)));
     insert(&mut row, "originallyAvailableAt", t.released.as_ref().map(|d| json!(d)));
     insert(&mut row, "audienceRating", t.rating.map(|r| json!(r)));
-    insert(&mut row, "rating", t.rating.map(|r| json!(r)));
+    insert(&mut row, "audienceRatingImage", t.rating.map(|_| json!("imdb://image.rating")));
+    insert(&mut row, "Rating", t.rating.map(|r| json!([{"image": "imdb://image.rating", "value": r, "type": "audience"}])));
     insert(&mut row, "duration", t.minutes.map(|m| json!(m * 60_000)));
     insert(&mut row, "thumb", t.poster.as_deref().map(|u| json!(art.path(u))));
     insert(&mut row, "art", t.background.as_deref().or(t.poster.as_deref()).map(|u| json!(art.path(u))));
