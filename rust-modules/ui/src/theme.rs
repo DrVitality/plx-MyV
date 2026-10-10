@@ -1649,12 +1649,12 @@ pub mod appearance {
     }
 
     /// The page gradient the Ember ground lays under a browsing screen, corner-major in the
-    /// wash's order (top-left, top-right, bottom-right, bottom-left): an ember glow in the top left
-    /// — rust, warm enough to sit with the red accent — that cools through a muted plum across the
-    /// top to a blue-slate in the bottom right, all dark enough that the fine print keeps its
-    /// contrast and the posters stay the brightest thing on screen.
-    const EMBER_WASH: [[f32; 4]; 4] = [rgb8(0x4d, 0x27, 0x17), rgb8(0x35, 0x22, 0x20),
-        rgb8(0x1a, 0x1b, 0x21), rgb8(0x2e, 0x1f, 0x1b)];
+    /// wash's order (top-left, top-right, bottom-right, bottom-left): a burnt-orange glow in the top
+    /// left, warm enough to sit with the red accent, cooling through wine across the top to a deep
+    /// navy in the bottom right — a ground with colour in it, still dark enough that the fine print
+    /// keeps its contrast and the posters stay the brightest thing on screen.
+    const EMBER_WASH: [[f32; 4]; 4] = [rgb8(0x6c, 0x2d, 0x15), rgb8(0x42, 0x1e, 0x26),
+        rgb8(0x12, 0x19, 0x2b), rgb8(0x36, 0x1d, 0x17)];
 
     /// Does the live ground draw a gradient of its own, so a page wash that has settled on the
     /// flat surface must still be painted (`widgets::AmbientWash::is_flat`)?

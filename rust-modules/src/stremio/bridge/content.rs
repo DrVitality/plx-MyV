@@ -433,9 +433,15 @@ impl Bridge {
             .filter_map(|(titles, (n, s))| {
                 let titles = titles.filter(|t| !t.is_empty())?;
                 let rows = self.rows(&titles, s.lib);
+                let title = shelf_title(addons, all, *s);
+                // a popular or trending catalog feeds the Home hero (`pms`'s `.popular` hubs)
+                let words = format!("{} {}", addons[s.addon].manifest.catalogs[s.catalog].id, title).to_ascii_lowercase();
+                let featured = words.contains("popular") || words.contains("trending") || words.contains(" top")
+                    || addons[s.addon].manifest.catalogs[s.catalog].id == "top";
+                let id = if featured { format!("stremio.shelf.{n}.popular") } else { format!("stremio.shelf.{n}") };
                 Some(json!({
-                    "title": shelf_title(addons, all, *s), "type": s.lib.wire(),
-                    "hubIdentifier": format!("stremio.shelf.{n}"), "key": format!("/hubs/stremio/{n}"),
+                    "title": title, "type": s.lib.wire(),
+                    "hubIdentifier": id, "key": format!("/hubs/stremio/{n}"),
                     "more": true, "size": rows.len(), "Metadata": rows,
                 }))
             })
@@ -586,7 +592,7 @@ impl Bridge {
         let mut by_shelf: std::collections::HashMap<String, Value> = self
             .hubs_for(&addons, &all, &picked)
             .into_iter()
-            .filter_map(|h| Some((h.get("hubIdentifier")?.as_str()?.to_string(), h)))
+            .filter_map(|h| Some((h.get("key")?.as_str()?.to_string(), h)))
             .collect();
         let mut hubs = Vec::new();
         for row in rows {
@@ -632,7 +638,7 @@ impl Bridge {
                     }
                 }
                 HomeRow::Shelf(n) => {
-                    if let Some(h) = by_shelf.remove(&format!("stremio.shelf.{n}")) {
+                    if let Some(h) = by_shelf.remove(&format!("/hubs/stremio/{n}")) {
                         hubs.push(h);
                     }
                 }
@@ -1030,7 +1036,11 @@ impl Bridge {
     /// the app decodes, and anything else would be a broken tile rather than an empty one.
     pub(super) fn art(&self, key: &str) -> Response {
         let Some(url) = self.art.url(key) else { return Response::empty(404) };
-        let bytes = match self.art_cache.lock().unwrap_or_else(|e| e.into_inner()).get(key) {
+        // Read into a local FIRST: a guard taken in a `match` scrutinee lives to the end of the
+        // match, and the miss arm locks the cache again to store — a self-deadlock that froze the
+        // first poster request and then every request after it (each takes the lock to warm art).
+        let cached = self.art_cache.lock().unwrap_or_else(|e| e.into_inner()).get(key);
+        let bytes = match cached {
             Some(b) => b,
             None => {
                 let Ok(bytes) = self.stremio.fetch(&url) else { return Response::empty(502) };
@@ -1087,10 +1097,25 @@ impl Bridge {
 
     /// `/photo/:/transcode?url=/stremio/art/{key}&…`: the app's sized-artwork request.
     pub(super) fn photo(&self, req: &Request) -> Response {
-        match req.query("url").and_then(|u| u.strip_prefix("/stremio/art/")) {
-            Some(key) => self.art(key),
-            None => Response::empty(404),
+        let Some(url) = req.query("url") else { return Response::empty(404) };
+        if let Some(key) = url.strip_prefix("/stremio/art/") {
+            return self.art(key);
         }
+        // `/library/metadata/{rk}/clearLogo`: the title's logo, which the heroes draw in place of
+        // its name — metahub's, for an IMDb title (a show's, for one of its episodes)
+        if let Some(rk) = url.strip_prefix("/library/metadata/").and_then(|r| r.strip_suffix("/clearLogo")) {
+            let id = match Rk::decode(rk) {
+                Some(Rk::Item { id, .. } | Rk::Season { id, .. } | Rk::Episode { id, .. }) => id,
+                None => return Response::empty(404),
+            };
+            let Some(logo) = catalog::metahub("logo", &id) else { return Response::empty(404) };
+            let path = self.art.path(&logo);
+            let answer = self.art(path.trim_start_matches("/stremio/art/"));
+            // most titles have no logo: say so for good (a 404), so the hero settles on the name
+            // instead of retrying a fetch that will never succeed
+            return if answer.status == 200 { answer } else { Response::empty(404) };
+        }
+        Response::empty(404)
     }
 }
 

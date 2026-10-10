@@ -60,7 +60,9 @@ impl Stremio for Scripted {
         Ok(())
     }
     fn fetch(&self, url: &str) -> Result<Vec<u8>, ApiError> {
-        self.pages.get(url).map(|v| serde_json::to_vec(v).unwrap()).ok_or(ApiError::Unavailable)
+        self.pages.get(url).map(|v| serde_json::to_vec(v).unwrap())
+            .or_else(|| self.files.get(url).cloned())
+            .ok_or(ApiError::Unavailable)
     }
     fn fetch_range(&self, url: &str, from: u64, len: u64) -> Result<Vec<u8>, ApiError> {
         let file = self.files.get(url).ok_or(ApiError::Unavailable)?;
@@ -1195,4 +1197,29 @@ fn release_text_names_its_languages_and_dubs() {
     assert!(names("Film 1080p\n🇫🇷 / 🇬🇧", "fr"));
     assert!(!names("Spaceballs.1987.1080p", "es"), "a word that merely contains a needle is not a language");
     assert!(names("[SubsPlease] Show - 02 (1080p) Dual Audio", "") == false);
+}
+
+
+/// **A poster fetched once is served again, and nothing waits on it.** The first version of the
+/// artwork memory locked itself inside its own `match`: the first poster request never returned,
+/// and every read after it (a listing warms its posters under the same lock) hung behind it —
+/// "Loading your library" forever. Run on a thread with a deadline so a hang fails here.
+#[test]
+fn a_poster_is_fetched_once_and_served_again_without_blocking_other_reads() {
+    let url = "https://img.example/poster.jpg";
+    let mut s = scripted(vec![cinemeta()]);
+    s.files.insert(url.into(), vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3]);
+    let b = std::sync::Arc::new(bridge_with(s));
+    let path = super::catalog::ArtMap::default().path(url);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = b.clone();
+    std::thread::spawn(move || {
+        let target = format!("/photo/:/transcode?width=200&height=300&url={path}");
+        let first = worker.handle(&authed("GET", &target)).status;
+        let again = worker.handle(&authed("GET", &target)).status;
+        let other = worker.handle(&authed("GET", "/library/sections")).status;
+        let _ = tx.send((first, again, other));
+    });
+    let got = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("the bridge answered (no deadlock)");
+    assert_eq!(got, (200, 200, 200));
 }

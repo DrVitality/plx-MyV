@@ -156,6 +156,13 @@ pub fn is_anime(stype: &str, id: &str) -> bool {
     stype == "anime" || ["kitsu:", "mal:", "anilist:", "anidb:"].iter().any(|p| id.starts_with(p))
 }
 
+/// The metahub image of `kind` (`poster`, `background`, `logo`) for an IMDb title — the images
+/// Stremio's own clients use for any `tt…` id; `None` for any other id.
+pub fn metahub(kind: &str, id: &str) -> Option<String> {
+    let tt = id.split(':').next().filter(|t| t.starts_with("tt") && t[2..].bytes().all(|b| b.is_ascii_digit()) && t.len() > 2)?;
+    Some(format!("https://images.metahub.space/{kind}/medium/{tt}/img"))
+}
+
 /// Artwork stand-ins: the app asks the media server for `/stremio/art/{key}` and the bridge fetches
 /// the remote image the key names.
 ///
@@ -400,8 +407,9 @@ impl Title {
             stype,
             id,
             name,
-            poster: text(v, "poster"),
-            background: text(v, "background"),
+            poster: text(v, "poster").or_else(|| metahub("poster", &id)),
+            // a backdrop is what the Home hero stands on: IMDb titles always have one at metahub
+            background: text(v, "background").or_else(|| metahub("background", &id)),
             description: text(v, "description"),
             year,
             released,
