@@ -425,6 +425,12 @@ pub fn title_row(t: &Title, shelf: Shelf<'_>, art: &ArtMap) -> Value {
         insert(&mut row, "leafCount", Some(json!(t.videos.len())));
         insert(&mut row, "viewedLeafCount", Some(json!(0)));
     }
+    // A film is playable from EVERY row it appears in, not only its own page: the film page keeps
+    // the row it was opened from (a shelf's, a search result's) and Play starts THAT row's part,
+    // so a shelf row without one made Play do nothing at all. The stream is picked when it opens.
+    if kind == Kind::Movie {
+        insert(&mut row, "Media", Some(placeholder_media(&rk, t.minutes)));
+    }
     row
 }
 
@@ -452,15 +458,12 @@ pub fn placeholder_media(rk: &str, minutes: Option<i64>) -> Value {
     }])
 }
 
-/// A title's full detail row: the library row plus people, and for a film its playable stand-in.
+/// A title's full detail row: the library row (a film's carries its playable stand-in) plus people.
 pub fn detail_row(t: &Title, shelf: Shelf<'_>, art: &ArtMap) -> Value {
     let mut row = title_row(t, shelf, art);
     insert(&mut row, "Role", (!t.cast.is_empty()).then(|| tags(&t.cast)));
     insert(&mut row, "Director", (!t.directors.is_empty()).then(|| tags(&t.directors)));
     insert(&mut row, "Writer", (!t.writers.is_empty()).then(|| tags(&t.writers)));
-    if matches!(t.rk, Rk::Item { kind: Kind::Movie, .. }) {
-        insert(&mut row, "Media", Some(placeholder_media(&t.rk.encode(), t.minutes)));
-    }
     row
 }
 

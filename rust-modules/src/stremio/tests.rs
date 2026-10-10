@@ -384,6 +384,9 @@ fn a_library_grid_lists_its_first_catalog_and_ends_where_the_catalog_does() {
     assert_eq!(first["type"], "movie");
     assert_eq!(first["year"], 1994);
     assert_eq!(first["librarySectionID"], 1);
+    // Playable from the grid itself: a film page opened from here plays this row's part.
+    let part = first["Media"][0]["Part"][0]["key"].as_str().unwrap();
+    assert!(part.starts_with("/library/parts/") && part.ends_with(".mkv"), "{part}");
     let thumb = first["thumb"].as_str().unwrap();
     assert!(thumb.starts_with("/stremio/art/") && thumb.len() < 40, "a short art stand-in: {thumb}");
     assert_eq!(mc["Meta"]["Type"][0]["active"], true);
@@ -396,6 +399,8 @@ fn a_library_shelf_is_each_of_its_catalogs_and_home_leads_with_continue_watching
     let hub = &anime["MediaContainer"]["Hub"][0];
     assert_eq!(hub["title"], "Trending");
     assert_eq!(hub["Metadata"][0]["librarySectionID"], 3);
+    // A show's row carries no version; only a film plays from its row.
+    assert!(hub["Metadata"][0].get("Media").is_none());
     let more = hub["key"].as_str().unwrap();
     let page = json_of(&b.handle(&authed("GET", more)));
     assert_eq!(page["MediaContainer"]["Metadata"][0]["title"], "Fullmetal Alchemist: Brotherhood");
