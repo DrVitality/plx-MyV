@@ -714,6 +714,42 @@ fn a_film_plays_its_chosen_stream_with_the_tracks_read_from_the_file() {
 }
 
 #[test]
+fn opensubtitles_is_searched_by_language_and_an_installed_file_joins_the_item() {
+    let mut s = content_scripted();
+    s.files.insert("https://t/r/2".into(), sample_mkv());
+    s.pages.insert("https://opensubtitles-v3.strem.io/subtitles/movie/tt0111161.json".into(), json!({"subtitles": [
+        {"id": "1", "url": "https://subs.example/en/1.srt", "lang": "eng"},
+        {"id": "2", "url": "https://subs.example/es/2.srt", "lang": "spa"},
+        {"id": "3", "url": "https://subs.example/es/3.srt", "lang": "spa"},
+    ]}));
+    s.pages.insert("https://subs.example/es/2.srt".into(), json!("1\n00:00:01,000 --> 00:00:02,000\nHola\n"));
+    let b = bridge_with(s);
+    let rk = Rk::item("movie", "tt0111161").unwrap().encode();
+    // the item is read first, as the player has before its Search page opens
+    let _ = b.handle(&authed("GET", &format!("/library/metadata/{rk}")));
+    let found = json_of(&b.handle(&authed("GET",
+        &format!("/library/metadata/{rk}/subtitles?language=es&hearingImpaired=0&forced=0"))));
+    let rows = found["MediaContainer"]["Stream"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "only the Spanish files");
+    assert!(rows.iter().all(|r| r["languageCode"] == "spa" && r["providerTitle"] == "OpenSubtitles"));
+    let key = rows[0]["key"].as_str().unwrap().to_string();
+    assert!(!rows.iter().any(|r| r.to_string().contains("subs.example")), "no provider address in the list");
+    // install: 200, and the next read of the item carries it as an outside subtitle
+    let put = b.handle(&authed("PUT", &format!("/library/metadata/{rk}/subtitles?key={key}")));
+    assert_eq!(put.status, 200);
+    let detail = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{rk}"))));
+    let streams = detail["MediaContainer"]["Metadata"][0]["Media"][0]["Part"][0]["Stream"].as_array().unwrap();
+    let added = streams.iter().find(|s| s["key"] == key.as_str()).expect("the installed subtitle");
+    assert_eq!(added["languageCode"], "spa");
+    assert_eq!(added["selected"], false, "the viewer selects it; installing does not");
+    // and the bridge serves the file at that key
+    assert_eq!(b.handle(&authed("GET", &key)).status, 200);
+    // a key from no search is accepted and changes nothing, as on the media server
+    let stale = b.handle(&authed("PUT", &format!("/library/metadata/{rk}/subtitles?key=/library/streams/123")));
+    assert_eq!(stale.status, 200);
+}
+
+#[test]
 fn a_track_choice_sticks_to_the_item() {
     let b = playback_bridge();
     let rk = Rk::item("movie", "tt0111161").unwrap().encode();

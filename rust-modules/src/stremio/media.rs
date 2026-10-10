@@ -88,6 +88,28 @@ fn resolution_label(height: u32) -> &'static str {
 pub struct ExternalSub {
     pub id: i64,
     pub language: String,
+    /// Selected on its own (the first offered in the viewer's language or English).
+    pub selected: bool,
+}
+
+/// The stream row of an outside subtitle.
+fn external_row(e: &ExternalSub) -> Value {
+    let lang = language_name(&e.language);
+    json!({
+        "id": e.id, "streamType": 3, "codec": "srt", "external": true,
+        "key": format!("/library/streams/{}", e.id), "language": lang,
+        "languageCode": e.language, "selected": e.selected,
+        "displayTitle": format!("{lang} (SRT External)"),
+    })
+}
+
+/// Add an outside subtitle to a built version (a search's install), unselected, once.
+pub fn add_external(media: &mut Value, e: &ExternalSub) {
+    let Some(streams) = media.pointer_mut("/0/Part/0/Stream").and_then(Value::as_array_mut) else { return };
+    if streams.iter().any(|s| s.get("id").and_then(Value::as_i64) == Some(e.id)) {
+        return;
+    }
+    streams.push(external_row(&ExternalSub { selected: false, ..e.clone() }));
 }
 
 /// The version for a read file. `part_id` names it in `/library/parts/{id}`; `rk` is the item; the
@@ -124,17 +146,9 @@ pub fn media_from_probe(rk: &str, part_id: i64, p: &Probe, size: Option<u64>, ex
         };
         streams.push(s);
     }
-    if sub_pick.is_none() {
-        for (n, e) in external.iter().enumerate() {
-            let lang = language_name(&e.language);
-            streams.push(json!({
-                "id": e.id, "streamType": 3, "codec": "srt", "external": true,
-                "key": format!("/library/streams/{}", e.id), "language": lang,
-                "languageCode": e.language, "selected": n == 0 && matches!(e.language.as_str(), "eng" | "en"),
-                "displayTitle": format!("{lang} (SRT External)"),
-            }));
-        }
-    }
+    // offered whenever the caller found some; selected on their own only when the file has no
+    // subtitle the player would pick itself
+    streams.extend(external.iter().map(|e| external_row(&ExternalSub { selected: e.selected && sub_pick.is_none(), ..e.clone() })));
     let (w, h) = video.map(|v| (v.width, v.height)).unwrap_or((0, 0));
     let audio = audio_pick.map(|i| &p.tracks[i]);
     let bitrate = match (size, p.duration_ms) {
@@ -156,7 +170,8 @@ pub fn media_from_probe(rk: &str, part_id: i64, p: &Probe, size: Option<u64>, ex
 
 /// The version for a file that could not be read, from what its release name says. Better than
 /// nothing and worse than reading it: the audio codec is the release name's word for it.
-pub fn media_from_facts(rk: &str, part_id: i64, f: &Facts, detail: &str, minutes: Option<i64>, size: Option<u64>) -> Value {
+pub fn media_from_facts(rk: &str, part_id: i64, f: &Facts, detail: &str, minutes: Option<i64>, size: Option<u64>,
+                        external: &[ExternalSub]) -> Value {
     let words = detail.to_ascii_uppercase();
     let has = |x: &str| words.split(|c: char| !c.is_ascii_alphanumeric()).any(|w| w == x);
     let acodec = if has("DDP") || has("EAC3") || words.contains("DD+") || has("DDP5") || has("DDP2") {
@@ -185,7 +200,7 @@ pub fn media_from_facts(rk: &str, part_id: i64, f: &Facts, detail: &str, minutes
                     default: true, forced: false, width: 0, height: 0, channels: 6, dovi: false },
         ],
     };
-    media_from_probe(rk, part_id, &probe, size, &[])
+    media_from_probe(rk, part_id, &probe, size, external)
 }
 
 #[cfg(test)]
@@ -228,7 +243,7 @@ mod tests {
         v.height = 2160;
         let probe = Probe { container: "mkv", duration_ms: 3_600_000,
             tracks: vec![v, t(TrackKind::Audio, "truehd", "eng"), t(TrackKind::Audio, "eac3", "eng")] };
-        let ext = [ExternalSub { id: 9001, language: "eng".into() }];
+        let ext = [ExternalSub { id: 9001, language: "eng".into(), selected: true }];
         let m = media_from_probe("mstt1", 77, &probe, Some(18_000_000_000), &ext);
         assert_eq!(m[0]["audioCodec"], "eac3");
         assert_eq!(m[0]["videoCodec"], "hevc");

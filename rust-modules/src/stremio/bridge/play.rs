@@ -18,7 +18,7 @@
 
 use super::super::catalog::{self, Rk, Title};
 use super::super::http::{Request, Response};
-use super::super::library::{self, Lib};
+use super::super::library::Lib;
 use super::super::media::{self, ExternalSub};
 use super::super::probe::{self, Parse, Probe};
 use super::super::streams::{best, Facts, Stream};
@@ -52,7 +52,6 @@ pub(super) struct Resolved {
 }
 
 /// Everything playback keeps between requests.
-#[derive(Default)]
 pub(super) struct PlayState {
     resolved: Mutex<HashMap<String, Arc<Resolved>>>,
     /// A viewer's stream choice, by item: an index into the ranked list.
@@ -62,11 +61,34 @@ pub(super) struct PlayState {
     /// Part id → (audio stream id, subtitle stream id); 0 for subtitles means off.
     tracks: Mutex<HashMap<i64, (Option<i64>, Option<i64>)>>,
     /// External subtitle id → its URL.
-    subs: Mutex<HashMap<i64, String>>,
+    pub(super) subs: Mutex<HashMap<i64, String>>,
     /// Item → when progress was last written.
     written: Mutex<HashMap<String, Instant>>,
     /// The last play queue built, for `/playQueues/{id}`.
     queue: Mutex<Option<Value>>,
+    /// Subtitle search candidates: id → (item, language, URL). Replaced by each search of the item.
+    pub(super) candidates: Mutex<HashMap<i64, (String, String, String)>>,
+    /// The next candidate id: far from every part-derived stream id.
+    pub(super) next_candidate: std::sync::atomic::AtomicI64,
+    /// Subtitles installed from a search, by item, for the rest of the run.
+    pub(super) installed: Mutex<HashMap<String, Vec<ExternalSub>>>,
+}
+
+impl Default for PlayState {
+    fn default() -> Self {
+        PlayState {
+            resolved: Mutex::default(),
+            choice: Mutex::default(),
+            parts: Mutex::default(),
+            tracks: Mutex::default(),
+            subs: Mutex::default(),
+            written: Mutex::default(),
+            queue: Mutex::default(),
+            candidates: Mutex::default(),
+            next_candidate: std::sync::atomic::AtomicI64::new(9_000_000_000),
+            installed: Mutex::default(),
+        }
+    }
 }
 
 /// Streams tried at most before the first pick stands.
@@ -161,40 +183,6 @@ impl Bridge {
         })
     }
 
-    /// Subtitles from the subtitle providers for a film or episode, English first.
-    fn external_subs(&self, token: &str, stype: &str, video: &str, part: i64) -> Vec<ExternalSub> {
-        let Ok(addons) = self.addons(token) else { return Vec::new() };
-        let mut found: Vec<(String, String)> = Vec::new();
-        for addon in library::subtitle_providers(&addons, stype, video) {
-            let url = format!("{}/subtitles/{}/{}.json", addon.base_url(), stype, video);
-            let Ok(v) = self.fetch_json(&url) else { continue };
-            if let Some(Value::Array(subs)) = v.get("subtitles") {
-                for s in subs {
-                    let (Some(u), Some(l)) = (s.get("url").and_then(Value::as_str), s.get("lang").and_then(Value::as_str)) else { continue };
-                    // Only an address this television can reach: never a desktop streaming server's.
-                    if u.starts_with("http") && !u.contains("localhost") && !u.contains("127.0.0.1") {
-                        found.push((l.to_ascii_lowercase(), u.to_string()));
-                    }
-                }
-            }
-        }
-        // English first, then at most two others, one of each language.
-        found.sort_by_key(|(l, _)| !matches!(l.as_str(), "eng" | "en"));
-        let mut seen = Vec::new();
-        let mut out = Vec::new();
-        let mut map = self.play.subs.lock().unwrap_or_else(|e| e.into_inner());
-        for (lang, url) in found {
-            if seen.contains(&lang) || out.len() >= 3 {
-                continue;
-            }
-            let id = part * 100 + 90 + out.len() as i64;
-            map.insert(id, url);
-            seen.push(lang.clone());
-            out.push(ExternalSub { id, language: lang });
-        }
-        out
-    }
-
     /// The resolved choice for a film or episode, from the memo when fresh.
     pub(super) fn resolved(&self, token: &str, rk: &Rk, rk_s: &str, minutes: Option<i64>) -> Option<Arc<Resolved>> {
         if matches!(rk, Rk::Season { .. }) || matches!(rk, Rk::Item { kind: catalog::Kind::Show, .. }) {
@@ -245,8 +233,11 @@ impl Bridge {
                 };
                 match probed {
                     Some(p) => {
-                        let has_english_sub = media::pick_subtitle(&p.tracks).is_some();
-                        let ext = if has_english_sub { Vec::new() } else { self.external_subs(token, stype, video, part) };
+                        // outside subtitles only for a file with none in the viewer's language
+                        let wanted = self.subtitle_language();
+                        let has_own = p.tracks.iter().any(|t| t.kind == super::super::probe::TrackKind::Subtitle
+                            && super::subs::two_letter(&t.language).as_deref() == Some(wanted.as_str()));
+                        let ext = if has_own { Vec::new() } else { self.external_subs(token, stype, video, part) };
                         plx_base::eventlog::log(&format!("stremio: playing {} ({}) — {} tracks read",
                             s.addon, f.resolution, p.tracks.len()));
                         media::media_from_probe(rk_s, part, &p, s.size, &ext)
@@ -254,13 +245,19 @@ impl Bridge {
                     None => {
                         plx_base::eventlog::log(&format!(
                             "stremio: playing {} ({}) — tracks unreadable, using the release name", s.addon, f.resolution));
-                        media::media_from_facts(rk_s, part, f, &s.detail, minutes, s.size)
+                        let ext = self.external_subs(token, stype, video, part);
+                        media::media_from_facts(rk_s, part, f, &s.detail, minutes, s.size, &ext)
                     }
                 }
             }
             None => json!([]),
         };
         let mut media = media;
+        // subtitles installed from a search, kept across re-reads of the item
+        let installed = self.play.installed.lock().unwrap_or_else(|e| e.into_inner()).get(rk_s).cloned().unwrap_or_default();
+        for sub in &installed {
+            media::add_external(&mut media, sub);
+        }
         if let Some((a, sub)) = self.play.tracks.lock().unwrap_or_else(|e| e.into_inner()).get(&part).copied() {
             apply_tracks(&mut media, a, sub);
         }
@@ -314,6 +311,19 @@ impl Bridge {
             }
             c.shows.insert(show_id.to_string(), memory);
         });
+    }
+
+    /// Add an installed subtitle to the item's resolved version in place, so the next read shows
+    /// it without resolving the stream again.
+    pub(super) fn add_installed_to_memo(&self, rk_s: &str, sub: &ExternalSub) {
+        let mut memo = self.play.resolved.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(r) = memo.get(rk_s).cloned() {
+            let mut media = r.media.clone();
+            media::add_external(&mut media, sub);
+            memo.insert(rk_s.to_string(), Arc::new(Resolved {
+                streams: r.streams.clone(), chosen: r.chosen, media, at: r.at,
+            }));
+        }
     }
 
     /// Forgets a resolved choice, so the next request resolves it again.

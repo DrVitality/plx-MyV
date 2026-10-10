@@ -18,6 +18,7 @@
 mod config;
 mod content;
 mod play;
+mod subs;
 
 use super::api::{Addon, ApiError, Stremio};
 use super::catalog::ArtMap;
@@ -185,6 +186,7 @@ impl Bridge {
         match segs {
             ["playQueues"] => self.play_queue(req, token),
             ["library", "parts", part] => self.select_tracks(req, part),
+            ["library", "metadata", rk, "subtitles"] => self.subtitle_install(req, rk),
             [":", "timeline"] => self.timeline(req, token),
             [":", "scrobble"] => self.scrobble(req, token, true),
             [":", "unscrobble"] => self.scrobble(req, token, false),
@@ -205,6 +207,7 @@ impl Bridge {
             ["library", "metadata", rk] => self.metadata(token, rk),
             ["library", "metadata", rk, "children"] => self.children(token, rk),
             ["library", "metadata", rk, "allLeaves"] => self.all_leaves(token, rk),
+            ["library", "metadata", rk, "subtitles"] => self.subtitle_search(req, token, rk),
             ["stremio", "art", key] => self.art(key),
             ["stremio", "streams", rk] => self.streams_route(token, rk),
             ["stremio", "choices", rk] => self.choices(token, rk),
