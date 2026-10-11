@@ -33,8 +33,9 @@ echo "::error title=build errors::$msg"
 for log in "$@"; do
     [ -s "$log" ] || continue
     grep -q 'panicked at' "$log" || continue
-    full=$(awk '/panicked at/{p=1} p&&/^(note: run with|thread .* panicked at)/&&!/panicked at/{p=0} p' "$log" \
-        | grep -v '^ *right: \|^note: run with')
+    # libtest's own `failures:` section: each failing test's captured output and panic, whole
+    full=$(awk '/^failures:$/{f=1} /^test result:/{f=0} f' "$log" \
+        | grep -v '^ *right: \|^note: run with\|^failures:$\|^    [a-z_:]*$\|^$')
     printf '%s' "$full" | fold -b -w 3900 | awk -v n=0 '
         { chunk = chunk $0 "\n"; if (length(chunk) > 3800) { emit(); } }
         END { if (length(chunk)) emit(); }

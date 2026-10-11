@@ -139,13 +139,13 @@ pub(super) fn draw<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '
     screen.ground.draw(p, Rect::FULL);
     field(screen, f, p);
     let p = p.alpha(screen.fade.alpha());
+    // while the field is empty the filters stand where the empty statement would
     if !screen.recents.is_empty() {
         recents(screen, f, p);
-    }
-    filter_rows(screen, f, p);
-    if screen.rows.is_empty() && screen.real_query() {
+    } else if screen.rows.is_empty() && screen.filter_lines() == 0 {
         empty(screen, f, p);
     }
+    filter_rows(screen, f, p);
     for (i, row) in screen.rows.iter().enumerate() {
         let Some((frame, shelf)) = screen.row_frame(f.cx, i) else { continue };
         let top = frame.y - layout::HEAD_TO_ROW;
@@ -358,7 +358,7 @@ fn filter_rows<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H
     use super::filters;
     let env = Env::inert();
     let scroll = screen.stack.scroll();
-    for line in 0..filters::lines() {
+    for line in 0..screen.filter_lines() {
         let top = screen.filter_line_top(line) - scroll;
         if !plx_ui::on_axis(top, filters::LINE_H, SCR_H, 0.0) {
             continue;
@@ -399,10 +399,14 @@ fn empty<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Pain
         return;
     };
     let mut rect = layout::empty_band(screen.editing);
-    // under the filters, which stand between the field and any results
-    let below = screen.filter_line_top(super::filters::lines()) + theme::space::MD;
-    rect.h = (rect.y + rect.h - below).max(theme::space::XL * 4.0);
-    rect.y = below - screen.stack.scroll();
+    let lines = screen.filter_lines();
+    if lines > 0 {
+        // under the filters, which stand between the field and any results
+        let below = screen.filter_line_top(lines) + theme::space::MD;
+        rect.h = (rect.y + rect.h - below).max(theme::space::XL * 4.0);
+        rect.y = below;
+    }
+    rect.y -= screen.stack.scroll();
     if empty == EmptyState::Fault {
         StatusOverlay::new(rect, plx_platform::i18n::msg::browse_search_failed_c(), StatusKind::Failed)
             .reason(plx_platform::i18n::msg::browse_search_failed_detail_c())

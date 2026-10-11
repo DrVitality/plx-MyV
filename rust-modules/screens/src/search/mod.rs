@@ -183,6 +183,12 @@ impl SearchScreen {
         fx.invalidate(Provenance::Input);
     }
 
+    /// How many filter lines the page shows: all of them while the field is empty (the page is
+    /// browsing under them), none while a search is typed (it stays narrowed to their TYPE).
+    pub(super) fn filter_lines(&self) -> usize {
+        if self.draft.query().trim().is_empty() { filters::lines() } else { 0 }
+    }
+
     /// The height of the recents block (its header and rows), 0 when there are none.
     pub(super) fn recents_h(&self) -> f32 {
         if self.recents.is_empty() {
@@ -587,7 +593,13 @@ impl SearchScreen {
     pub fn recents_shown(&self) -> usize { self.recents.len() }
 
     fn first_content(&self) -> Option<GroupId> {
-        if !self.recents.is_empty() { Some(RECENTS_GROUP) } else { Some(filter_group(0)) }
+        if !self.recents.is_empty() {
+            Some(RECENTS_GROUP)
+        } else if self.filter_lines() > 0 {
+            Some(filter_group(0))
+        } else {
+            self.rows.first().map(|row| row.group)
+        }
     }
     /// The stack's key of result row `row`.
     fn section(&self, row: usize) -> Sec { Sec::Row(self.rows[row].kind, self.rows_gen) }
@@ -689,9 +701,10 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
                 out.push(SectionSpec::new(Sec::Clear, plx_ui::cards::Kind::Custom { height: 0.0, focusable: true }, CLEAR_GROUP));
             }
         }
-        for line in 0..filters::lines() {
+        let lines = self.filter_lines();
+        for line in 0..lines {
             let pad = if line == 0 { self.filters_pad() } else { 0.0 };
-            let last = if line + 1 == filters::lines() { plx_ui::theme::space::MD } else { 0.0 };
+            let last = if line + 1 == lines { plx_ui::theme::space::MD } else { 0.0 };
             out.push(SectionSpec::new(Sec::Filter(line as u8), plx_ui::cards::Kind::Custom {
                 height: pad + filters::LINE_H + last, focusable: true }, filter_group(line)));
         }
@@ -848,18 +861,21 @@ impl<H: SearchLike> Screen<H> for SearchScreen {
         } else {
             None
         };
-        if let Some(above) = above {
-            out.push(Link { from: above, dir: Dir::Down, to: filter_group(0) });
-            out.push(Link { from: filter_group(0), dir: Dir::Up, to: above });
-        }
-        for line in 1..filters::lines() {
-            out.push(Link { from: filter_group(line - 1), dir: Dir::Down, to: filter_group(line) });
-            out.push(Link { from: filter_group(line), dir: Dir::Up, to: filter_group(line - 1) });
-        }
-        if let Some(first) = self.rows.first() {
-            let last = filter_group(filters::lines() - 1);
-            out.push(Link { from: last, dir: Dir::Down, to: first.group });
-            out.push(Link { from: first.group, dir: Dir::Up, to: last });
+        let lines = self.filter_lines();
+        if lines > 0 {
+            if let Some(above) = above {
+                out.push(Link { from: above, dir: Dir::Down, to: filter_group(0) });
+                out.push(Link { from: filter_group(0), dir: Dir::Up, to: above });
+            }
+            for line in 1..lines {
+                out.push(Link { from: filter_group(line - 1), dir: Dir::Down, to: filter_group(line) });
+                out.push(Link { from: filter_group(line), dir: Dir::Up, to: filter_group(line - 1) });
+            }
+            if let Some(first) = self.rows.first() {
+                let last = filter_group(lines - 1);
+                out.push(Link { from: last, dir: Dir::Down, to: first.group });
+                out.push(Link { from: first.group, dir: Dir::Up, to: last });
+            }
         }
         for pair in self.rows.windows(2) {
             out.push(Link { from: pair[0].group, dir: Dir::Down, to: pair[1].group });
