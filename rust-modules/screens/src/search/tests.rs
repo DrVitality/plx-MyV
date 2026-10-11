@@ -212,8 +212,8 @@ fn down_from_the_field_reaches_only_a_region_that_is_drawn() {
     let mut screen = fixture.screen();
     let mut engine = seated(&screen, &fixture);
     assert!(screen.recents.is_empty());
-    assert_eq!(step_dir(&mut screen, &fixture, &mut engine, Dir::Down), Some(screen.key(FIELD)),
-        "nothing is drawn below the field, so focus must not leave it");
+    assert_eq!(step_dir(&mut screen, &fixture, &mut engine, Dir::Down), Some(screen.key(filters::elem(0, 0))),
+        "under an empty field stand the browse filters, and nothing else");
 
     // (2) no query, terms remembered: the recents list.
     watching(&session, "owned-search-handoff-terms", &["gromit", "wallace"]);
@@ -401,8 +401,12 @@ fn the_recents_cursor_stops_on_the_clear_control() {
     for _ in 0..10 {
         seen.push(step_dir(&mut screen, &fixture, &mut engine, Dir::Down).unwrap().elem);
     }
-    let expected: Vec<u32> = screen.recents.iter().copied().chain(std::iter::repeat(CLEAR)).take(10).collect();
-    assert_eq!(seen, expected, "▼ walks every drawn term and then caps on Clear");
+    // …then Clear, then down the browse filters' lines, capping on the last
+    let lines: Vec<u32> = (0..filters::lines()).map(|line| filters::elem(line, 0)).collect();
+    let last = *lines.last().unwrap();
+    let expected: Vec<u32> = screen.recents.iter().copied().chain([CLEAR]).chain(lines)
+        .chain(std::iter::repeat(last)).take(10).collect();
+    assert_eq!(seen, expected, "▼ walks every drawn term, Clear and the filters, and caps on the last");
 
     // Clear is one row past the last term shown, and its own block is where the renderer draws it.
     let cx = fixture.cx(Some(screen.key(CLEAR)));
@@ -694,7 +698,7 @@ fn the_panels_edit_keys_move_the_caret_clear_the_field_and_type_in_the_middle() 
     assert_eq!(screen.draft.query(), "сXуббота");
     assert_eq!(screen.draft.caret(), "сX".len(), "…leaving the caret after the inserted text");
     assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::App(AppFx::Store(StoreId::Search,
-        StoreCmd::Search(SearchCmd::SetQueryScoped { query, .. }))) if query == "сXуббота")),
+        StoreCmd::Search(SearchCmd::SetQueryScoped { query, .. }))) if filters::user_part(query) == "сXуббота")),
         "every accepted edit is one scoped store command");
     let (handled, _, _) = deliver(&mut screen, &fixture, field,
         key_event(Key::Other, plx_ui::consts::SDLK_BACKSPACE));

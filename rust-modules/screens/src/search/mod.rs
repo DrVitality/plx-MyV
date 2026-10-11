@@ -461,7 +461,10 @@ impl<H: SearchLike> Machine<H> for SearchScreen {
                         if *key == Key::Back { self.keyboard(false, false, fx); return Handled::Yes; }
                         if *key == Key::Ok { self.keyboard(false, true, fx); return Handled::Yes; }
                         if *key == Key::Down {
-                            if let Some(group) = self.first_content() {
+                            // the panel hands off to RESULTS (or the recents), not to the filters:
+                            // an empty field being typed into keeps its keyboard
+                            let results = if !self.recents.is_empty() { Some(RECENTS_GROUP) } else { self.rows.first().map(|row| row.group) };
+                            if let Some(group) = results {
                                 self.keyboard(false, true, fx);
                                 self.reseat(FocusTarget::ContainerGroup(group), fx);
                             }
