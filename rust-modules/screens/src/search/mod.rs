@@ -212,7 +212,7 @@ impl SearchScreen {
     }
 
     /// The browse filters, for the renderer.
-    pub(super) fn filters(&self) -> &filters::Filters {
+    fn filters(&self) -> &filters::Filters {
         &self.filters
     }
 
