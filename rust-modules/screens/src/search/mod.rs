@@ -3,6 +3,7 @@
 //! the legacy Search renderer it replaced is deleted entirely.
 mod cards;
 mod draft;
+mod filters;
 // `pub`: exposes `layout::{FIELD, CONTENT_TOP}` to `ui::consts`'s overscan-rects audit,
 // which otherwise has no path to this module's geometry. Replaces the deleted legacy Search
 // renderer's own `FIELD`/`CONTENT_TOP` module-level constants.
@@ -37,6 +38,8 @@ const CLEAR: u32 = 2;
 const FIELD_GROUP: GroupId = GroupId(0x5345_4100);
 const RECENTS_GROUP: GroupId = GroupId(0x5345_4101);
 const CLEAR_GROUP: GroupId = GroupId(0x5345_4102);
+/// The filter lines' groups, one per line ([`filters::lines`]).
+fn filter_group(line: usize) -> GroupId { GroupId(0x5345_4110 + line as u32) }
 const STRIP: GroupId = plx_ui::containers::tabs::STRIP;
 /// The alpha at or under which the owner annotation is invisible: the renderer draws no run
 /// below it, and the instance swaps the word it holds only there — so a handle never changes
@@ -70,7 +73,7 @@ struct Row { kind: Kind, group: GroupId, elems: Vec<u32> }
 /// The sections of the page, top to bottom. A result row's key carries the page's `rows_gen`: a
 /// row the page wiped and rebuilt is a new section with a new shelf, as a wiped row always was.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Sec { Head, Recents, Clear, Row(Kind, u32) }
+pub enum Sec { Head, Recents, Clear, Filter(u8), Row(Kind, u32) }
 
 pub struct SearchScreen {
     entry: EntryId,
@@ -100,6 +103,8 @@ pub struct SearchScreen {
     owner_alpha: Spring,
     restored: Option<Memory>,
     render: render::Resources,
+    /// The browse filters (type, order, genre) every query carries ([`filters`]).
+    filters: filters::Filters,
     /// Diagnostic-only counter, not part of [`LogicalState::write`]/the state hash — how many
     /// `Search` `StoreChanged` deliveries this instance has seen. It carries the same name
     /// (`notices`) the retired route-word page kept its own count under, so `app::bridge`'s generic
@@ -116,7 +121,7 @@ impl SearchScreen {
             recent_clear_pending: false, publication: None, content_dirty: true,
             fade: plx_ui::xfade::Xfade::new(), ground: plx_ui::widgets::PageGround::new(),
             owner_row: None, owner: String::new(), owner_alpha: Spring::at(0.0), restored: None, render: Default::default(),
-            notices: 0 }
+            filters: filters::Filters::default(), notices: 0 }
     }
     fn key(&self, elem: u32) -> FocusKey<u32> { FocusKey { entry: self.entry, elem } }
     fn real_query(&self) -> bool { plx_data::search::terms(self.draft.query()).is_some() }
@@ -157,6 +162,7 @@ impl SearchScreen {
     }
     fn edit<H: SearchLike>(&mut self, edit: &TextEdit, fx: &mut Effects<'_, H>) {
         if let Some(query) = self.draft.edit(edit) {
+            let query = self.filters.compose(&query);
             self.store(SearchCmd::SetQueryScoped { profile_generation: self.draft.profile(), query }, fx);
             self.wipe_rows();
             self.stack.scroll_to(0.0);
@@ -165,6 +171,49 @@ impl SearchScreen {
         }
         self.blink_us = 0;
         fx.invalidate(Provenance::Input);
+    }
+
+    /// Ask the store for the field's text under the current filters, and start the rows over.
+    fn send_query<H: SearchLike>(&mut self, fx: &mut Effects<'_, H>) {
+        let query = self.filters.compose(self.draft.query());
+        self.store(SearchCmd::SetQueryScoped { profile_generation: self.draft.profile(), query }, fx);
+        self.wipe_rows();
+        self.content_dirty = true;
+        self.fade.reload();
+        fx.invalidate(Provenance::Input);
+    }
+
+    /// The height of the recents block (its header and rows), 0 when there are none.
+    pub(super) fn recents_h(&self) -> f32 {
+        if self.recents.is_empty() {
+            return 0.0;
+        }
+        plx_ui::table::HDR_H + self.recents.len().min(layout::RECENT_CAP) as f32 * plx_ui::table::ROW_H
+    }
+
+    /// The air above the first filter line: room for the Clear control when it stands there.
+    pub(super) fn filters_pad(&self) -> f32 {
+        if !self.recents.is_empty() && !self.showing_suggestions() {
+            layout::CLEAR_H + 2.0 * plx_ui::theme::space::MD
+        } else {
+            plx_ui::theme::space::MD
+        }
+    }
+
+    /// The top of filter line `line`, in document space (the page's scroll not applied).
+    pub(super) fn filter_line_top(&self, line: usize) -> f32 {
+        layout::CONTENT_TOP + self.recents_h() + self.filters_pad() + line as f32 * filters::LINE_H
+    }
+
+    /// The screen top of filter `line`'s pills inside its section, whose top is `section_y` (the
+    /// first line's section carries the air above the filters).
+    fn filter_section_line_y(&self, line: u8, section_y: f32) -> f32 {
+        if line == 0 { section_y + self.filters_pad() } else { section_y }
+    }
+
+    /// The browse filters, for the renderer.
+    pub(super) fn filters(&self) -> &filters::Filters {
+        &self.filters
     }
 
     /// Drop the result rows, and with them their shelves.
@@ -230,7 +279,7 @@ impl SearchScreen {
                 }
             }
         }
-        if self.draft.pending() || !self.real_query() {
+        if self.draft.pending() || !(self.real_query() || filters::browsing(view.query())) {
             self.wipe_rows();
             return false;
         }
@@ -279,6 +328,11 @@ impl SearchScreen {
             self.keyboard(!self.editing, true, fx);
             return Handled::Yes;
         }
+        if let Some((line, i)) = filters::of_elem(elem) {
+            self.filters.pick(line, i);
+            self.send_query(fx);
+            return Handled::Yes;
+        }
         if elem == CLEAR && !self.recents.is_empty() && !self.showing_suggestions() {
             self.store(SearchCmd::ClearRecents { profile_generation: self.draft.profile() }, fx);
             self.recent_clear_pending = true; self.recents.clear();
@@ -292,6 +346,7 @@ impl SearchScreen {
             });
             if let Some(term) = term {
                 if let Some(query) = self.draft.replace(&term) {
+                    let query = self.filters.compose(&query);
                     self.store(SearchCmd::SetQueryScoped { profile_generation: self.draft.profile(), query }, fx);
                 }
                 self.remember(fx);
@@ -355,6 +410,10 @@ impl<H: SearchLike> Machine<H> for SearchScreen {
             ScreenEvent::Mount => {
                 self.fade.mount();
                 self.reseat(FocusTarget::Elem(self.key(FIELD)), fx);
+                // nothing typed: open on what the filters browse (by default, picked for you)
+                if self.draft.query().trim().is_empty() && !filters::browsing(H::search(cx).query()) {
+                    self.send_query(fx);
+                }
             }
             ScreenEvent::WillLeave(_) | ScreenEvent::Unmount | ScreenEvent::Cover | ScreenEvent::Suspend => self.keyboard(false, false, fx),
             ScreenEvent::Activate(elem) => return self.activate(*elem, false, cx, fx),
@@ -528,7 +587,7 @@ impl SearchScreen {
     pub fn recents_shown(&self) -> usize { self.recents.len() }
 
     fn first_content(&self) -> Option<GroupId> {
-        if !self.recents.is_empty() { Some(RECENTS_GROUP) } else { self.rows.first().map(|row| row.group) }
+        if !self.recents.is_empty() { Some(RECENTS_GROUP) } else { Some(filter_group(0)) }
     }
     /// The stack's key of result row `row`.
     fn section(&self, row: usize) -> Sec { Sec::Row(self.rows[row].kind, self.rows_gen) }
@@ -630,6 +689,12 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
                 out.push(SectionSpec::new(Sec::Clear, plx_ui::cards::Kind::Custom { height: 0.0, focusable: true }, CLEAR_GROUP));
             }
         }
+        for line in 0..filters::lines() {
+            let pad = if line == 0 { self.filters_pad() } else { 0.0 };
+            let last = if line + 1 == filters::lines() { plx_ui::theme::space::MD } else { 0.0 };
+            out.push(SectionSpec::new(Sec::Filter(line as u8), plx_ui::cards::Kind::Custom {
+                height: pad + filters::LINE_H + last, focusable: true }, filter_group(line)));
+        }
         for row in &self.rows {
             let elem = if matches!(row.kind, Kind::Movie | Kind::Show | Kind::Episode) { ElemKind::Card } else { ElemKind::Bare };
             // Search owns the vertical model: explicit links between rows and a seat projected from
@@ -656,15 +721,22 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
         match k { Sec::Head => Some(FIELD), Sec::Clear if !self.recents.is_empty() && !self.showing_suggestions() => Some(CLEAR), _ => None }
     }
     fn plain_len(&self, k: Sec) -> usize {
-        match k { Sec::Recents => self.recents.len(), Sec::Head => 1, Sec::Clear => (!self.recents.is_empty() && !self.showing_suggestions()) as usize, Sec::Row(..) => 0 }
+        match k { Sec::Recents => self.recents.len(), Sec::Head => 1, Sec::Clear => (!self.recents.is_empty() && !self.showing_suggestions()) as usize,
+            Sec::Filter(line) => filters::len(line as usize), Sec::Row(..) => 0 }
     }
     fn plain_elem(&self, k: Sec, n: usize) -> Option<u32> {
-        match k { Sec::Recents => self.recents.get(n).copied(), _ => if n == 0 { StackPage::<H>::elem_of(self, k) } else { None } }
+        match k {
+            Sec::Recents => self.recents.get(n).copied(),
+            Sec::Filter(line) => (n < filters::len(line as usize)).then(|| filters::elem(line as usize, n)),
+            _ => if n == 0 { StackPage::<H>::elem_of(self, k) } else { None },
+        }
     }
     fn plain_step(&self, k: Sec, at: usize, dir: Dir) -> Option<usize> {
         match (k, dir) {
             (Sec::Recents, Dir::Up) => at.checked_sub(1),
             (Sec::Recents, Dir::Down) => at.checked_add(1),
+            (Sec::Filter(_), Dir::Left) => at.checked_sub(1),
+            (Sec::Filter(line), Dir::Right) => (at + 1 < filters::len(line as usize)).then_some(at + 1),
             _ => None,
         }
     }
@@ -672,15 +744,21 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
         match k {
             Sec::Recents => layout::recent(0, layout::CONTENT_TOP - section.y),
             Sec::Clear => layout::clear_below(section.y, cx.measure),
+            Sec::Filter(line) => filters::pill(0, self.filter_section_line_y(line, section.y)),
             _ => Rect::new(layout::FIELD.x, layout::FIELD.y + section.y, layout::FIELD.w, layout::FIELD.h),
         }
     }
     fn element_rect(&self, cx: &Cx<'_, H>, k: Sec, n: usize, section: Rect) -> Rect {
-        if k == Sec::Recents { layout::recent(n, layout::CONTENT_TOP - section.y) } else { self.focus_rect(cx, k, section) }
+        match k {
+            Sec::Recents => layout::recent(n, layout::CONTENT_TOP - section.y),
+            Sec::Filter(line) => filters::pill(n, self.filter_section_line_y(line, section.y)),
+            _ => self.focus_rect(cx, k, section),
+        }
     }
     fn plain_group(&self, _cx: &Cx<'_, H>, k: Sec, id: GroupId, extent: Rect) -> GroupSpec {
         match k {
             Sec::Recents => group(id, GroupKind::Column, self.recents.len(), extent, ElemKind::Bare, Seat::Remembered),
+            Sec::Filter(line) => group(id, GroupKind::Row { wrap: false }, filters::len(line as usize), extent, ElemKind::Control, Seat::Remembered),
             Sec::Clear => {
                 let mut clear = group(id, GroupKind::Row { wrap: false }, 1, extent, ElemKind::Control, Seat::First);
                 clear.edge[1] = EdgeRule::Stop;
@@ -692,7 +770,8 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
     /// Entered from the field, a group takes the card focus last left on in it, else its first.
     fn seat_override(&self, cx: &Cx<'_, H>, k: Sec, _from: Placed) -> Option<u32> {
         if !cx.focus.current.is_some_and(|key| key.elem == FIELD) { return None; }
-        let group = match k { Sec::Recents => RECENTS_GROUP, Sec::Clear => CLEAR_GROUP, Sec::Head => FIELD_GROUP, Sec::Row(kind, _) => layout::group(kind) };
+        let group = match k { Sec::Recents => RECENTS_GROUP, Sec::Clear => CLEAR_GROUP, Sec::Head => FIELD_GROUP,
+            Sec::Filter(line) => filter_group(line as usize), Sec::Row(kind, _) => layout::group(kind) };
         let valid = |elem: &u32| match k {
             Sec::Row(kind, _) => self.rows.iter().any(|row| row.kind == kind && row.elems.contains(elem)),
             _ => (0..StackPage::<H>::plain_len(self, k)).any(|n| StackPage::<H>::plain_elem(self, k, n) == Some(*elem)),
@@ -759,6 +838,28 @@ impl<H: SearchLike> Screen<H> for SearchScreen {
         if !self.recents.is_empty() && !self.showing_suggestions() {
             out.push(Link { from: RECENTS_GROUP, dir: Dir::Down, to: CLEAR_GROUP });
             out.push(Link { from: CLEAR_GROUP, dir: Dir::Up, to: RECENTS_GROUP });
+        }
+        // the recents (or their Clear control) lead down into the filters, line by line, and the
+        // last filter line into the first row of results
+        let above = if !self.recents.is_empty() && !self.showing_suggestions() {
+            Some(CLEAR_GROUP)
+        } else if !self.recents.is_empty() {
+            Some(RECENTS_GROUP)
+        } else {
+            None
+        };
+        if let Some(above) = above {
+            out.push(Link { from: above, dir: Dir::Down, to: filter_group(0) });
+            out.push(Link { from: filter_group(0), dir: Dir::Up, to: above });
+        }
+        for line in 1..filters::lines() {
+            out.push(Link { from: filter_group(line - 1), dir: Dir::Down, to: filter_group(line) });
+            out.push(Link { from: filter_group(line), dir: Dir::Up, to: filter_group(line - 1) });
+        }
+        if let Some(first) = self.rows.first() {
+            let last = filter_group(filters::lines() - 1);
+            out.push(Link { from: last, dir: Dir::Down, to: first.group });
+            out.push(Link { from: first.group, dir: Dir::Up, to: last });
         }
         for pair in self.rows.windows(2) {
             out.push(Link { from: pair[0].group, dir: Dir::Down, to: pair[1].group });

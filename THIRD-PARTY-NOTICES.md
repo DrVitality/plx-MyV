@@ -234,6 +234,7 @@ stated; election does not alter your rights under the other arms.
 | gimli | 0.32.3 | MIT OR Apache-2.0 | The `gimli` authors |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 | Amanieu d'Antras |
 | image | 0.25.10 | MIT OR Apache-2.0 | The image-rs Developers |
+| image-webp | 0.2.4 | MIT OR Apache-2.0 | The image-rs developers |
 | itoa | 1.0.18 | MIT OR Apache-2.0 | David Tolnay |
 | libc | 0.2.186 and 0.2.185 | MIT OR Apache-2.0 | The Rust Project Developers |
 | memchr | 2.8.2 and 2.7.6 | Unlicense OR MIT | 2015 Andrew Gallant |
@@ -241,6 +242,7 @@ stated; election does not alter your rights under the other arms.
 | num-traits | 0.2.19 | MIT OR Apache-2.0 | 2014 The Rust Project Developers |
 | object | 0.37.3 | Apache-2.0 OR MIT | The `object` authors |
 | png | 0.18.1 | MIT OR Apache-2.0 | 2015 nwin |
+| quick-error | 2.0.1 | MIT/Apache-2.0 | 2015 The quick-error developers |
 | rustc-demangle | 0.1.27 | MIT/Apache-2.0 | Alex Crichton |
 | serde | 1.0.228 | MIT OR Apache-2.0 | Erick Tryzelaar, David Tolnay |
 | serde_core | 1.0.228 | MIT OR Apache-2.0 | Erick Tryzelaar, David Tolnay |

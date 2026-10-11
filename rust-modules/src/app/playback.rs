@@ -1139,6 +1139,10 @@ pub(crate) unsafe fn activate_player_row(
             pages,
             bridge,
         );
+    } else if btn == plx_appkit::player_hud::BTN_STREAMS {
+        // The Streams disc: the same `…` popover, opened straight on its stream list.
+        plx_appkit::more_menu::open_next_on_streams();
+        super::bridge::open_player_overlay(ps, bridge.metadata_view(), pages, plx_screens::player::overlay::OverlayKind::More { quality: false });
     } else if btn == plx_appkit::player_hud::BTN_MORE {
         // …so the discs are what row 1 holds — the complement of the arm above, and the row's only
         // other occupant. OK on a control disc PRESENTS its panel on this page's own stack.

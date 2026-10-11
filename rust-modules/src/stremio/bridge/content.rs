@@ -874,18 +874,27 @@ impl Bridge {
     // ---------------------------------------------------------------- search
 
     pub(super) fn search(&self, req: &Request, token: &str) -> Response {
-        let query = req.query("query").unwrap_or("").trim().to_string();
+        let raw = req.query("query").unwrap_or("");
+        let (text, filters) = Browse::split(raw);
+        let query = text.trim().to_string();
         let limit = req.query("limit").and_then(|l| l.parse::<usize>().ok()).unwrap_or(10).clamp(1, 50);
         let addons = match self.addons(token) {
             Ok(addons) => addons,
             Err(e) => return api_failure(e),
         };
         if query.is_empty() {
-            return Response::json(200, &container(json!({"Hub": []})));
+            return match filters {
+                Some(f) => Response::json(200, &container(json!({"Hub": self.browse(token, &addons, &f)}))),
+                None => Response::json(200, &container(json!({"Hub": []}))),
+            };
         }
         let mut hubs = Vec::new();
         let mut listings = Vec::new();
+        let wanted = filters.map_or(Kind2::All, |f| f.kind);
         for (stype, wire) in [("movie", "movie"), ("series", "show")] {
+            if !wanted.has_stype(stype) {
+                continue;
+            }
             let catalogs: Vec<(usize, usize)> =
                 library::search_catalogs(&addons, stype).into_iter()
                     .filter(|(a, _)| self.with_config(|c| c.addon_on(&addons[*a], super::super::api::Resource::Catalog)))
@@ -1056,10 +1065,19 @@ impl Bridge {
                     note_art_trouble(&url, "did not answer");
                     return Response::empty(502);
                 };
-                if image_kind(&bytes).is_none() {
-                    note_art_trouble(&url, "answered with something that is not a JPEG or PNG");
-                    return Response::empty(404);
-                }
+                // the app decodes JPEG and PNG; anything else the image library reads (WebP, which
+                // metahub serves for part of its catalogue) is re-encoded as a JPEG here
+                let bytes = if image_kind(&bytes).is_some() {
+                    bytes
+                } else {
+                    match as_jpeg(&bytes) {
+                        Some(jpeg) => jpeg,
+                        None => {
+                            note_art_trouble(&url, &format!("answered with {} the app cannot show", sniff(&bytes)));
+                            return Response::empty(404);
+                        }
+                    }
+                };
                 let bytes = Arc::new(bytes);
                 self.art_cache.lock().unwrap_or_else(|e| e.into_inner()).put(key, bytes.clone());
                 bytes
@@ -1180,6 +1198,40 @@ fn note_art_trouble(url: &str, what: &str) {
     }
 }
 
+/// An image the app cannot decode itself (WebP, say) as a JPEG it can, at most poster-sized; `None`
+/// when the bytes are no image the library reads.
+fn as_jpeg(bytes: &[u8]) -> Option<Vec<u8>> {
+    let img = image::load_from_memory(bytes).ok()?;
+    let img = if img.width() > ART_MAX_SIDE || img.height() > ART_MAX_SIDE {
+        img.thumbnail(ART_MAX_SIDE, ART_MAX_SIDE)
+    } else {
+        img
+    };
+    let rgb = img.to_rgb8();
+    let mut out = Vec::new();
+    let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 88);
+    enc.encode(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8).ok()?;
+    Some(out)
+}
+
+/// The longest side a converted image keeps: a backdrop at 1080p, more than any poster needs.
+const ART_MAX_SIDE: u32 = 1920;
+
+/// What `bytes` look like, for the log: a format name, or that they are text.
+fn sniff(bytes: &[u8]) -> &'static str {
+    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        "a WebP"
+    } else if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" {
+        "an AVIF/HEIF"
+    } else if bytes.starts_with(b"GIF8") {
+        "a GIF"
+    } else if bytes.first().is_some_and(|b| *b == b'<' || *b == b'{') {
+        "a text page"
+    } else {
+        "an unknown format"
+    }
+}
+
 /// The image type `bytes` start with, as an HTTP content type; `None` for anything else.
 fn image_kind(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
@@ -1246,6 +1298,21 @@ impl ArtCache {
 #[cfg(test)]
 mod art_cache_tests {
     use super::*;
+
+    /// A WebP poster (what metahub answers for part of its catalogue) reaches the app as a JPEG.
+    #[test]
+    fn an_image_the_app_cannot_decode_is_handed_over_as_a_jpeg() {
+        let mut webp = Vec::new();
+        let img = image::RgbaImage::from_pixel(4, 6, image::Rgba([200, 30, 40, 255]));
+        image::codecs::webp::WebPEncoder::new_lossless(&mut webp)
+            .encode(img.as_raw(), 4, 6, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        assert_eq!(sniff(&webp), "a WebP");
+        let jpeg = as_jpeg(&webp).expect("converted");
+        assert_eq!(image_kind(&jpeg), Some("image/jpeg"));
+        assert!(as_jpeg(b"<html>not an image</html>").is_none());
+        assert_eq!(sniff(b"<html>"), "a text page");
+    }
 
     #[test]
     fn a_listing_names_its_posters_once_each_in_order() {
@@ -1734,6 +1801,9 @@ impl Bridge {
         if let Some(rest) = n.strip_prefix("q-") {
             return self.search_listing(req, token, rest);
         }
+        if let Some(rest) = n.strip_prefix("d-") {
+            return self.browse_listing(req, token, rest);
+        }
         self.shelf_page(req, token, n)
     }
 
@@ -1748,6 +1818,19 @@ impl Bridge {
         };
         if let Some(t) = own {
             return Some(t.to_string());
+        }
+        if let Some(rest) = n.strip_prefix("d-") {
+            let (shelf, genre) = rest.split_once('-')?;
+            let addons = self.addons(token).ok()?;
+            let all = self.shelves(&addons);
+            let s = all.get(shelf.parse::<usize>().ok()?).copied()?;
+            let genre = unhex(genre)?;
+            let name = shelf_title(&addons, &all, s);
+            return Some(if genre.is_empty() {
+                format!("{name} · {}", s.lib.title())
+            } else {
+                format!("{genre} · {name} · {}", s.lib.title())
+            });
         }
         if let Some(rest) = n.strip_prefix("q-") {
             let (kind, q) = rest.split_once('-')?;
@@ -1795,6 +1878,244 @@ impl Bridge {
         let page: Vec<Value> = rows.iter().skip(start).take(size).cloned().collect();
         Response::json(200, &container(json!({"size": page.len(), "totalSize": rows.len(), "offset": start,
                                               "Metadata": page})))
+    }
+}
+
+// ---------------------------------------------------------------- browse (Search's filters)
+
+/// Search's filter TYPE ([`Browse`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind2 {
+    All,
+    Movies,
+    Shows,
+    Anime,
+}
+
+impl Kind2 {
+    fn libs(self) -> &'static [Lib] {
+        match self {
+            Kind2::All => &[Lib::Movies, Lib::Shows],
+            Kind2::Movies => &[Lib::Movies],
+            Kind2::Shows => &[Lib::Shows],
+            Kind2::Anime => &[Lib::Anime],
+        }
+    }
+
+    /// Does a typed search of Stremio type `stype` belong under this choice?
+    fn has_stype(self, stype: &str) -> bool {
+        match self {
+            Kind2::All | Kind2::Anime => true,
+            Kind2::Movies => stype == "movie",
+            Kind2::Shows => stype == "series",
+        }
+    }
+}
+
+/// Search's filter ORDER.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Order {
+    ForYou,
+    Popular,
+    TopRated,
+    Newest,
+}
+
+/// The filters the Search page sends inside its query (`screens::search::filters`): the text,
+/// then `::f|{type}|{order}|{genre}`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Browse {
+    kind: Kind2,
+    order: Order,
+    /// Empty for every genre.
+    genre: String,
+}
+
+impl Browse {
+    /// The query's text and, when it carries them, its filters.
+    fn split(query: &str) -> (&str, Option<Browse>) {
+        let Some(at) = query.find("::f") else { return (query, None) };
+        let mut parts = query[at + 3..].split('|').skip(1);
+        let kind = match parts.next().unwrap_or("all") {
+            "movie" => Kind2::Movies,
+            "show" => Kind2::Shows,
+            "anime" => Kind2::Anime,
+            _ => Kind2::All,
+        };
+        let order = match parts.next().unwrap_or("foryou") {
+            "popular" => Order::Popular,
+            "rated" => Order::TopRated,
+            "new" => Order::Newest,
+            _ => Order::ForYou,
+        };
+        let genre = parts.next().unwrap_or("").trim().to_string();
+        (&query[..at], Some(Browse { kind, order, genre }))
+    }
+}
+
+/// How well a catalog's id and name answer an order: higher is better, 0 when nothing says so.
+fn order_fit(id: &str, name: &str, order: Order) -> u8 {
+    let words = format!("{id} {name}").to_ascii_lowercase();
+    let has = |xs: &[&str]| xs.iter().any(|x| words.contains(x));
+    match order {
+        Order::Popular | Order::ForYou => if id == "top" || has(&["popular", "trending"]) { 2 } else { 0 },
+        Order::TopRated => if has(&["imdbrating", "rating", "rated", "best"]) { 2 } else { 0 },
+        Order::Newest => if id == "year" || has(&["new", "latest", "recent", "year", "airing"]) { 2 } else { 0 },
+    }
+}
+
+impl Bridge {
+    /// The shelf of library `lib` that best answers `order` and can be narrowed to `genre` (any
+    /// shelf when `genre` is empty), with the genre spelled as that catalog spells it.
+    fn browse_shelf(&self, addons: &[Addon], all: &[Shelf], lib: Lib, order: Order, genre: &str)
+        -> Option<(usize, Shelf, Option<String>)> {
+        let mut best: Option<(u8, usize, Shelf, Option<String>)> = None;
+        for (n, s) in shelves_of(all, lib) {
+            let c = &addons[s.addon].manifest.catalogs[s.catalog];
+            let spelled = if genre.is_empty() {
+                None
+            } else {
+                let offered = c.extra.iter().find(|e| e.name == "genre" && !e.options.is_empty());
+                match offered.and_then(|e| e.options.iter().find(|o| o.eq_ignore_ascii_case(genre))) {
+                    Some(o) => Some(o.clone()),
+                    None => continue,
+                }
+            };
+            // a catalog whose genre choice is REQUIRED (Cinemeta's by-year) is only usable with one
+            let required = c.extra.iter().any(|e| e.name == "genre" && e.is_required);
+            if required && spelled.is_none() {
+                continue;
+            }
+            let fit = order_fit(&c.id, c.title(), order);
+            if best.as_ref().is_none_or(|b| fit > b.0) {
+                best = Some((fit, n, s, spelled));
+            }
+        }
+        best.map(|(_, n, s, g)| (n, s, g))
+    }
+
+    /// Search with nothing typed: a shelf per library under the filters, and a card per shelf
+    /// that opens it whole. FOR YOU is the titles picked from what the account watched
+    /// ([`Self::for_you_rows`]), narrowed to the type and genre; with nothing watched yet it is
+    /// what is popular.
+    fn browse(&self, token: &str, addons: &[Addon], f: &Browse) -> Vec<Value> {
+        let all = self.shelves(addons);
+        let mut hubs = Vec::new();
+        let mut cards = Vec::new();
+        if f.order == Order::ForYou {
+            let picked: Vec<Value> = self.for_you_rows(token, addons).into_iter()
+                .filter(|row| f.genre.is_empty() || row_has_genre(row, &f.genre))
+                .collect();
+            for lib in f.kind.libs() {
+                let wire = lib.wire();
+                let rows: Vec<Value> = picked.iter()
+                    .filter(|row| row.get("type").and_then(Value::as_str) == Some(if wire == "movie" { "movie" } else { "show" }))
+                    .filter(|row| *lib != Lib::Anime || row.get("librarySectionID").and_then(Value::as_i64) == Some(row_shelf(Lib::Anime).section))
+                    .cloned()
+                    .collect();
+                if !rows.is_empty() {
+                    hubs.push(json!({"title": wire, "type": wire, "hubIdentifier": wire, "size": rows.len(), "Metadata": rows}));
+                }
+            }
+            if !hubs.is_empty() {
+                cards.push(json!({"ratingKey": format!("{LISTING}for_you"), "key": format!("/library/collections/{LISTING}for_you/children"),
+                    "type": "collection", "title": "Picked for You", "thumb": hubs[0].pointer("/Metadata/0/thumb").cloned()}));
+            }
+        }
+        if hubs.is_empty() {
+            // the shelves that answer the order (popular when "for you" has nothing to go on)
+            let order = if f.order == Order::ForYou { Order::Popular } else { f.order };
+            let picks: Vec<(Lib, usize, Shelf, Option<String>)> = f.kind.libs().iter()
+                .filter_map(|lib| self.browse_shelf(addons, &all, *lib, order, &f.genre).map(|(n, s, g)| (*lib, n, s, g)))
+                .collect();
+            let jobs: Vec<Box<dyn FnOnce() -> Vec<Title> + Send + '_>> = picks.iter()
+                .map(|(_, _, s, g)| {
+                    let (s, g) = (*s, g.clone());
+                    Box::new(move || self.catalog_page_in(&addons[s.addon], (s.addon, s.catalog), 0, None, g.as_deref()))
+                        as Box<dyn FnOnce() -> Vec<Title> + Send + '_>
+                })
+                .collect();
+            for ((lib, n, s, g), titles) in picks.iter().zip(parallel(jobs)) {
+                let titles = titles.unwrap_or_default();
+                if titles.is_empty() {
+                    continue;
+                }
+                let rows = self.rows(&titles, *lib);
+                let wire = lib.wire();
+                // a library's kind may already hold a shelf (anime and shows are both shows)
+                if hubs.iter().any(|h| h.get("type").and_then(Value::as_str) == Some(wire)) {
+                    continue;
+                }
+                let genre = g.clone().unwrap_or_default();
+                let rk = format!("{LISTING}d-{n}-{}", hex(&genre));
+                let name = shelf_title(addons, &all, *s);
+                let title = if genre.is_empty() { format!("All · {name}") } else { format!("All {genre} · {name}") };
+                cards.push(json!({"ratingKey": rk, "key": format!("/library/collections/{rk}/children"),
+                    "type": "collection", "subtype": wire, "title": title,
+                    "thumb": titles.iter().find_map(|t| t.poster.as_deref()).map(|u| self.art.path(u))}));
+                hubs.push(json!({"title": wire, "type": wire, "hubIdentifier": wire, "size": rows.len(), "Metadata": rows}));
+            }
+        }
+        if !cards.is_empty() {
+            hubs.push(json!({"title": "collection", "type": "collection", "hubIdentifier": "collection",
+                             "size": cards.len(), "Metadata": cards}));
+        }
+        hubs
+    }
+
+    /// A browse shelf whole (`d-{shelf}-{genre in hex}`), a window at a time.
+    fn browse_listing(&self, req: &Request, token: &str, rest: &str) -> Response {
+        let Some((shelf, genre)) = rest.split_once('-') else { return Response::empty(404) };
+        let Some(genre) = unhex(genre) else { return Response::empty(404) };
+        let addons = match self.addons(token) {
+            Ok(addons) => addons,
+            Err(e) => return api_failure(e),
+        };
+        let all = self.shelves(&addons);
+        let Some(s) = shelf.parse::<usize>().ok().and_then(|n| all.get(n).copied()) else {
+            return Response::empty(404);
+        };
+        let (start, size) = window(req, 60);
+        let (rows, ended) = if genre.is_empty() {
+            let (titles, ended) = self.shelf_window(&addons[s.addon], s, start, size);
+            (self.rows(&titles, s.lib), ended)
+        } else {
+            let titles = self.catalog_page_in(&addons[s.addon], (s.addon, s.catalog), start, None, Some(&genre));
+            let ended = titles.is_empty();
+            (self.rows(&titles, s.lib), ended)
+        };
+        let total = if ended { start + rows.len() } else { start + rows.len() + size.max(1) };
+        Response::json(200, &container(json!({"size": rows.len(), "totalSize": total, "offset": start, "Metadata": rows})))
+    }
+}
+
+/// Does a title row carry `genre` among its genres?
+fn row_has_genre(row: &Value, genre: &str) -> bool {
+    row.get("Genre").and_then(Value::as_array).is_some_and(|tags| tags.iter()
+        .filter_map(|t| t.get("tag").and_then(Value::as_str))
+        .any(|t| t.eq_ignore_ascii_case(genre)))
+}
+
+#[cfg(test)]
+mod browse_tests {
+    use super::*;
+
+    #[test]
+    fn a_query_carries_its_text_and_its_filters() {
+        assert_eq!(Browse::split("dune"), ("dune", None));
+        let (text, f) = Browse::split("dune::f|movie|rated|Action");
+        assert_eq!(text, "dune");
+        assert_eq!(f, Some(Browse { kind: Kind2::Movies, order: Order::TopRated, genre: "Action".into() }));
+        let (text, f) = Browse::split("::f|all|foryou|");
+        assert_eq!(text, "");
+        assert_eq!(f, Some(Browse { kind: Kind2::All, order: Order::ForYou, genre: String::new() }));
+    }
+
+    #[test]
+    fn an_order_is_answered_by_the_catalog_named_for_it() {
+        assert!(order_fit("top", "Popular", Order::Popular) > order_fit("imdbRating", "Featured", Order::Popular));
+        assert!(order_fit("imdbRating", "Featured", Order::TopRated) > 0);
+        assert!(order_fit("year", "New", Order::Newest) > 0);
     }
 }
 

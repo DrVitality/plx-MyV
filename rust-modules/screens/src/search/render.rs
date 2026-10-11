@@ -141,7 +141,9 @@ pub(super) fn draw<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '
     let p = p.alpha(screen.fade.alpha());
     if !screen.recents.is_empty() {
         recents(screen, f, p);
-    } else if screen.rows.is_empty() {
+    }
+    filter_rows(screen, f, p);
+    if screen.rows.is_empty() && screen.real_query() {
         empty(screen, f, p);
     }
     for (i, row) in screen.rows.iter().enumerate() {
@@ -350,6 +352,44 @@ fn recents<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p
     stop(screen, CLEAR, ElemKind::Control, f, p);
 }
 
+/// The browse filters: a label column, then a line of pills per row (the genres wrapped onto
+/// several). The chosen pill wears the accent; the focused one the control face's focus.
+fn filter_rows<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: Painter) {
+    use super::filters;
+    let env = Env::inert();
+    let scroll = screen.stack.scroll();
+    for line in 0..filters::lines() {
+        let top = screen.filter_line_top(line) - scroll;
+        if !plx_ui::on_axis(top, filters::LINE_H, SCR_H, 0.0) {
+            continue;
+        }
+        if let Some(label) = filters::row_label(line) {
+            Label::new(label.as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY)
+                .bold()
+                .draw(p, Rect::new(MARGIN_X, top, filters::LABEL_W, filters::LINE_H));
+        }
+        let chosen = screen.filters().chosen(line);
+        for i in 0..filters::len(line) {
+            let rect = filters::pill(i, top);
+            let elem = filters::elem(line, i);
+            let focused = f.cx.focus.current == Some(screen.key(elem));
+            let picked = chosen == Some(i);
+            // the chosen pill is lit in the accent whether focused or not; the rest are the
+            // ordinary control face, bright only under focus
+            let style = if picked {
+                plx_ui::widgets::ControlStyle::Custom { fill: theme::ACCENT, ink: theme::ACCENT_INK }
+            } else {
+                plx_ui::widgets::ControlStyle::Accent
+            };
+            Button::new(filters::label(line, i).as_ptr(), theme::size::LABEL, rect)
+                .style(style)
+                .focused(focused)
+                .draw(&env, p);
+            stop(screen, elem, ElemKind::Control, f, p);
+        }
+    }
+}
+
 fn empty<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Painter) {
     let state = H::search(f.cx).state();
     if screen.draft.pending() {
@@ -359,7 +399,10 @@ fn empty<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Pain
         return;
     };
     let mut rect = layout::empty_band(screen.editing);
-    rect.y -= screen.stack.scroll();
+    // under the filters, which stand between the field and any results
+    let below = screen.filter_line_top(super::filters::lines()) + theme::space::MD;
+    rect.h = (rect.y + rect.h - below).max(theme::space::XL * 4.0);
+    rect.y = below - screen.stack.scroll();
     if empty == EmptyState::Fault {
         StatusOverlay::new(rect, plx_platform::i18n::msg::browse_search_failed_c(), StatusKind::Failed)
             .reason(plx_platform::i18n::msg::browse_search_failed_detail_c())

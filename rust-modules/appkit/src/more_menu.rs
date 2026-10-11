@@ -146,6 +146,15 @@ fn streams_for(ps: &plx_media::route::PlaybackSession) -> Option<(u32, Vec<Strea
     (!rk.is_empty() && g.rk == rk && !g.none).then(|| (g.rev, g.rows.clone(), g.playing))
 }
 
+/// The next menu built opens on its Streams page — the HUD's Streams disc asks for it just before
+/// presenting the ordinary `…` popover, which consumes it ([`MoreMenuState::new`]).
+static OPEN_ON_STREAMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Ask that the next `…` menu open straight on its stream list.
+pub fn open_next_on_streams() {
+    OPEN_ON_STREAMS.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Streams rows listed at most.
 const STREAM_ROWS: usize = 60;
 
@@ -398,6 +407,10 @@ impl MoreMenuState {
         if quality.is_some() && quality_offered(&st.rows, st.forced) {
             st.push(ps, MorePage::Quality);
             st.motion.cancel_slide();
+        } else if OPEN_ON_STREAMS.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            // the HUD's Streams disc: straight to the list, BACK returns to the root
+            st.push(ps, MorePage::Streams);
+            st.motion.cancel_slide();
         }
         st
     }
@@ -539,6 +552,12 @@ impl MoreMenuState {
 
     pub fn new(ps: &plx_media::route::PlaybackSession) -> Self {
         Self::open_focused(ps, None)
+    }
+
+    /// Whether the next menu built opens on its Streams page (see [`open_next_on_streams`]).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn opens_on_streams_next() -> bool {
+        OPEN_ON_STREAMS.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The existing overflow menu, opened on the Quality page with the ACTIVE rung focused.

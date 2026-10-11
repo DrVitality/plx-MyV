@@ -347,6 +347,122 @@
     "value": "one more character",
     "description": "browse search one_more"
   },
+  "browse.search.filter.type": {
+    "value": "TYPE",
+    "description": "Search filters: label before the row of type choices (All, Movies, Shows, Anime)."
+  },
+  "browse.search.filter.sort": {
+    "value": "SORT",
+    "description": "Search filters: label before the row of orderings (For You, Popular, Top rated, Newest)."
+  },
+  "browse.search.filter.genre": {
+    "value": "GENRE",
+    "description": "Search filters: label before the rows of genres."
+  },
+  "browse.search.filter.all": {
+    "value": "All",
+    "description": "Search filters: type choice \u2014 films, shows and anime together."
+  },
+  "browse.search.filter.movies": {
+    "value": "Movies",
+    "description": "Search filters: type choice \u2014 films only."
+  },
+  "browse.search.filter.shows": {
+    "value": "Shows",
+    "description": "Search filters: type choice \u2014 series only."
+  },
+  "browse.search.filter.anime": {
+    "value": "Anime",
+    "description": "Search filters: type choice \u2014 anime only."
+  },
+  "browse.search.filter.for_you": {
+    "value": "For You",
+    "description": "Search filters: ordering \u2014 titles recommended from what the viewer has watched."
+  },
+  "browse.search.filter.popular": {
+    "value": "Popular",
+    "description": "Search filters: ordering \u2014 most popular now."
+  },
+  "browse.search.filter.top_rated": {
+    "value": "Top rated",
+    "description": "Search filters: ordering \u2014 best rated."
+  },
+  "browse.search.filter.newest": {
+    "value": "Newest",
+    "description": "Search filters: ordering \u2014 newest releases."
+  },
+  "browse.search.filter.any_genre": {
+    "value": "All genres",
+    "description": "Search filters: genre choice \u2014 no genre filter."
+  },
+  "browse.search.genre.action": {
+    "value": "Action",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.adventure": {
+    "value": "Adventure",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.animation": {
+    "value": "Animation",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.comedy": {
+    "value": "Comedy",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.crime": {
+    "value": "Crime",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.documentary": {
+    "value": "Documentary",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.drama": {
+    "value": "Drama",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.family": {
+    "value": "Family",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.fantasy": {
+    "value": "Fantasy",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.history": {
+    "value": "History",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.horror": {
+    "value": "Horror",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.mystery": {
+    "value": "Mystery",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.romance": {
+    "value": "Romance",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.sci_fi": {
+    "value": "Sci-Fi",
+    "description": "Film/TV genre name (science fiction)."
+  },
+  "browse.search.genre.thriller": {
+    "value": "Thriller",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.war": {
+    "value": "War",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.western": {
+    "value": "Western",
+    "description": "Film/TV genre name."
+  },
   "browse.search.suggested": {
     "value": "SUGGESTED",
     "description": "Search: heading over suggested search terms (what is popular now), shown before anything has been searched"

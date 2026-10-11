@@ -4411,7 +4411,7 @@ impl View for StatusOverlay<'_> {
 }
 
 // ---- TransportButton: circular control button with a runtime-rasterized SVG glyph
-// (0 = subtitles/CC, 1 = audio, 2 = more/overflow). The player supplies Unkeyed, so focused is a
+// (0 = subtitles/CC, 1 = streams, 2 = audio, 3 = more/overflow). The player supplies Unkeyed, so focused is a
 // flat accent + dark icon and idle is a light film + white icon. ----
 pub struct TransportButton {
     pub frame: Rect,
@@ -4492,8 +4492,9 @@ impl View for TransportButton {
             self.ground,
         );
         let id = match self.which {
-            1 => Icon::Audio,
-            2 => Icon::More,
+            1 => Icon::Collection, // the streams: a stack of sources
+            2 => Icon::Audio,
+            3 => Icon::More,
             _ => Icon::Cc,
         };
         let s = (r.w * DISC_ICON_RATIO).round();

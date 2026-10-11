@@ -491,8 +491,10 @@ pub const CTRL_Y: f32 = BTN_Y;
 /// track and `…` panels were aligned to the same 80 (`track_menu`/`more_menu`). All three moved onto
 /// `MARGIN_X` together on 2026-08-23 — they are one right edge by design, so they take one number.
 pub const CTRL_RIGHT: f32 = SCR_W - plx_ui::consts::MARGIN_X;
-/// how many control discs the row holds: Subtitles, Audio, More
-const BTN_N: i32 = 3;
+/// how many control discs the row holds: Subtitles, Streams, Audio, More
+const BTN_N: i32 = 4;
+/// Index of the Streams disc — the stream list for what is playing, beside Subtitles.
+pub const BTN_STREAMS: i32 = 1;
 
 /// The CONTROL ROW's focus pop — one spring per item ([`plx_ui::widgets::CtlPop`]), so the
 /// control being left shrinks while the arriving one grows instead of both snapping.
@@ -626,7 +628,7 @@ impl TransportRow {
 /// was introduced to stop.
 pub const BTN_MORE: i32 = BTN_N - 1;
 /// width the disc row occupies, the floor for anything replacing it
-pub const CTRL_ROW_W: f32 = 3.0 * BTN_S + 2.0 * BTN_GAP;
+pub const CTRL_ROW_W: f32 = BTN_N as f32 * BTN_S + (BTN_N - 1) as f32 * BTN_GAP;
 
 /// The shared control-row slot for anything that STANDS IN for the disc pair: right-aligned to the
 /// discs' own edge, and never narrower than the pair it replaces so the row does not visibly shrink
