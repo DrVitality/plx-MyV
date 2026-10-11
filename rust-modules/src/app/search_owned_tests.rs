@@ -516,12 +516,19 @@ fn owned_search_unrelated_store_notice_cannot_ack_a_net_zero_edit_batch() {
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
-    // the page opens on its browse query (`screens::search::filters`): let that notice land first,
-    // so the only Search notice below is the one the edits owe
-    frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
+    // The page opens on its browse query (`screens::search::filters`), which the store ASKS for:
+    // with no server registered it publishes Searching and then, one pump later, Failed — two
+    // Search notices of its own. Let both land first, so the only Search notice below is the one
+    // the edits owe.
+    for _ in 0..3 {
+        frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
+    }
     let target = MachineId::Instance(d.nav.top_page().unwrap().inst.as_ref().unwrap().id);
+    // A SPACE, not a letter: the store keys its fetch on the trimmed query, so a space typed and
+    // erased never restarts it, and no Searching→Failed flip of the empty roster lands a Search
+    // notice in the same frame as the unrelated one under test.
     for kind in [InputKind::SystemKeyboard(true),
-        InputKind::Text(plx_machine::machine::TextEdit::Commit("a".into())),
+        InputKind::Text(plx_machine::machine::TextEdit::Commit(" ".into())),
         InputKind::Text(plx_machine::machine::TextEdit::Backspace)] {
         d.emit(MachineId::Input, Fx::Deliver(target, Delivery::Screen(ScreenEvent::Input(InputEvent {
             at: tick(1), source: Source::Script, kind,
