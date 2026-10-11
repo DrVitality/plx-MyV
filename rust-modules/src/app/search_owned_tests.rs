@@ -516,6 +516,9 @@ fn owned_search_unrelated_store_notice_cannot_ack_a_net_zero_edit_batch() {
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
+    // the page opens on its browse query (`screens::search::filters`): let that notice land first,
+    // so the only Search notice below is the one the edits owe
+    frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
     let target = MachineId::Instance(d.nav.top_page().unwrap().inst.as_ref().unwrap().id);
     for kind in [InputKind::SystemKeyboard(true),
         InputKind::Text(plx_machine::machine::TextEdit::Commit("a".into())),

@@ -414,6 +414,11 @@ fn the_recents_cursor_stops_on_the_clear_control() {
     let last = <SearchScreen as Focusable<HostFixture>>::place(&screen, &screen.recents[2], &cx, At::Drawn).unwrap();
     assert!(clear.rect.y >= last.rect.y + last.rect.h, "Clear sits below the last DRAWN term");
     assert_eq!(clear.rect.y, layout::clear(3, 0.0, &fixture.measure).y);
+    // ▲ back up the filter lines to Clear
+    for _ in 0..filters::lines() {
+        step_dir(&mut screen, &fixture, &mut engine, Dir::Up);
+    }
+    assert_eq!(engine.current(OWNER).map(|k| k.elem), Some(CLEAR), "▲ climbs the filters back to Clear");
     assert!(step_dir(&mut screen, &fixture, &mut engine, Dir::Up).is_some_and(|k| k.elem == screen.recents[2]),
         "…and ▲ returns to the list rather than to the field");
 
