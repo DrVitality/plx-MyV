@@ -209,6 +209,7 @@ fn the_placeholder_tokens_keep_their_default_values() {
     assert_eq!(theme::SKELETON_TOP, theme::CARD_PLACEHOLDER);
     assert_eq!(theme::CARD_ABSENT, theme::CARD_PLACEHOLDER);
     assert_ne!(theme::SKELETON_TOP, theme::SKELETON_BOT);
-    assert_eq!(theme::CARD_PLACEHOLDER, [31.0 / 255.0, 33.0 / 255.0, 41.0 / 255.0, 1.0]);
-    assert_eq!(theme::SKELETON_BOT, [20.0 / 255.0, 23.0 / 255.0, 28.0 / 255.0, 1.0]);
+    // The warm-charcoal palette's stops (`COOL_850` / `COOL_900`).
+    assert_eq!(theme::CARD_PLACEHOLDER, [33.0 / 255.0, 28.0 / 255.0, 30.0 / 255.0, 1.0]);
+    assert_eq!(theme::SKELETON_BOT, [23.0 / 255.0, 19.0 / 255.0, 20.0 / 255.0, 1.0]);
 }

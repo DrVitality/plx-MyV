@@ -54,9 +54,11 @@ the pinned Sentry Native cross-build), and `sshpass` (Homebrew; deploy/run use y
   (default `~/webos-ndk/…`). One-time; re-run `relocate-sdk.sh` if you move the SDK.
 - `tools/sim.ps1 setup|build|run|shot|send` — Windows 11 UI/Plex simulator through the existing
   Ubuntu 22.04 WSLg runtime. It uses GPU-accelerated desktop OpenGL, keeps build/runtime state on
-  WSL's Linux filesystem, and stages fonts, their notice and the bundled ASS renderer into an isolated app directory. Its `make sim-wsl`
-  build is optimized and deliberately skips host FFmpeg, so it covers UI, sign-in, Plex browsing,
-  screenshots and remote commands but not demux/clock-sink playback. WSLg's non-blocking GLX swap
+  WSL's Linux filesystem, and stages fonts, their notice, the bundled ASS renderer and the host
+  FFmpeg into an isolated app directory. Its `make sim-wsl` build is optimized and, since
+  2026-10-10, builds the host FFmpeg too, so a `run` plays: it arms the clock sink and the
+  simulator picture (a system `ffmpeg` decode, no sound) beside UI, sign-in, browsing,
+  screenshots and remote commands. WSLg's non-blocking GLX swap
   is capped at 60 Hz in the Linux host build. The launcher also refuses WSLg's `use_gfxredir=0`
   copy fallback, where GL swaps can remain at 60 while the Windows surface updates at only a few
   FPS. See the `ui-sim` skill.
@@ -1738,7 +1740,7 @@ table selected on `target_pointer_width` with `ci/ffabi-assert.c` holding both. 
 clamped to the last fed PTS, position reported at the television's measured 5 Hz) and the whole
 pipeline between the socket and the decoder runs on the Mac: both AVIO transports, `ff.rs`'s
 demux, the AU queues and their byte-cap backpressure, the feed-ahead throttle, rung transactions,
-seek. The Windows `sim-wsl` target deliberately omits FFmpeg and stops at the host no-video seam.
+seek. The Linux / Windows `sim-wsl` target builds the same host FFmpeg (staged as `pkg/libav*-plx-host.so.*`) and streams the same way; `tools/sim.ps1 run` arms the clock sink and the simulator picture.
 Measured the day the macOS path landed: 94 `abr:` lines and a rung commit in one 30 s host run against
 `tests/serve_fixtures.py`. Until then this half was device-only and `make sim-macos` said so
 (`ff: FFmpeg unavailable — the app runs, playback will refuse`), which is why the ABR work was

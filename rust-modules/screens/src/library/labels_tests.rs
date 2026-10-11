@@ -201,7 +201,8 @@ fn owned_library_overscan_probe_covers_every_legacy_edge() {
     }
 }
 
-/// The deck's focused title carries the amber ▶ only while OK on the deck plays.
+/// A focused title carries the amber ▶ exactly while OK on the card plays — on the deck and on
+/// every other shelf, since the setting covers every card.
 #[test]
 fn the_deck_title_carries_the_play_glyph_only_while_the_press_plays() {
     let _guard = plx_base::testlock::serial();
@@ -219,7 +220,7 @@ fn the_deck_title_carries_the_play_glyph_only_while_the_press_plays() {
         glyph(DeckPress::Play, false), glyph(DeckPress::Details, false),
     );
     plx_media::route::restore_deck_press(prior);
-    assert_eq!(seen, (true, false, false, false));
+    assert_eq!(seen, (true, false, true, false));
 }
 
 #[test]

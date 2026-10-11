@@ -713,9 +713,9 @@ mod tests {
     #[test]
     fn the_non_sentinel_colour_constants_are_unchanged() {
         use plx_gfx::gfx::tokens::rgb8;
-        assert_eq!(theme::CARD_PLACEHOLDER, rgb8(0x1f, 0x21, 0x29));
-        assert_eq!(theme::SKELETON_TOP, rgb8(0x1f, 0x21, 0x29));
-        assert_eq!(theme::SKELETON_BOT, rgb8(0x14, 0x17, 0x1c));
+        assert_eq!(theme::CARD_PLACEHOLDER, rgb8(0x21, 0x1c, 0x1e));
+        assert_eq!(theme::SKELETON_TOP, rgb8(0x21, 0x1c, 0x1e));
+        assert_eq!(theme::SKELETON_BOT, rgb8(0x17, 0x13, 0x14));
         assert_eq!(theme::CARD_ABSENT, theme::CARD_PLACEHOLDER);
         assert!(!SENTINEL);
     }
@@ -727,7 +727,7 @@ mod tests {
         for c in [theme::CARD_PLACEHOLDER, theme::SKELETON_TOP, theme::SKELETON_BOT] {
             assert_eq!(c, theme::PLACEHOLDER_SENTINEL);
         }
-        assert_eq!(theme::CARD_ABSENT, plx_gfx::gfx::tokens::rgb8(0x1f, 0x21, 0x29), "absence is never sentinel");
+        assert_eq!(theme::CARD_ABSENT, plx_gfx::gfx::tokens::rgb8(0x21, 0x1c, 0x1e), "absence is never sentinel");
         let faded = Painter::root().alpha(0.35).rgb(0.5);
         assert_eq!((painter(faded).opacity(), painter(faded).scale()), (1.0, 1.0));
     }

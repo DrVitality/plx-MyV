@@ -163,11 +163,12 @@ fn every_tab_pill_round_trips_through_the_focus_packing() {
         (STRIP_SHOWS_ELEM, HomeReq::Tab(HomeTab::Shows)),
         (STRIP_SEARCH_ELEM, HomeReq::Tab(HomeTab::Search)),
         (STRIP_ACCOUNT_ELEM, HomeReq::Account),
+        (STRIP_ANIME_ELEM, HomeReq::Tab(HomeTab::Anime)),
     ];
     for (elem, want) in cases {
         assert_eq!(HomeScreen::request_for_strip(elem), Some(want));
     }
-    assert_eq!(HomeScreen::request_for_strip(STRIP_ACCOUNT_ELEM + 1), None);
+    assert_eq!(HomeScreen::request_for_strip(STRIP_ANIME_ELEM + 1), None);
     for page_key in [HERO_PLAY_ELEM, HERO_INFO_ELEM, FIRST_ITEM_ELEM] {
         assert_eq!(HomeScreen::request_for_strip(page_key), None);
     }
@@ -326,7 +327,7 @@ fn a_failed_home_stands_on_the_page_readout_lines() {
     plx_data::pms::seed_for_test(&mut state, &adapter, 0, plx_data::pms::HubState::Failed);
     let snapshot = plx_data::pms::hubs_snapshot(&state);
     let (caption, kind, action) = status_read(snapshot.view()).unwrap();
-    assert_eq!((caption.to_str().unwrap(), kind), ("Can\u{2019}t reach your Plex server", StatusKind::Failed));
+    assert_eq!((caption.to_str().unwrap(), kind), ("Can\u{2019}t reach Stremio", StatusKind::Failed));
     assert_eq!(action.unwrap().to_str().unwrap(), "Try again");
     let measure = plx_ui::fixture::FixtureMeasure;
     let no_offer = OfferWatch::default();
@@ -684,6 +685,17 @@ fn the_card_anchor_rect_tracks_the_drawn_card_through_scroll_and_snap() {
     }
 }
 
+/// Equal to the 8-bit code: a blend that lands ON a colour may differ from it in the last float
+/// bit (the ground's channels are no longer all equal), which no pixel can show.
+#[track_caller]
+fn assert_same_colours(got: [[f32; 4]; 4], want: [[f32; 4]; 4], why: &str) {
+    for (g, w) in got.iter().zip(want.iter()) {
+        for (a, b) in g.iter().zip(w.iter()) {
+            assert!((a - b).abs() < 0.5 / 255.0, "{why}: {got:?} vs {want:?}");
+        }
+    }
+}
+
 fn blurred(blur: [[f32; 3]; 4]) -> PmsMovie {
     PmsMovie {
         has_blur: true,
@@ -714,15 +726,15 @@ fn the_wash_floors_on_the_app_surface_and_never_dims_toward_black() {
         [0.8, 0.75, 0.2],
         [0.1, 0.1, 0.12],
     ]);
-    assert_eq!(
+    assert_same_colours(
         wash_corners(Some(&bright), flat, 1.0),
         flat,
-        "the dive resolves to the app ground, not to black"
+        "the dive resolves to the app ground, not to black",
     );
-    assert_eq!(
+    assert_same_colours(
         wash_corners(Some(&bright), flat, 1.5),
         flat,
-        "…and an overshooting snap cannot push past it"
+        "…and an overshooting snap cannot push past it",
     );
 
     // **The grid end held at the app's own surface, which is what makes every assertion below
@@ -1847,7 +1859,7 @@ fn deck_press_is(mode: plx_media::route::DeckPress) -> DeckPressGuard {
 }
 
 #[test]
-fn continue_watching_commit_follows_the_setting_while_an_ordinary_shelf_opens_detail() {
+fn every_shelfs_commit_follows_the_card_press_setting() {
     use plx_media::route::DeckPress;
     let _guard = plx_base::testlock::serial();
     let mut state = plx_data::pms::PmsState::default();
@@ -1865,7 +1877,7 @@ fn continue_watching_commit_follows_the_setting_while_an_ordinary_shelf_opens_de
         assert!(has_home(&play, |r| matches!(r, HomeReq::Play { rk, .. } if rk == "1")));
     }
     {
-        // the default: OK on a deck card opens the page, exactly as on any other shelf
+        // Open details: OK opens the page
         let _press = deck_press_is(DeckPress::Details);
         let detail = commit(&mut s, 2);
         assert!(has_home(&detail, |r| matches!(r, HomeReq::Detail { rk, .. } if rk == "1")));
@@ -1876,23 +1888,26 @@ fn continue_watching_commit_follows_the_setting_while_an_ordinary_shelf_opens_de
         sid: plx_plex::plex::ServerId::UNSET,
         key: "/hubs/recent".into(),
     };
-    let detail = commit(&mut s, 3);
-    assert!(has_home(&detail, |r| matches!(r, HomeReq::Detail { rk, .. } if rk == "1")));
+    // an ordinary shelf follows the same setting: the press plays
+    let play = commit(&mut s, 3);
+    assert!(has_home(&play, |r| matches!(r, HomeReq::Play { rk, .. } if rk == "1")));
 }
 
-/// The amber ▶ promises the press plays, so the deck's title line carries it in Play mode only.
+/// The amber ▶ promises the press plays, so a focused title carries it in Play mode only — and a
+/// collection, whose press only ever opens, never does.
 #[test]
 fn the_deck_title_carries_the_play_glyph_only_while_the_press_plays() {
     use plx_media::route::DeckPress;
     let _guard = plx_base::testlock::serial();
     {
         let _press = deck_press_is(DeckPress::Play);
-        assert!(deck_label(true, "Show").glyph);
-        assert!(!deck_label(false, "Show").glyph, "a shelf that navigates never carries it");
+        assert!(press_label(0, "Film").glyph);
+        assert!(press_label(1, "Show").glyph);
+        assert!(!press_label(plx_data::pms::KIND_COLLECTION, "Box set").glyph);
     }
     let _press = deck_press_is(DeckPress::Details);
-    assert!(!deck_label(true, "Show").glyph);
-    assert!(!deck_label(false, "Show").glyph);
+    assert!(!press_label(0, "Film").glyph);
+    assert!(!press_label(1, "Show").glyph);
 }
 
 #[test]

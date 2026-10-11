@@ -16,6 +16,16 @@ mod related;
 mod season;
 mod section;
 mod trailer;
+
+/// OK on a Related or collection-member card: play it while the press plays (the card-press
+/// preference, as on every other shelf), else open its page. A row the page no longer holds opens.
+fn card_open(sid: plx_plex::plex::ServerId, rk: String, row: Option<&plx_data::pms::PmsMovie>) -> ContentReq {
+    match row {
+        Some(m) => crate::registry::card_press_request(m),
+        None => ContentReq::Push(ContentArg::Detail { sid, rk }),
+    }
+}
+
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -3696,7 +3706,7 @@ impl DetailScreen {
     /// four controls' worth of geometry and three drawn) is exactly the class of bug this
     /// publication exists to remove.
     pub fn alt_available(&self, meta: plx_data::metadata::MetadataView<'_>) -> bool {
-        meta.alt_available(self.sid, &self.rk)
+        meta.alt_available(self.sid, &self.rk) || self.detail(meta).is_some_and(hero::streams_offered)
     }
 
     /// **Is there a file for the *Track information* sheet to describe?** — the Languages column's
@@ -3754,7 +3764,8 @@ impl DetailScreen {
                     .map(|d| related::action(d, local))
                     .unwrap_or(related::Action::None);
                 if let related::Action::OpenDetail(sid, rk) = action {
-                    self.content(fx, ContentReq::Push(ContentArg::Detail { sid, rk }));
+                    let row = self.detail(meta).and_then(|d| d.related.iter().find(|m| m.sid == sid && m.rk == rk));
+                    self.content(fx, card_open(sid, rk, row));
                 }
             }
             Some(Located::Collection(_)) => {
@@ -3763,7 +3774,9 @@ impl DetailScreen {
                     .map(|d| collection::action(d, local))
                     .unwrap_or(related::Action::None);
                 if let related::Action::OpenDetail(sid, rk) = action {
-                    self.content(fx, ContentReq::Push(ContentArg::Detail { sid, rk }));
+                    let row = self.detail(meta)
+                        .and_then(|d| collection::members(d).iter().find(|m| m.sid == sid && m.rk == rk));
+                    self.content(fx, card_open(sid, rk, row));
                 }
             }
             Some(Located::CollectionHeading) => {
@@ -3855,6 +3868,17 @@ impl DetailScreen {
                     );
                     let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y, widths);
                     rect.y -= self.scroll.pos;
+                    let anchor = [rect.x, rect.y, rect.w, rect.h].map(f32::to_bits);
+                    // On the Stremio bridge the pill is *Streams*: the stream menu for the leaf
+                    if let Some((rk, part, title, episode)) = self
+                        .detail(meta)
+                        .filter(|d| hero::streams_offered(d))
+                        .and_then(hero::streams_leaf)
+                    {
+                        let sid = plx_media::route::item_sid(self.sid);
+                        self.content(fx, ContentReq::ChooseStream { sid, rk, part, title, episode, anchor });
+                        return;
+                    }
                     // The ANCHOR travels on the argument, bit for bit, so the surface places
                     // itself off the pill without the page or a static holding a `Rect` for it.
                     self.content(
@@ -4080,3 +4104,4 @@ mod preview_plane_tests {
         );
     }
 }
+

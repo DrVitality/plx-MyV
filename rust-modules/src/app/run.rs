@@ -1268,6 +1268,11 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
         // drove HOME's focus underneath instead. The press-cancel each of them paid for
         // by hand — a pointer sliding off the control it armed must abandon that press —
         // is `dispatch`'s ingest, which cancels an arm whose hit no longer resolves to it.
+        // Over an open details bubble the pointer is reaching for its buttons: the cards drawn
+        // under it must not take focus (which would close the bubble on the way).
+        if !matches!(app.route(), AppArg::Player) && plx_ui::cards::peek::covers(mx, my) {
+            return;
+        }
         if super::bridge::owns_input(&app.pages) {
             // `app.last_input`, stamped from the clock at the top of this arm: `fr.now`
             // is not written until after ingest (`tree_tick` above says why).
@@ -1314,6 +1319,22 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
         // replaces each spelled out the two activation shapes by hand — a control FACE
         // dips and commits on the spring-back, a table row commits on the button-down —
         // which is exactly what `ElemKind` says once, per element, for every owned screen.
+        // A click on one of the details bubble's buttons: Play or Details for the card the
+        // bubble was drawn for, the same activation OK and the card's menu perform.
+        if !matches!(app.route(), AppArg::Player) {
+            let (cx, cy) = ptr_xy(&app.ev);
+            if let Some((button, key)) = plx_ui::cards::peek::hit(cx, cy) {
+                if let Some(item) = plx_screens::registry::peeked_row(&key) {
+                    log("bubble: button clicked");
+                    let play = button == plx_ui::cards::peek::PeekButton::Play;
+                    super::input::activate_card(&mut app.player.session, &mut app.adapters.player, &item, play,
+                        HUD_LINGER_MS, None, &mut app.pages, &mut app.bridge, &mut app.menu_play_await,
+                        clock::now());
+                    plx_machine::idle::invalidate();
+                    return;
+                }
+            }
+        }
         if super::bridge::owns_input(&app.pages) {
             let (cx, cy) = ptr_xy(&app.ev);
             app.inputs.push(super::bridge::click_input(
@@ -1608,6 +1629,29 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
                 if let Some(player) = super::bridge::player_mut(&mut app.pages) {
                     player.up_next.cancel(); // nothing queued after all — don't re-fire
                 }
+            } else {
+                super::playback::note_auto_advance();
+            }
+        }
+        // "Are you still watching?": a press resets the run of automatic episodes, and the
+        // episode past it pauses on its first picture
+        super::playback::still_watching_tick(&mut app.adapters.player, app.last_input,
+            super::bridge::player(&app.pages).is_some());
+        // the Stremio bridge changed something Home shows (a library save, a Home-row or addon
+        // setting): the same refetch, at once
+        if crate::stremio::take_home_changed() {
+            app.refresh_hubs_at = fr.now | 1;
+        }
+        // Search's suggestions, once a run, as soon as there is a server to ask
+        crate::app::input::search_suggestions_fetch();
+        // a title sent from the phone remote: its page opens (never playback); while the player
+        // is up it waits, so a phone cannot cut into what is playing (the route, not `fr.player`,
+        // which `prepare_window` has not written yet this frame)
+        if !matches!(app.route(), AppArg::Player) {
+            if let Some(rk) = crate::stremio::take_remote_request() {
+                log("phone remote: opening a title");
+                super::bridge::open_detail(&mut app.pages, &mut app.bridge,
+                    plx_plex::plex::current_server(), &rk, None, None);
             }
         }
         // post-playback home refresh (armed by every exit_player): refetch the hubs so
@@ -1671,6 +1715,17 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
                 // no observable signal at all before it.
                 if let Some((kind, start)) = offer {
                     log(&format!("marker offer: {kind:?} at {}s", start / 1000));
+                }
+                // Skip intros > Automatically: the same act as pressing Skip Intro, once per
+                // segment (the segment is retired first, so the landing does not offer it again).
+                if super::playback::auto_skip_intros() {
+                    if let plx_appkit::player_hud::ControlSlot::Skip(pr) = fr.ctrl {
+                        if let (plx_data::metadata::MarkerKind::Intro, plx_appkit::skip_pill::SkipAction::Seek(ns)) = (pr.kind, pr.action) {
+                            app.bridge.metadata_mut().run(plx_data::stores::metadata::MetadataCmd::MarkSkipped(pr.marker));
+                            super::playback::request_seek(ns);
+                            log("marker auto-skip: intro");
+                        }
+                    }
                 }
                 // A segment beginning puts the HUD ON SCREEN and offers the row — the timer,
                 // the DISMISSAL and the ring in one act, because raising the timer alone left
@@ -2279,6 +2334,21 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
             menu_play_tick(&mut app.player.session, &mut app.adapters.player,
                 &mut app.pages, &mut app.bridge, &mut app.menu_play_await, fr.now);
         }
+        // The stream picker's answer (its list to present, or its choice made and the item to
+        // play), for the same route-unconditional reason.
+        if app.bridge.stream_pick.is_some() {
+            crate::app::input::stream_pick_tick(&mut app.player.session, &mut app.adapters.player,
+                &mut app.pages, &mut app.bridge, &mut super::playback::LivePlaybackResources, fr.now);
+        }
+        // The player's Change stream page: its list fetched once per item, and a pick's landing.
+        // Keyed on the route itself, not `fr.player`: that is written by `prepare_window`, which
+        // runs AFTER this phase, so it read false on every frame and the list was never asked for.
+        if matches!(app.route(), AppArg::Player) {
+            crate::app::input::player_streams_fetch(&app.player.session);
+        }
+        if app.bridge.player_stream.is_some() {
+            crate::app::input::player_stream_tick(&mut app.player.session, &mut app.adapters.player, &mut app.bridge);
+        }
         // Server-side view-state WRITES (Mark as Watched / Unwatched, Remove from Deck): send
         // the next queued one, land the last one's answer and kick the refresh it owes. Route-
         // unconditional for the same reason as the two pumps around it — the user can walk off
@@ -2483,13 +2553,16 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                             if page_owned {
                                 app.pages.draw_with_glass_below(&mut app.bridge, &mut app.glass, true, ceiling);
                             } else {
-                                plx_gfx::gfx::frame_clear(plx_ui::theme::CLEAR_RGB.0, plx_ui::theme::CLEAR_RGB.1, plx_ui::theme::CLEAR_RGB.2);
+                                let ground = plx_ui::theme::appearance::clear_rgb();
+                                plx_gfx::gfx::frame_clear(ground.0, ground.1, ground.2);
                             }
                             if plan != super::bridge::PagePlan::SurfacesOnly && Z::OPENER < ceiling {
                                 let _opener = plx_ui::frame::backdrop::layer(Z::OPENER, false);
                                 app.bridge.redraw_opener(&app.pages);
                             }
                         };
+                        // a bubble that closed takes its clickable buttons with it
+                        plx_ui::cards::peek::begin_frame();
                         {
                             let _declarations = plx_ui::frame::backdrop::discover(sources.clone());
                             plx_base::diag::spans::span("disc", || page(Z::ALL));
@@ -4758,5 +4831,32 @@ mod pump_wiring_tests {
             "pump_detail() and pump_season() must be pumped from the same function — found what \
              looks like an intervening function boundary between them"
         );
+    }
+}
+
+/// `Frame::player` is written by `prepare_window`, which runs after `playback_tick` and `update`,
+/// so in those two phases it is always `false`. Reading it there is how the player's Streams page
+/// never asked for its list (and how a phone remote could open a page over playback).
+#[cfg(test)]
+mod frame_player_order_tests {
+    #[test]
+    fn no_phase_before_prepare_window_reads_the_player_bit() {
+        let whole = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app/run.rs"),
+        )
+        .expect("read run.rs");
+        let src = whole.split("#[cfg(test)]").next().expect("the loop's source");
+        for (open, close) in [
+            ("pub(crate) unsafe fn playback_tick(", "pub(crate) unsafe fn land_results("),
+            ("pub(crate) unsafe fn update(", "pub(crate) unsafe fn draw("),
+        ] {
+            let at = src.find(open).expect(open);
+            let end = at + src[at..].find(close).expect(close);
+            let reads: Vec<&str> = src[at..end]
+                .lines()
+                .filter(|l| !l.trim_start().starts_with("//") && l.contains("fr.player"))
+                .collect();
+            assert!(reads.is_empty(), "{open} reads `fr.player` before it is written: {reads:?}");
+        }
     }
 }

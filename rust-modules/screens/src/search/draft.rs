@@ -10,7 +10,9 @@ pub(super) struct Draft {
 }
 
 impl Draft {
+    /// `query` is the store's: its browse filters ([`super::filters`]) are not the field's text.
     pub(super) fn new(profile: u32, query: &str) -> Self {
+        let query = super::filters::user_part(query);
         Self { buffer: TextBuffer::new(query.into(), query.len()), profile, pending: false }
     }
     pub(super) fn query(&self) -> &str { self.buffer.text() }
@@ -21,6 +23,7 @@ impl Draft {
     /// A profile replacement always wins. An ordinary retained view never overwrites local
     /// input; only a store notification acknowledges it. Equal text keeps the user's caret.
     pub(super) fn observe(&mut self, profile: u32, query: &str, notified: bool) -> bool {
+        let query = super::filters::user_part(query);
         if profile != self.profile {
             *self = Self::new(profile, query);
             return true;
@@ -84,6 +87,17 @@ mod tests {
         draft.observe(7, "summer ", true);
         assert!(!draft.pending());
         assert_eq!(draft.caret(), caret, "store acknowledgement must not move the insertion point");
+    }
+
+    /// The filters the store's query carries never reach the field, and acknowledge its text.
+    #[test]
+    fn a_query_carrying_filters_acknowledges_the_text_alone() {
+        let mut draft = Draft::new(7, "::f|all|foryou|");
+        assert_eq!(draft.query(), "");
+        assert_eq!(draft.edit(&TextEdit::Commit("dune".into())).as_deref(), Some("dune"));
+        draft.observe(7, "dune::f|movie|popular|", true);
+        assert!(!draft.pending(), "the store holds the text that was typed");
+        assert_eq!(draft.query(), "dune");
     }
 
     #[test]

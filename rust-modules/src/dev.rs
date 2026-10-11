@@ -66,7 +66,7 @@ pub(crate) mod framedump;
 // `test` as well as the feature: `any_trigger_present` is the only caller and it is cfg'd out of a
 // release build, but the test below asserts this list's contents and runs with default features.
 #[cfg(any(feature = "devtriggers", test))]
-const DIAG: [&str; 36] = [
+const DIAG: [&str; 38] = [
     "plxnative-diag.log",
     "plxnative-events.log",
     "plxnative-stderr.log",
@@ -147,6 +147,13 @@ const DIAG: [&str; 36] = [
     "plxnative-rec",
     "plxnative-recplay",
     "plxnative-guard", // diagnostic policy only; never changes the boot screen
+    // The desktop simulator's two playback stand-ins (`player/ffi_host.rs`, `player/sim_video.rs`):
+    // the clock sink accepts the demuxed stream and keeps time, the picture is a system ffmpeg's.
+    // They decide how the host SEAM behaves once a play starts, never which screen boots, and
+    // `tools/sim.ps1` arms both on every interactive run — a run that must still come up on the
+    // who's-watching picker and the consent question exactly as the television does.
+    "plxnative-clocksink",
+    "plxnative-simvideo",
     // Boot-latched Dolby Vision capability A/B. They alter only the platform answer used by the
     // route policy, so an experiment must not independently replace Home with the profile picker.
     "plxnative-dvcaps0",

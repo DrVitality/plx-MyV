@@ -447,6 +447,7 @@ fn mount_page(
         SettingsPage::Contribute => Box::new(super::legal::DocumentPage::contribute(entry)),
         SettingsPage::Playback => Box::new(super::preferences::PreferencesPage::new(entry, super::preferences::Kind::Playback)),
         SettingsPage::AudioSubtitles => Box::new(super::preferences::PreferencesPage::new(entry, super::preferences::Kind::AudioSubtitles)),
+        SettingsPage::Appearance => Box::new(super::preferences::PreferencesPage::new(entry, super::preferences::Kind::Appearance)),
         SettingsPage::Legal => Box::new(super::legal::LegalIndex::new(entry)),
         SettingsPage::About => Box::new(super::legal::DocumentPage::about(entry)),
         SettingsPage::Document(i) => Box::new(super::legal::DocumentPage::legal(entry, i)),
@@ -457,6 +458,9 @@ fn mount_page(
         }
         SettingsPage::Favourites => Box::new(super::onboard::OnboardScreen::settings(entry, cx.views)),
         SettingsPage::Picker(kind) => Box::new(super::preferences::PickerPage::new(entry, kind)),
+        SettingsPage::Stremio => Box::new(super::stremio_settings::StremioPage::list(entry)),
+        SettingsPage::StremioRow(i) => Box::new(super::stremio_settings::StremioPage::row(entry, i)),
+        SettingsPage::StremioAddon(i) => Box::new(super::stremio_settings::StremioPage::addon(entry, i)),
     }
 }
 
@@ -949,8 +953,11 @@ struct ServerMachineId(String);
 #[derive(Clone, PartialEq, Eq, Debug)]
 enum RootId {
     Favourites,
+    /// Addons & Home (this fork's Stremio bridge).
+    Stremio,
     Playback,
     AudioSubtitles,
+    Appearance,
     Language,
     AutoSignIn,
     TrailerAutoplay,
@@ -977,6 +984,8 @@ impl FormId for RootId {
             RootId::Privacy => 7,
             RootId::Legal => 8,
             RootId::About => 9,
+            RootId::Appearance => 10,
+            RootId::Stremio => 11,
             // the base; `root_form` adds the position (`item_keyed`)
             RootId::Plaintext(_) => PLAINTEXT_KEY_BASE,
         })
@@ -1102,6 +1111,14 @@ fn root_form(inputs: &RootInputs) -> Form<RootId, Action, SettingsPage> {
                 .detail(plx_platform::i18n::msg::settings_libraries_detail())
                 .value(plx_platform::i18n::msg::settings_libraries_count(inputs.library_count))
                 .chevron(true),
+        )
+        .item(
+            RootId::Stremio,
+            RowKind::Nav(SettingsPage::Stremio),
+            Action::Door,
+            Row::new(plx_platform::i18n::msg::settings_stremio_title())
+                .detail(plx_platform::i18n::msg::settings_stremio_detail())
+                .chevron(true),
         );
     let playback = FormSection::new(plx_platform::i18n::msg::settings_playback_section())
         .item(
@@ -1119,6 +1136,16 @@ fn root_form(inputs: &RootInputs) -> Form<RootId, Action, SettingsPage> {
             Action::Door,
             Row::new(plx_platform::i18n::msg::settings_audio_title())
                 .detail(plx_platform::i18n::msg::settings_audio_detail())
+                .chevron(true),
+        );
+    // The look of the whole app, for everyone: its own section, ahead of the system switches.
+    let appearance = FormSection::new(plx_platform::i18n::msg::settings_appearance_section())
+        .item(
+            RootId::Appearance,
+            RowKind::Nav(SettingsPage::Appearance),
+            Action::Door,
+            Row::new(plx_platform::i18n::msg::settings_appearance_title())
+                .detail(plx_platform::i18n::msg::settings_appearance_detail())
                 .chevron(true),
         );
     let system = FormSection::new(plx_platform::i18n::msg::settings_system_section())
@@ -1194,6 +1221,7 @@ fn root_form(inputs: &RootInputs) -> Form<RootId, Action, SettingsPage> {
     Form::new()
         .section(libraries)
         .section(playback)
+        .section(appearance)
         .section(system)
         .section(plaintext)
         .section(privacy)

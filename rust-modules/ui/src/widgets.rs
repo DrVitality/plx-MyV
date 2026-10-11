@@ -3313,8 +3313,11 @@ impl AmbientWash {
     /// [`theme::SURFACE_APP`] is snapped to exact codes for the `GL_DITHER` reason in its own doc,
     /// so that is the unit this value is reasoned in.) Its own method because the corner springs are
     /// private.
+    ///
+    /// A ground that draws a gradient of its own (Ember, `theme::appearance::ground_pass`) is never
+    /// flat: the settled wash IS that gradient, and skipping it would leave the flat clear.
     pub fn is_flat(&self, c: [f32; 4], eps: f32) -> bool {
-        self.corners
+        !theme::appearance::ground_pass() && self.corners
             .iter()
             .all(|q| q.iter().zip(c).all(|(s, v)| (s.pos - v).abs() <= eps))
     }
@@ -3326,7 +3329,18 @@ impl AmbientWash {
     /// way to dissolve that cut rather than disguise it is to lay the ground's own colour over it
     /// at a falling alpha. A guessed constant cannot do that here — this ground is keyed to the
     /// host's artwork and is a different colour on every page.
+    ///
+    /// It includes the live ground's shift (`theme::appearance::wash_shift`, read at `(x, y)` as a
+    /// screen position), exactly as the painter adds it, so the fade lands on the colour drawn.
     pub fn sample(&self, r: Rect, x: f32, y: f32) -> [f32; 3] {
+        let c = self.sample_raw(r, x, y);
+        let full = Rect::FULL;
+        let d = theme::appearance::wash_shift(x / full.w, y / full.h);
+        std::array::from_fn(|i| (c[i] + d[i]).clamp(0.0, 1.0))
+    }
+    /// [`sample`](Self::sample) before the ground's shift — the corners a band of this wash hands
+    /// the painter, which adds the shift itself.
+    fn sample_raw(&self, r: Rect, x: f32, y: f32) -> [f32; 3] {
         let u = if r.w > 0.0 { ((x - r.x) / r.w).clamp(0.0, 1.0) } else { 0.0 };
         let v = if r.h > 0.0 { ((y - r.y) / r.h).clamp(0.0, 1.0) } else { 0.0 };
         let c = |i: usize, q: usize| self.corners[q][i].pos;
@@ -3381,7 +3395,7 @@ impl AmbientWash {
         };
         let corners = |b: Rect| {
             [(b.x, b.y), (b.x + b.w, b.y), (b.x + b.w, b.y + b.h), (b.x, b.y + b.h)]
-                .map(|(x, y)| self.sample(r, x, y))
+                .map(|(x, y)| self.sample_raw(r, x, y))
         };
         let knees = ramp.map_or([None, None], |q| [Some(q.stops[0].0), Some(q.stops[1].0)]);
         let ink = |b: Rect| {
@@ -3499,6 +3513,137 @@ pub fn art_wash_split(r: Rect, art: Rect) -> Option<(Rect, [Option<Rect>; 4])> {
             band(x1, y0, rx1, y1),
         ],
     ))
+}
+
+// ---- shelf_tray: the container a titled shelf of cards sits in. ----
+
+/// How far a shelf tray reaches past the cards it holds, px at 1080p, above the tiles' top edge
+/// and below their bottom (or their label block). A focused tile's pop grows past it on purpose —
+/// the card lifting OUT of its tray is the focus.
+pub const SHELF_TRAY_PAD: f32 = 14.0;
+
+/// **The tray one titled shelf of cards sits in** — a faint band behind the row, edge to edge, so
+/// each filter (Popular, Trending, a genre) reads as one container and two shelves are visibly
+/// apart. It runs the full width of the screen because the row does: the cards scroll off both
+/// edges, and a panel that stopped at the margins left them hanging past its end. A brighter
+/// hairline along its top, a fainter one along its foot, and a short accent mark on the top edge
+/// under the start of the heading tie the title above to the tray below.
+///
+/// The heading stays ABOVE it as the tray's title: a shelf's pitch keeps only a region gap between
+/// one row's cards and the next row's heading, and a tray that also wrapped the heading would have
+/// left no air between two trays.
+///
+/// `cards_top` is the top of the tiles (screen space, as the screen lays the row out), `cards_h`
+/// the tile height, `band` the label band the shelf reserves right now (`Shelf::under_band`) and
+/// `margin_x` the shelf's left margin (where the mark starts). Drawn BEFORE the row, under its
+/// cards.
+pub fn shelf_tray(p: Painter, margin_x: f32, cards_top: f32, cards_h: f32, band: f32) {
+    let collapsed = crate::card_row::LABEL_BAND_COLLAPSED;
+    let open = ((band - collapsed) / (crate::card_row::UNDER_LABEL_H - collapsed)).clamp(0.0, 1.0);
+    // collapsed: one pad of sheet under the posters; open: the whole label block plus a little
+    let foot = SHELF_TRAY_PAD + (crate::card_row::UNDER_LABEL_H + 4.0 - SHELF_TRAY_PAD) * open;
+    let top = cards_top - SHELF_TRAY_PAD;
+    // past both screen edges, so its side rims (and corners) are never on the panel
+    let bleed = 4.0;
+    let r = Rect::new(-bleed, top, crate::consts::SCR_W + 2.0 * bleed, cards_h + SHELF_TRAY_PAD + foot);
+    p.rect_rimmed(
+        r,
+        1.0,
+        theme::SHELF_TRAY_TOP,
+        theme::SHELF_TRAY_BOT,
+        theme::SHELF_TRAY_RIM,
+        theme::SHELF_TRAY_RIM_TOP,
+    );
+    let mark = Rect::new(
+        margin_x,
+        top - theme::SHELF_TRAY_MARK_H * 0.5,
+        theme::SHELF_TRAY_MARK_W,
+        theme::SHELF_TRAY_MARK_H,
+    );
+    p.rect(mark, theme::SHELF_TRAY_MARK_H * 0.5, theme::ACCENT, theme::ACCENT, 0.0);
+}
+
+/// **The search bar**: a capsule standing around a text field `rect`, a magnifier at its leading
+/// end, its rim and glyph lit toward the accent by `hot` (0 at rest, 1 while the field is focused
+/// or being typed into). Answers the rect the field's text belongs in, inside the capsule and
+/// clear of the glyph.
+pub fn search_bar(p: Painter, rect: Rect, hot: f32) -> Rect {
+    let hot = hot.clamp(0.0, 1.0);
+    p.rounded().rect_rimmed(
+        rect,
+        rect.h * 0.5,
+        theme::SEARCH_BAR_TOP,
+        theme::SEARCH_BAR_BOT,
+        theme::cross(theme::SEARCH_BAR_RIM, theme::ACCENT, hot),
+        theme::SEARCH_BAR_RIM_TOP,
+    );
+    let lead = rect.h * 0.5;
+    let icon = Rect::new(
+        rect.x + lead - theme::SEARCH_BAR_ICON * 0.25,
+        rect.cy() - theme::SEARCH_BAR_ICON * 0.5,
+        theme::SEARCH_BAR_ICON,
+        theme::SEARCH_BAR_ICON,
+    );
+    crate::icons::draw(p, crate::icons::Icon::Search, icon,
+        theme::cross(theme::TEXT_TERTIARY, theme::ACCENT, hot));
+    let x = icon.x + icon.w + theme::SEARCH_BAR_PAD;
+    Rect::new(x, rect.y, (rect.x + rect.w - lead - x).max(0.0), rect.h)
+}
+
+/// **A soft panel**: the quiet rounded ground a block of controls stands on, so it reads as one
+/// group on a busy page (the Search page's browse filters).
+pub fn soft_panel(p: Painter, rect: Rect) {
+    p.rect_rimmed(
+        rect,
+        theme::SOFT_PANEL_RAD,
+        theme::SOFT_PANEL_TOP,
+        theme::SOFT_PANEL_BOT,
+        theme::SOFT_PANEL_RIM,
+        theme::SHELF_TRAY_RIM_TOP,
+    );
+}
+
+/// **A dropdown's panel**: the dark rounded sheet an open dropdown's options stand on, with a
+/// soft shadow under it so it reads as lifted over the page.
+pub fn dropdown_panel(p: Painter, rect: Rect) {
+    let lift = theme::DROPDOWN_RAD * 0.5;
+    p.rect(
+        Rect::new(rect.x - lift * 0.5, rect.y + lift * 0.5, rect.w + lift, rect.h + lift),
+        theme::DROPDOWN_RAD + lift,
+        theme::DROPDOWN_SHADOW,
+        theme::with_a(theme::DROPDOWN_SHADOW, 0.0),
+        0.0,
+    );
+    p.rect_rimmed(
+        rect,
+        theme::DROPDOWN_RAD,
+        theme::DROPDOWN_TOP,
+        theme::DROPDOWN_BOT,
+        theme::DROPDOWN_RIM,
+        theme::PEEK_RIM_TOP,
+    );
+}
+
+/// **One option of an open dropdown** in its `cell`: the focused option lit in the accent, the
+/// chosen one bold with a check at its trailing end.
+pub fn dropdown_option(p: Painter, cell: Rect, label: &CStr, size: c_int, focused: bool, chosen: bool) {
+    let inset = 4.0;
+    let pill = Rect::new(cell.x + inset, cell.y + inset, cell.w - 2.0 * inset, cell.h - 2.0 * inset);
+    if focused {
+        p.rounded().rect(pill, pill.h * 0.5, theme::ACCENT, theme::ACCENT, 0.0);
+    }
+    let ink = if focused { theme::ACCENT_INK } else if chosen { theme::TEXT_PRIMARY } else { theme::TEXT_SECONDARY };
+    let check = size as f32;
+    let mut text = Label::new(label.as_ptr(), size, ink).v(VAlign::Middle);
+    if chosen {
+        text = text.bold();
+    }
+    text.draw(p, Rect::new(pill.x + theme::DROPDOWN_TEXT_X, pill.y,
+        (pill.w - 2.0 * theme::DROPDOWN_TEXT_X - check).max(0.0), pill.h));
+    if chosen {
+        let icon = Rect::new(pill.x + pill.w - theme::DROPDOWN_TEXT_X - check, pill.cy() - check * 0.5, check, check);
+        crate::icons::draw(p, crate::icons::Icon::Check, icon, if focused { theme::ACCENT_INK } else { theme::ACCENT });
+    }
 }
 
 // ---- PageGround: the item-keyed ground a BROWSING screen stands on. ----
@@ -4349,7 +4494,7 @@ impl View for StatusOverlay<'_> {
 }
 
 // ---- TransportButton: circular control button with a runtime-rasterized SVG glyph
-// (0 = subtitles/CC, 1 = audio, 2 = more/overflow). The player supplies Unkeyed, so focused is a
+// (0 = subtitles/CC, 1 = streams, 2 = audio, 3 = more/overflow). The player supplies Unkeyed, so focused is a
 // flat accent + dark icon and idle is a light film + white icon. ----
 pub struct TransportButton {
     pub frame: Rect,
@@ -4430,8 +4575,9 @@ impl View for TransportButton {
             self.ground,
         );
         let id = match self.which {
-            1 => Icon::Audio,
-            2 => Icon::More,
+            1 => Icon::Collection, // the streams: a stack of sources
+            2 => Icon::Audio,
+            3 => Icon::More,
             _ => Icon::Cc,
         };
         let s = (r.w * DISC_ICON_RATIO).round();
@@ -6932,14 +7078,16 @@ impl ControlPalette {
         let keyed = |l: f32, scale: f32, alpha: f32| {
             oklab_to_srgb([l, ha * chroma * scale, hb * chroma * scale], alpha)
         };
-        let focus_top = keyed(
-            theme::CONTROL_FOCUS_FACE_L,
-            theme::CONTROL_FOCUS_AMBIENT_C,
-            1.0,
-        );
-        let focus_body = keyed(
-            theme::CONTROL_FOCUS_FACE_L - theme::CONTROL_FOCUS_BODY_STEP,
-            theme::CONTROL_FOCUS_AMBIENT_C,
+        // The FOCUSED face is the brand accent on every page, whatever the artwork's hue: the
+        // ground keys the idle face (below), and focus is the one place the crimson lives. The
+        // body is the same hue one OKLCH lightness step below the lit top, so the face still
+        // reads as material catching light rather than a flat chip.
+        // the LIVE accent (Settings › Appearance), since the body is computed from it and a
+        // computed shade cannot be matched at the paint door
+        let accent = srgb_to_oklab(theme::appearance::accent());
+        let focus_top = theme::appearance::accent();
+        let focus_body = oklab_to_srgb(
+            [accent[0] - theme::CONTROL_FOCUS_BODY_STEP, accent[1], accent[2]],
             1.0,
         );
         let idle = keyed(

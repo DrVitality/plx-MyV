@@ -338,11 +338,14 @@ pub struct AVSubtitleRect {
 // None branch on Darwin instead of by failing to link.
 plx_base::dynlib! {
     avformat: [
-        // The ELF the app SHIPS, and the Mach-O the desktop simulator builds beside it
-        // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list). A candidate
-        // LIST rather than a `cfg`: `dynlib!` already tries each name and reports the ones
-        // it could not open, and only one of these two can ever exist in an app directory.
+        // The ELF the app SHIPS, then the two desktop-simulator builds beside it
+        // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list): the Linux ELF
+        // staged as `-plx-host` (`ci/stage-host-ffmpeg.sh`) and the Mach-O. A candidate LIST
+        // rather than a `cfg`: `dynlib!` already tries each name and reports the ones it could
+        // not open; an ARM copy left in a Linux simulator's pkg/ simply fails to open and the
+        // next name is tried.
         "libavformat-plx.so.63",
+        "libavformat-plx-host.so.63",
         "libavformat-plx.63.dylib",
     ] {
     // Declared beside libavformat's other entry points because that is the library that DEFINES
@@ -395,11 +398,14 @@ plx_base::dynlib! {
 }}
 plx_base::dynlib! {
     avcodec: [
-        // The ELF the app SHIPS, and the Mach-O the desktop simulator builds beside it
-        // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list). A candidate
-        // LIST rather than a `cfg`: `dynlib!` already tries each name and reports the ones
-        // it could not open, and only one of these two can ever exist in an app directory.
+        // The ELF the app SHIPS, then the two desktop-simulator builds beside it
+        // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list): the Linux ELF
+        // staged as `-plx-host` (`ci/stage-host-ffmpeg.sh`) and the Mach-O. A candidate LIST
+        // rather than a `cfg`: `dynlib!` already tries each name and reports the ones it could
+        // not open; an ARM copy left in a Linux simulator's pkg/ simply fails to open and the
+        // next name is tried.
         "libavcodec-plx.so.63",
+        "libavcodec-plx-host.so.63",
         "libavcodec-plx.63.dylib",
     ] {
     fn avcodec_version() -> c_uint;
@@ -441,11 +447,14 @@ plx_base::dynlib! {
     // loader resolves by symbol, not by header, so it must move to the library that defines it or
     // the whole avutil table reports Incomplete on every device.
     avutil: [
-        // The ELF the app SHIPS, and the Mach-O the desktop simulator builds beside it
-        // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list). A candidate
-        // LIST rather than a `cfg`: `dynlib!` already tries each name and reports the ones
-        // it could not open, and only one of these two can ever exist in an app directory.
+        // The ELF the app SHIPS, then the two desktop-simulator builds beside it
+        // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list): the Linux ELF
+        // staged as `-plx-host` (`ci/stage-host-ffmpeg.sh`) and the Mach-O. A candidate LIST
+        // rather than a `cfg`: `dynlib!` already tries each name and reports the ones it could
+        // not open; an ARM copy left in a Linux simulator's pkg/ simply fails to open and the
+        // next name is tried.
         "libavutil-plx.so.61",
+        "libavutil-plx-host.so.61",
         "libavutil-plx.61.dylib",
     ] {
     fn avutil_version() -> c_uint;
@@ -470,11 +479,14 @@ plx_base::dynlib! {
 }}
 plx_base::dynlib! {
     swscale: [
-        // The ELF the app SHIPS, and the Mach-O the desktop simulator builds beside it
-        // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list). A candidate
-        // LIST rather than a `cfg`: `dynlib!` already tries each name and reports the ones
-        // it could not open, and only one of these two can ever exist in an app directory.
+        // The ELF the app SHIPS, then the two desktop-simulator builds beside it
+        // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list): the Linux ELF
+        // staged as `-plx-host` (`ci/stage-host-ffmpeg.sh`) and the Mach-O. A candidate LIST
+        // rather than a `cfg`: `dynlib!` already tries each name and reports the ones it could
+        // not open; an ARM copy left in a Linux simulator's pkg/ simply fails to open and the
+        // next name is tried.
         "libswscale-plx.so.10",
+        "libswscale-plx-host.so.10",
         "libswscale-plx.10.dylib",
     ] {
     fn sws_getContext(

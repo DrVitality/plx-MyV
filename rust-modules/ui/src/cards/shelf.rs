@@ -46,12 +46,14 @@ pub struct Shelf {
     slept: bool,
     /// The element-keyed pop pool (`pool.rs`).
     pool: RowPool,
+    /// The focused card's details bubble (`peek.rs`).
+    peek: super::peek::PeekState,
 }
 
 impl Shelf {
     pub const fn new(entry: EntryId, style: &'static RowStyle) -> Self {
         Self { entry, style, row: CardRow::new(), seen: Seen::Nothing, landed: None, left: false, asked: None, asked_before: None,
-            margin: 0.0, dormant: false, slept: false, pool: RowPool::new() }
+            margin: 0.0, dormant: false, slept: false, pool: RowPool::new(), peek: super::peek::PeekState::new() }
     }
 
     /// Cards this far past the screen's leading (left) edge still paint (a popped card's shadow
@@ -135,6 +137,7 @@ impl Shelf {
     fn tick<H: Host, S: CardSource<H>>(&mut self, dt: f32, cx: &Cx<'_, H>, src: &S) {
         let focus = super::focused_index(&cx.focus, self.entry, src)
             .filter(|_| !self.dormant);
+        self.peek.tick(focus.filter(|&i| src.peek(i).is_some()), dt);
         self.landed = None;
         if self.dormant {
             // nothing is lifted under the fade, and whatever was lets go like an unfocused shelf's
@@ -383,6 +386,14 @@ impl Shelf {
         if let Some(i) = focus.filter(|&i| i < src.len()) {
             let s = super::press_scale(self.pop(src, i, focus), i, pressed, f.cx);
             self.draw_card(f, pr, src, i, at, s, true);
+            let alpha = self.peek.alpha();
+            if alpha > 0.0 && src.loaded(i) {
+                if let Some(peek) = src.peek(i) {
+                    let card = card_row::tile_rect(i, self.style.margin_x, self.pitch(), 0.0, at.y - pr.dy(),
+                        (self.style.w, self.style.h)).scaled(s);
+                    super::peek::draw(pr, card, &peek, alpha, f.measure);
+                }
+            }
         }
     }
 

@@ -98,6 +98,8 @@ pub struct Grid {
     reveal: Option<f32>,
     ahead: usize,
     asked: Option<(usize, usize)>,
+    /// The focused card's details bubble (`peek.rs`).
+    peek: super::peek::PeekState,
 }
 
 impl Grid {
@@ -116,6 +118,7 @@ impl Grid {
             reveal: None,
             ahead: spec.cols * 2,
             asked: None,
+            peek: super::peek::PeekState::new(),
         }
     }
 
@@ -165,6 +168,7 @@ impl Grid {
 
     fn tick<H: Host, S: CardSource<H>>(&mut self, dt: f32, cx: &Cx<'_, H>, src: &S, fx: &mut Effects<'_, H>) {
         let focus = super::focused_index(&cx.focus, self.entry, src);
+        self.peek.tick(focus.filter(|&i| src.peek(i).is_some()), dt);
         self.landed = None;
         self.shift = 0.0;
         self.shrink.follow(&mut self.pop, src);
@@ -371,7 +375,15 @@ impl Grid {
             self.draw_card(f, p, src, i, super::press_scale(self.pop(src, i, focus), i, pressed, f.cx), false, &bands);
         }
         if let Some(i) = focus.filter(|&i| i < src.len()) {
-            self.draw_card(f, p, src, i, super::press_scale(self.pop(src, i, focus), i, pressed, f.cx), true, &bands);
+            let s = super::press_scale(self.pop(src, i, focus), i, pressed, f.cx);
+            self.draw_card(f, p, src, i, s, true, &bands);
+            let alpha = self.peek.alpha();
+            if alpha > 0.0 && src.loaded(i) {
+                if let Some(peek) = src.peek(i) {
+                    let card = super::to_local(p, self.cell(i, &bands)).scaled(s);
+                    super::peek::draw(p, card, &peek, alpha, f.measure);
+                }
+            }
         }
         self.record_stops(f, p, src);
     }

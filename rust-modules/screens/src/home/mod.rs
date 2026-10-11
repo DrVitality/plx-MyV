@@ -90,6 +90,9 @@ pub const STRIP_MOVIES_ELEM: u32 = plx_ui::dispatch::STRIP_BASE + 1;
 pub const STRIP_SHOWS_ELEM: u32 = plx_ui::dispatch::STRIP_BASE + 2;
 pub const STRIP_SEARCH_ELEM: u32 = plx_ui::dispatch::STRIP_BASE + 3;
 pub const STRIP_ACCOUNT_ELEM: u32 = plx_ui::dispatch::STRIP_BASE + 4;
+/// The Anime pill. A key past the account chip's, so no existing key moved when it was added; the
+/// strip DRAWS it after TV Shows (`app::chrome`).
+pub const STRIP_ANIME_ELEM: u32 = plx_ui::dispatch::STRIP_BASE + 5;
 
 const MAX_ITEMS: usize = plx_data::pms::MAX_SHELF_ITEMS;
 const HERO_FLIP_CD: f32 = 0.35;
@@ -1101,7 +1104,15 @@ impl HomeScreen {
                 .current
                 .is_none_or(|key| key.elem >= plx_ui::dispatch::STRIP_BASE)
         {
-            self.reseat(FocusTarget::ContainerGroup(HERO_GROUP), cx, fx);
+            // Appearance › Home opens on: Continue Watching seats its first card instead of the hero
+            let deck = start_on_continue()
+                .then(|| self.rows.iter().position(|r| r.identity == HomeHubIdentity::ContinueWatching))
+                .flatten()
+                .and_then(|row| self.dev_focus_key(row, 0, cx));
+            match deck {
+                Some(key) => self.reseat(FocusTarget::Elem(key), cx, fx),
+                None => self.reseat(FocusTarget::ContainerGroup(HERO_GROUP), cx, fx),
+            }
         }
         self.cta_available = cta_available;
         if self.rows.is_empty() {
@@ -1279,6 +1290,7 @@ impl HomeScreen {
             STRIP_MOVIES_ELEM => HomeReq::Tab(HomeTab::Movies),
             STRIP_SHOWS_ELEM => HomeReq::Tab(HomeTab::Shows),
             STRIP_SEARCH_ELEM => HomeReq::Tab(HomeTab::Search),
+            STRIP_ANIME_ELEM => HomeReq::Tab(HomeTab::Anime),
             STRIP_ACCOUNT_ELEM => HomeReq::Account,
             _ => return None,
         })
@@ -1339,6 +1351,7 @@ impl HomeScreen {
                     HomeTab::Movies => STRIP_MOVIES_ELEM,
                     HomeTab::Shows => STRIP_SHOWS_ELEM,
                     HomeTab::Search => STRIP_SEARCH_ELEM,
+                    HomeTab::Anime => STRIP_ANIME_ELEM,
                 };
                 self.strip_chosen = true;
                 self.reseat(
@@ -1455,12 +1468,7 @@ impl HomeScreen {
                 let Some(item) = self.item_at(view, row, col) else {
                     return;
                 };
-                if self
-                    .rows
-                    .get(row)
-                    .is_some_and(|h| h.identity == HomeHubIdentity::ContinueWatching)
-                    && plx_media::route::deck_press().press_plays()
-                {
+                if crate::registry::card_press_plays(item.kind) {
                     let resume_ns =
                         plx_data::metadata::resume_ns(item.resume_ms, item.dur_ns / 1_000_000);
                     (
@@ -1659,6 +1667,16 @@ impl HomeScreen {
                 continue;
             }
             let row_y = self.grid.base_y(row);
+            if env.sp > 0.02 {
+                // the shelf's container, under its heading's line and its cards
+                plx_ui::widgets::shelf_tray(
+                    p.alpha(env.sp),
+                    MARGIN_X,
+                    row_y + CARD_DY,
+                    CARD_H,
+                    self.grid.under_band(row),
+                );
+            }
             if let Some(linked) = self.heading_widget(view, row).filter(|_| env.sp > 0.02) {
                 let m = linked.measure(f.measure);
                 let focus_t = f32::from(heading == Some(row) && env.sp > 0.5);
@@ -1879,6 +1897,18 @@ impl HomeScreen {
             elem: *self.rows.get(row)?.elems.get(col)?,
         })
     }
+}
+
+/// Settings › Appearance › Home opens on, as the app last applied it: whether Home's first seat is
+/// its Continue Watching row rather than the hero.
+static START_ON_CONTINUE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_start_on_continue(on: bool) {
+    START_ON_CONTINUE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn start_on_continue() -> bool {
+    START_ON_CONTINUE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 impl LogicalState for HomeScreen {
@@ -2976,11 +3006,11 @@ mod placeholder_tests;
 #[cfg(test)]
 pub(crate) mod cards_harness; // Tier 2 card conformance (cards_conformance_tests.rs)
 
-/// A focused tile's title line. The deck's carries the amber ▶ only while OK on a Continue
-/// Watching card plays (`DeckPress::Play`): the triangle promises the press, so when OK opens the
+/// A focused tile's title line. It carries the amber ▶ only while OK on the card plays
+/// ([`crate::registry::card_press_plays`]): the triangle promises the press, so when OK opens the
 /// page there is none (`widgets::still_line`'s rule).
-fn deck_label(is_deck: bool, title: &str) -> ui_cards::TileLabel {
-    if is_deck && plx_media::route::deck_press().press_plays() {
+fn press_label(kind: std::os::raw::c_int, title: &str) -> ui_cards::TileLabel {
+    if crate::registry::card_press_plays(kind) {
         ui_cards::TileLabel::played(title)
     } else {
         ui_cards::TileLabel::title(title)
@@ -3006,6 +3036,9 @@ impl<'a> HomeCards<'a> {
 }
 
 impl<H: HomeLike> CardSource<H> for HomeCards<'_> {
+    fn peek(&self, i: usize) -> Option<ui_cards::Peek> {
+        self.item(i).and_then(super::registry::card_peek)
+    }
     fn more(&self) -> bool {
         self.paging && self.home.hub(self.view, self.row).is_some_and(|hub| hub.more)
     }
@@ -3037,7 +3070,7 @@ impl<H: HomeLike> CardSource<H> for HomeCards<'_> {
     fn label(&self, i: usize) -> ui_cards::TileLabel {
         let Some(item) = self.item(i) else { return ui_cards::TileLabel::default() };
         let continue_watching = self.home.rows[self.row].identity == HomeHubIdentity::ContinueWatching;
-        let mut label = deck_label(continue_watching, &item.title);
+        let mut label = press_label(item.kind, &item.title);
         label.caption = ui_cards::focused_caption(&tile_facts::of(item), continue_watching);
         label
     }

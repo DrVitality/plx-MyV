@@ -483,6 +483,7 @@ unsafe fn sf_load(payload: *const c_char, epoch: u32) -> c_int {
     if !payload.is_null() {
         let payload = std::ffi::CStr::from_ptr(payload).to_string_lossy();
         crate::player::sim_video::load(&payload, Clock::position_ns);
+        crate::player::sim_audio::load(&payload, Clock::position_ns);
     }
     ACTIVE_EPOCH.store(epoch, Relaxed);
     CALLBACK_INTERCEPTS.store(0, Relaxed);
@@ -621,6 +622,7 @@ unsafe fn sf_flush() -> c_int {
     }
     Clock::rewind();
     crate::player::sim_video::flush();
+    crate::player::sim_audio::reset();
     1
 }
 unsafe fn sf_push_eos() -> c_int {
@@ -665,6 +667,8 @@ unsafe fn sf_feed(p: *const u8, size: c_uint, pts: i64, es_data: c_int) -> c_cha
         if !p.is_null() && size > 0 {
             crate::player::sim_video::feed(std::slice::from_raw_parts(p, size as usize), pts);
         }
+    } else if !p.is_null() && size > 0 {
+        crate::player::sim_audio::feed(std::slice::from_raw_parts(p, size as usize), pts);
     }
     FEED_OK
 }
@@ -681,6 +685,7 @@ unsafe fn sf_unload() {
     LOADED.store(false, Relaxed);
     Clock::rewind();
     crate::player::sim_video::stop();
+    crate::player::sim_audio::reset();
 }
 unsafe fn sf_callback_gate_retire() -> c_int {
     #[cfg(any(test, feature = "test-support"))]
@@ -712,6 +717,7 @@ unsafe fn sf_destroy() -> c_int {
     LOADED.store(false, Relaxed);
     Clock::rewind();
     crate::player::sim_video::stop();
+    crate::player::sim_audio::reset();
     1
 }
 unsafe fn sf_quarantine() {
@@ -723,6 +729,7 @@ unsafe fn sf_quarantine() {
     LOADED.store(false, Relaxed);
     Clock::rewind();
     crate::player::sim_video::stop();
+    crate::player::sim_audio::reset();
 }
 
 /// `VP_NONE` — "video cannot be displayed, but the app still runs", which is precisely the

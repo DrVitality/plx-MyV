@@ -76,11 +76,23 @@ impl CredentialPolicy {
         }
     }
 
-    /// May a credential ride `origin` under this policy? TLS always; plaintext only under
-    /// [`CredentialPolicy::AllowPlaintext`].
+    /// May a credential ride `origin` under this policy? TLS always; the STREMIO BRIDGE's own
+    /// loopback origin always (in this fork it is the one server, and a request to it never leaves
+    /// the device, so there is no wire for the key to be read from); other plaintext only under
+    /// [`CredentialPolicy::AllowPlaintext`]. The exemption names the bridge's exact port rather
+    /// than all of loopback: every other plaintext origin, including a test's loopback stand-in for
+    /// a LAN server, is graded exactly as before.
     pub fn may_carry_credential(self, origin: &Origin) -> bool {
-        origin.is_tls() || self == CredentialPolicy::AllowPlaintext
+        origin.is_tls() || is_stremio_bridge(origin) || self == CredentialPolicy::AllowPlaintext
     }
+}
+
+/// Is `origin` the Stremio bridge: plaintext to this device's loopback interface, on
+/// [`STREMIO_BRIDGE_PORT`](super::account::STREMIO_BRIDGE_PORT)?
+pub fn is_stremio_bridge(origin: &Origin) -> bool {
+    !origin.is_tls()
+        && origin.port() == i32::from(super::account::STREMIO_BRIDGE_PORT)
+        && matches!(origin.host(), "127.0.0.1" | "::1" | "localhost")
 }
 
 #[cfg(test)]
@@ -95,5 +107,23 @@ mod tests {
         assert_eq!(CredentialPolicy::of_build(true, true), CredentialPolicy::HttpsOnly);
         assert_eq!(CredentialPolicy::of_build(false, false), CredentialPolicy::HttpsOnly);
         assert_eq!(CredentialPolicy::of_build(false, true), CredentialPolicy::HttpsOnly);
+    }
+
+    /// The Stremio bridge's loopback origin carries the account key even in a store build; any
+    /// other plaintext origin, loopback on another port included, still does not.
+    #[test]
+    fn a_store_build_admits_a_credential_to_the_stremio_bridge_only() {
+        let store = CredentialPolicy::HttpsOnly;
+        let bridge = Origin::http("127.0.0.1", 32498);
+        assert!(is_stremio_bridge(&bridge));
+        assert!(store.may_carry_credential(&bridge));
+        for other in [
+            Origin::http("127.0.0.1", 32400),
+            Origin::http("192.168.1.10", 32498),
+            Origin::http("127.0.0.2", 32498),
+        ] {
+            assert!(!is_stremio_bridge(&other), "{} is not the bridge", other.base());
+            assert!(!store.may_carry_credential(&other), "{} must stay refused", other.base());
+        }
     }
 }

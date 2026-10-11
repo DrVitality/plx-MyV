@@ -357,6 +357,11 @@ pub(crate) struct Bridge {
     /// …and what the item context menu asked, drained by `content::content_requests` — which holds
     /// the route, the trail and the playback session's `&mut` that its dispatch needs.
     item_menu_reqs: Vec<plx_screens::registry::ItemMenuReq>,
+    /// The stream picker between a press and its answer (`input::stream_pick_tick`).
+    pub(crate) stream_pick: Option<super::input::StreamPickAwait>,
+    /// A stream switch asked from the player's More menu, until the bridge has recorded it
+    /// (`input::player_stream_tick`): then the item is resolved again at the same position.
+    pub(crate) player_stream: Option<std::sync::mpsc::Receiver<bool>>,
     #[cfg(test)]
     keyboard_calls: Vec<bool>,
     #[cfg(test)]
@@ -562,6 +567,8 @@ impl Bridge {
             search_reqs: Vec::new(),
             player_reqs: Vec::new(),
             item_menu_reqs: Vec::new(),
+            stream_pick: None,
+            player_stream: None,
             #[cfg(test)]
             keyboard_calls: Vec::new(),
             #[cfg(test)]
@@ -645,6 +652,7 @@ impl Bridge {
         match tab {
             HomeTab::Movies => self.directory.view().preferred(plx_data::browse::SecKind::Movie).is_some(),
             HomeTab::Shows => self.directory.view().preferred(plx_data::browse::SecKind::Show).is_some(),
+            HomeTab::Anime => self.directory.view().preferred(plx_data::browse::SecKind::Anime).is_some(),
             _ => true,
         }
     }
@@ -952,6 +960,23 @@ impl Bridge {
     /// presents it. It used to CALL the three `ui::item_menu::open*` entry points and answer with
     /// a `MenuHost` for the loop to put on `app.route`; the surface's argument carries all of it
     /// now, including the two bits that variant existed to say.
+    /// The catalog row a content page's focused card stands for (Person, Collection, Detail's
+    /// Related and collection shelves), for [`ContentReq::PlayCard`](plx_screens::registry::ContentReq::PlayCard).
+    pub(crate) fn content_focused_item(&self, d: &Dispatcher<AppHost>, entry: EntryId, ret: &ReturnState<u32, PageMemory>)
+        -> Option<plx_data::pms::PmsMovie> {
+        let e = d.nav.entry(entry)?;
+        if !matches!(e.arg, AppArg::Content(_)) { return None; }
+        let real = &e.inst.as_ref()?.screen;
+        let mut parts = CxParts { tick: Tick { ms: 0, dt_us: 0 },
+            press: plx_machine::machine::PressRead { scale: 1.0, is_long: false, held_ms: None, owner: None },
+            focus: plx_machine::machine::FocusRead { current: None , ..Default::default() },
+            owner: plx_machine::machine::InputOwner::Entry(entry) };
+        parts.focus.current = ret.focus;
+        let cx = parts.cx::<AppHost>(self.views(), &self.measure);
+        let card = real.focused_card(&cx, ret.focus, Some(At::Drawn))?;
+        card.item.downcast_ref::<plx_data::pms::PmsMovie>().cloned()
+    }
+
     pub(crate) fn content_menu_arg(&self, d: &Dispatcher<AppHost>, entry: EntryId, ret: &ReturnState<u32, PageMemory>)
         -> Option<plx_screens::registry::ItemMenuArg> {
         let e = d.nav.entry(entry)?;
@@ -2679,6 +2704,7 @@ pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut 
         plx_media::route::restore_next_episode_mode(saved.next_episode_mode());
         plx_media::route::restore_skip_interval(saved.skip_interval());
         plx_media::route::restore_deck_press(saved.deck_press());
+        super::boot::apply_appearance(saved.appearance());
         plx_media::player::restore_subtitle_tone(saved.subtitle_tone());
         plx_media::player::restore_audio_enhancements(saved.audio_enhancements());
         let endpoints = super::boot::install_pms_owned(bridge, &c.origin,
@@ -2857,13 +2883,18 @@ pub(crate) fn nav_tab(
                     Pill::Search => HomeTab::Search,
                     Pill::Section(plx_data::browse::SecKind::Movie) => HomeTab::Movies,
                     Pill::Section(plx_data::browse::SecKind::Show) => HomeTab::Shows,
+                    Pill::Section(plx_data::browse::SecKind::Anime) => HomeTab::Anime,
                 };
                 rig.home_command(HomeCmd::FocusStrip(want));
             }
             AppArg::Home
         }
-        HomeTab::Movies | HomeTab::Shows => {
-            let kind = if tab == HomeTab::Movies { plx_data::browse::SecKind::Movie } else { plx_data::browse::SecKind::Show };
+        HomeTab::Movies | HomeTab::Shows | HomeTab::Anime => {
+            let kind = match tab {
+                HomeTab::Movies => plx_data::browse::SecKind::Movie,
+                HomeTab::Anime => plx_data::browse::SecKind::Anime,
+                _ => plx_data::browse::SecKind::Show,
+            };
             rig.enter_library(kind);
             if d.top_arg() != Some(&AppArg::Library) { rig.aim_library(kind); }
             AppArg::Library

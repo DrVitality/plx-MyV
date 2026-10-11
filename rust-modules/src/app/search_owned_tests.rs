@@ -7,6 +7,16 @@ use plx_ui::screen::{Focusable, ScreenArg};
 use super::test_support::*;
 use super::test_support::frame;
 
+/// The text the store's query carries: Search adds its browse filters after it (`::f|…`,
+/// `screens::search::filters`), which no assertion here is about.
+fn typed_query(rig: &Bridge) -> &str {
+    text_of(rig.stores.search.query())
+}
+
+fn text_of(q: &str) -> &str {
+    q.find("::f").map_or(q, |i| &q[..i])
+}
+
 fn owned_search_probe(d: &Dispatcher<AppHost>) -> String {
     let screen = d.top_screen().expect("Search mounted");
     assert!(screen.as_any().unwrap().is::<plx_screens::search::SearchScreen>());
@@ -405,10 +415,10 @@ fn owned_search_adopts_panel_text_without_restarting_or_losing_the_commit() {
     assert_ne!(d.focus(), field);
     frame(&mut d, &mut rig, AppArg::Search, tick(2),
         crate::app::events::text_inputs("stray", false, tick(2), Source::Sdl));
-    assert_eq!(rig.stores.search.query(), "ab", "closed desktop fields reject stray text");
+    assert_eq!(typed_query(&rig), "ab", "closed desktop fields reject stray text");
     frame(&mut d, &mut rig, AppArg::Search, tick(3),
         crate::app::events::text_inputs("X", true, tick(3), Source::Sdl));
-    assert_eq!(rig.stores.search.query(), "abX");
+    assert_eq!(typed_query(&rig), "abX");
     assert!(owned_search_probe(&d).contains("editing=true"));
     assert_eq!(rig.keyboard_adoptions, 1);
     assert_eq!(d.focus(), field, "adoption returns focus from results to the editing field");
@@ -416,7 +426,7 @@ fn owned_search_adopts_panel_text_without_restarting_or_losing_the_commit() {
     let mut events = script_key(Key::Left, tick(4));
     events.extend(crate::app::events::text_inputs("Y", true, tick(4), Source::Sdl));
     frame(&mut d, &mut rig, AppArg::Search, tick(4), events);
-    assert_eq!(rig.stores.search.query(), "abYX", "an already-editing field keeps its chosen caret");
+    assert_eq!(typed_query(&rig), "abYX", "an already-editing field keeps its chosen caret");
     assert_eq!(rig.keyboard_adoptions, 2);
     assert!(rig.keyboard_calls.is_empty());
 }
@@ -437,12 +447,12 @@ fn owned_search_opens_edits_and_closes_in_one_input_batch_in_order() {
     events.extend(script_key(Key::Left, tick(1)));
     events.push(text("b", tick(1)));
     frame(&mut d, &mut rig, AppArg::Search, tick(1), events);
-    assert_eq!(rig.stores.search.query(), "ba");
+    assert_eq!(typed_query(&rig), "ba");
     assert_eq!(rig.keyboard_calls, [true]);
     let mut events = script_key(Key::Back, tick(2));
     events.push(text("x", tick(2)));
     frame(&mut d, &mut rig, AppArg::Search, tick(2), events);
-    assert_eq!(rig.stores.search.query(), "ba", "desktop text after dismissal is not a new edit");
+    assert_eq!(typed_query(&rig), "ba", "desktop text after dismissal is not a new edit");
     assert_eq!(rig.keyboard_calls, [true, false]);
 }
 
@@ -506,9 +516,19 @@ fn owned_search_unrelated_store_notice_cannot_ack_a_net_zero_edit_batch() {
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
+    // The page opens on its browse query (`screens::search::filters`), which the store ASKS for:
+    // with no server registered it publishes Searching and then, one pump later, Failed — two
+    // Search notices of its own. Let both land first, so the only Search notice below is the one
+    // the edits owe.
+    for _ in 0..3 {
+        frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
+    }
     let target = MachineId::Instance(d.nav.top_page().unwrap().inst.as_ref().unwrap().id);
+    // A SPACE, not a letter: the store keys its fetch on the trimmed query, so a space typed and
+    // erased never restarts it, and no Searching→Failed flip of the empty roster lands a Search
+    // notice in the same frame as the unrelated one under test.
     for kind in [InputKind::SystemKeyboard(true),
-        InputKind::Text(plx_machine::machine::TextEdit::Commit("a".into())),
+        InputKind::Text(plx_machine::machine::TextEdit::Commit(" ".into())),
         InputKind::Text(plx_machine::machine::TextEdit::Backspace)] {
         d.emit(MachineId::Input, Fx::Deliver(target, Delivery::Screen(ScreenEvent::Input(InputEvent {
             at: tick(1), source: Source::Script, kind,
@@ -517,7 +537,7 @@ fn owned_search_unrelated_store_notice_cannot_ack_a_net_zero_edit_batch() {
     d.emit(MachineId::Store(StoreId::Browse.ord()), Fx::Deliver(target,
         Delivery::Screen(ScreenEvent::StoreChanged(StoreId::Browse.ord(), 100))));
     frame(&mut d, &mut rig, AppArg::Search, tick(1), vec![]);
-    assert_eq!(rig.stores.search.query(), "");
+    assert_eq!(typed_query(&rig), "");
     assert!(owned_search_probe(&d).contains("pending=true"),
         "matching frozen text is not an acknowledgement from another store");
     frame(&mut d, &mut rig, AppArg::Search, tick(2), vec![]);
@@ -540,12 +560,12 @@ fn owned_search_keeps_several_commits_while_the_frame_view_is_frozen() {
         at: tick(1), source: Source::Script, kind: InputKind::Text(plx_machine::machine::TextEdit::Commit(text.into())),
     }));
     frame(&mut d, &mut rig, AppArg::Search, tick(1), input);
-    assert_eq!(rig.stores.search.query(), "summer ", "the real store received every committed edit");
+    assert_eq!(typed_query(&rig), "summer ", "the real store received every committed edit");
     assert_eq!(retained.view().query(), "");
-    assert_eq!(rig.search.view().query(), "", "this frame still has its original immutable view");
+    assert_eq!(text_of(rig.search.view().query()), "", "this frame still has its original immutable view");
     assert!(owned_search_probe(&d).contains("pending=true"));
     frame(&mut d, &mut rig, AppArg::Search, tick(2), vec![]);
-    assert_eq!(rig.search.view().query(), "summer ");
+    assert_eq!(text_of(rig.search.view().query()), "summer ");
     assert!(owned_search_probe(&d).contains("pending=false"));
     assert!(owned_search_probe(&d).contains("caret=7"));
 }
@@ -610,15 +630,16 @@ fn owned_search_result_keys_are_server_scoped_and_survive_same_query_reordering(
     assert_eq!(d.focus(), Some(second), "identity survives the changed catalog order");
     frame(&mut d, &mut rig, AppArg::Search, tick(4), script_key(Key::Ok, tick(4)));
     for i in 5..35 { frame(&mut d, &mut rig, AppArg::Search, tick(i), vec![]); }
+    // OK on a film plays it (the card-press default); the request names the retained item.
     assert!(rig.search_reqs.iter().any(|(_, req, _)| matches!(req,
-        plx_screens::registry::SearchReq::Detail { sid, rk } if *sid == b && rk == "same-local-key")));
+        plx_screens::registry::SearchReq::Play { sid, rk } if *sid == b && rk == "same-local-key")));
     assert!(!rig.search_reqs.iter().any(|(_, req, _)| matches!(req,
-        plx_screens::registry::SearchReq::Detail { sid, .. } if *sid == a)));
+        plx_screens::registry::SearchReq::Play { sid, .. } if *sid == a)));
     let requests = rig.take_search_reqs();
     assert!(!requests.is_empty());
     assert!(rig.take_search_reqs().is_empty(), "requests execute only once");
     let (_, _, ret) = requests.iter().find(|(_, req, _)| matches!(req,
-        plx_screens::registry::SearchReq::Detail { .. })).unwrap();
+        plx_screens::registry::SearchReq::Play { .. })).unwrap();
     let entry = d.nav.top_page().unwrap().id;
     let (selected, opener) = rig.search_selection(&d, entry, ret.focus).unwrap();
     assert!(matches!(selected, plx_data::search::Item::Media(item) if item.sid == b));
@@ -653,13 +674,13 @@ fn owned_search_rejects_a_queued_query_from_the_departing_profile() {
     session.watching("synthetic-replacement-profile");
     rig.search_run(plx_data::stores::search::SearchCmd::Reset);
     frame(&mut d, &mut rig, AppArg::Search, tick(1), vec![]);
-    assert_eq!(rig.stores.search.query(), "");
+    assert_eq!(typed_query(&rig), "");
     assert!(owned_search_probe(&d).contains("caret=0"));
     let next_generation = plx_plex::plex::session::current_gen();
     d.emit(MachineId::Input, Fx::App(AppFx::Store(StoreId::Search, StoreCmd::Search(
         plx_data::stores::search::SearchCmd::SetQueryScoped { profile_generation: next_generation, query: "replacement text".into() }))));
     frame(&mut d, &mut rig, AppArg::Search, tick(2), vec![]);
-    assert_eq!(rig.stores.search.query(), "replacement text");
+    assert_eq!(typed_query(&rig), "replacement text");
     frame(&mut d, &mut rig, AppArg::Search, tick(3), vec![]);
     assert!(owned_search_probe(&d).contains("caret=16"));
 }
@@ -1088,7 +1109,8 @@ fn owned_search_ok_on_a_collection_requests_its_collection_page() {
             if *sid == a && rk == "50007" && *tag == 7))
         .expect("OK on a collection requests its page");
     assert!(!requests.iter().any(|(_, req, _)| matches!(req,
-        plx_screens::registry::SearchReq::Detail { .. })), "never an item detail");
+        plx_screens::registry::SearchReq::Detail { .. } | plx_screens::registry::SearchReq::Play { .. })),
+        "never an item detail or play");
     let entry = d.nav.top_page().unwrap().id;
     let (selected, _) = rig.search_selection(&d, entry, ret.focus).unwrap();
     assert!(matches!(selected, plx_data::search::Item::Collection(c) if c.item.rk == "50007"));

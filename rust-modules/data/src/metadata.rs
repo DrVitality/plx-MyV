@@ -2395,6 +2395,11 @@ pub struct PlayingItem {
     /// so this is the one honest source of "the light under the panel" there
     /// (`screen::Scrim::over_video`).
     pub blur: Option<[[f32; 3]; 4]>,
+    /// The played leaf's own video codec, `Media[0].videoCodec` (empty = not said). The resolve
+    /// prefers it to the catalog row's (`route::plan::build_stream`): a row can carry a stand-in
+    /// — the Stremio bridge's listing rows say `h264` until a stream is chosen — and a Load that
+    /// declares H.264 for an HEVC stream decodes nothing.
+    pub vcodec: String,
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -2416,6 +2421,7 @@ impl PlayingItem {
             markers: Vec::new(),
             chapters: Vec::new(),
             blur: None,
+            vcodec: String::new(),
         }
     }
 }
@@ -2463,6 +2469,7 @@ fn cached_playing(state: &MetadataState, sid: plx_plex::plex::ServerId, rk: &str
             markers: d.markers.clone(),
             chapters: d.chapters.clone(),
             blur: d.has_blur.then_some(d.blur),
+            vcodec: d.vcodec.clone(),
         })
 }
 
@@ -2505,6 +2512,10 @@ pub fn fetch_playing_item(sid: plx_plex::plex::ServerId, rk: &str) -> Option<Pla
         .as_ref()
         .and_then(|it| it.ultra_blur_colors)
         .and_then(|u| u.corners());
+    let vcodec = it
+        .as_ref()
+        .and_then(|it| it.primary_media().map(|m| m.video_codec.clone()))
+        .unwrap_or_default();
     Some(PlayingItem {
         sid,
         rk: rk.to_string(),
@@ -2519,6 +2530,7 @@ pub fn fetch_playing_item(sid: plx_plex::plex::ServerId, rk: &str) -> Option<Pla
         markers,
         chapters,
         blur,
+        vcodec,
     })
 }
 

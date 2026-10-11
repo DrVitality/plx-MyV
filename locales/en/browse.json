@@ -127,6 +127,10 @@
     "value": "Cast & Crew",
     "description": "browse detail cast"
   },
+  "browse.detail.streams": {
+    "value": "Streams",
+    "description": "Detail page pill on the Stremio bridge: opens the list of streams (sources) for this film or episode, to play a different one (another language, quality or release)."
+  },
   "browse.detail.also_available": {
     "value": "Also available",
     "description": "browse detail also_available"
@@ -204,7 +208,7 @@
     "description": "browse home continue"
   },
   "browse.home.failed": {
-    "value": "Can’t reach your Plex server",
+    "value": "Can’t reach Stremio",
     "description": "browse home failed"
   },
   "browse.home.empty": {
@@ -328,7 +332,7 @@
     "description": "browse login slow"
   },
   "browse.login.title": {
-    "value": "Sign in to Plex",
+    "value": "Sign in to Stremio",
     "description": "browse login title"
   },
   "browse.login.instructions": {
@@ -342,6 +346,126 @@
   "browse.search.one_more": {
     "value": "one more character",
     "description": "browse search one_more"
+  },
+  "browse.search.filter.genre_button": {
+    "value": "Genre",
+    "description": "Search: the name on the dropdown button that picks a genre, before its setting: “Genre: Comedy”."
+  },
+  "browse.search.filter.sort_button": {
+    "value": "Sort",
+    "description": "Search: the name on the dropdown button that picks the order (for you, popular, top rated, newest), before its setting: “Sort: Popular”."
+  },
+  "browse.search.filter.type_button": {
+    "value": "Type",
+    "description": "Search: the name on the dropdown button that picks the kind of title (all, films, shows, anime), before its setting: “Type: All”."
+  },
+  "browse.search.filter.all": {
+    "value": "All",
+    "description": "Search filters: type choice — films, shows and anime together."
+  },
+  "browse.search.filter.movies": {
+    "value": "Movies",
+    "description": "Search filters: type choice — films only."
+  },
+  "browse.search.filter.shows": {
+    "value": "Shows",
+    "description": "Search filters: type choice — series only."
+  },
+  "browse.search.filter.anime": {
+    "value": "Anime",
+    "description": "Search filters: type choice — anime only."
+  },
+  "browse.search.filter.for_you": {
+    "value": "For You",
+    "description": "Search filters: ordering — titles recommended from what the viewer has watched."
+  },
+  "browse.search.filter.popular": {
+    "value": "Popular",
+    "description": "Search filters: ordering — most popular now."
+  },
+  "browse.search.filter.top_rated": {
+    "value": "Top rated",
+    "description": "Search filters: ordering — best rated."
+  },
+  "browse.search.filter.newest": {
+    "value": "Newest",
+    "description": "Search filters: ordering — newest releases."
+  },
+  "browse.search.filter.any_genre": {
+    "value": "All genres",
+    "description": "Search filters: genre choice — no genre filter."
+  },
+  "browse.search.genre.action": {
+    "value": "Action",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.adventure": {
+    "value": "Adventure",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.animation": {
+    "value": "Animation",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.comedy": {
+    "value": "Comedy",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.crime": {
+    "value": "Crime",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.documentary": {
+    "value": "Documentary",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.drama": {
+    "value": "Drama",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.family": {
+    "value": "Family",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.fantasy": {
+    "value": "Fantasy",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.history": {
+    "value": "History",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.horror": {
+    "value": "Horror",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.mystery": {
+    "value": "Mystery",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.romance": {
+    "value": "Romance",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.sci_fi": {
+    "value": "Sci-Fi",
+    "description": "Film/TV genre name (science fiction)."
+  },
+  "browse.search.genre.thriller": {
+    "value": "Thriller",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.war": {
+    "value": "War",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.genre.western": {
+    "value": "Western",
+    "description": "Film/TV genre name."
+  },
+  "browse.search.suggested": {
+    "value": "SUGGESTED",
+    "description": "Search: heading over suggested search terms (what is popular now), shown before anything has been searched"
   },
   "browse.search.recents": {
     "value": "RECENT SEARCHES",
@@ -367,6 +491,10 @@
     "value": "SEARCH RESULTS",
     "description": "browse search results"
   },
+  "browse.search.results_heading": {
+    "value": "Results",
+    "description": "Search: the heading over the grid of titles a typed search found."
+  },
   "browse.search.your_server": {
     "value": "your server",
     "description": "browse search your_server"
@@ -388,7 +516,7 @@
     "description": "browse login finding"
   },
   "browse.login.connecting": {
-    "value": "Connecting to Plex…",
+    "value": "Connecting to Stremio…",
     "description": "browse login connecting"
   },
   "browse.person.eyebrow": {
@@ -461,6 +589,41 @@
       "count": "i64"
     },
     "description": "browse person credits"
+  },
+  "browse.menu.instant_only": {
+    "value": "Instant only",
+    "description": "Stream picker switch: list only streams that start at once (cached on the debrid service)"
+  },
+  "browse.player.still_watching": {
+    "value": "Still watching? Press OK to keep going.",
+    "description": "Toast when the next episode starts paused after several episodes in a row with no button pressed"
+  },
+  "browse.peek.imdb": {
+    "value": "IMDb {score}",
+    "description": "Details bubble facts line: the title's IMDb score, e.g. IMDb 8.1",
+    "args": {
+      "score": "str"
+    }
+  },
+  "browse.peek.play": {
+    "value": "Play",
+    "description": "Button in the details bubble beside a focused card: plays the item (clickable with the pointer; lit when OK does the same)."
+  },
+  "browse.peek.details": {
+    "value": "Details",
+    "description": "Button in the details bubble beside a focused card: opens the item's page (clickable with the pointer; lit when OK does the same)."
+  },
+  "browse.peek.hint_play": {
+    "value": "OK plays · hold OK for more",
+    "description": "Foot line of the details bubble that opens beside a focused card: pressing OK plays the item, holding OK opens its menu (with Go to Movie / Show)."
+  },
+  "browse.peek.hint_details": {
+    "value": "OK opens · hold OK for more",
+    "description": "Foot line of the details bubble beside a focused card when OK opens the item's page (the Open details setting); holding OK opens its menu."
+  },
+  "browse.kind.anime": {
+    "value": "Anime",
+    "description": "Top tab and library-type label for the Anime library (shows and films from anime catalogs)."
   },
   "browse.detail.seasons": {
     "value": {
@@ -678,26 +841,26 @@
     "description": "browse auth timeout"
   },
   "browse.auth.no_servers": {
-    "value": "This Plex account has no server yet.",
+    "value": "This Stremio account has no catalogs yet.",
     "description": "browse auth no_servers"
   },
   "browse.auth.no_servers_signed_in_as": {
-    "value": "Signed in as {account}.\nThis Plex account has no server yet.",
+    "value": "Signed in as {account}.\nThis Stremio account has no catalogs yet.",
     "args": {
       "account": "str"
     },
     "description": "Sign-in read-out reason when the account has no server: two sentences on two lines (the line break is deliberate and the read-out honours it); {account} is the signed-in account's name, shortened to fit the first line. Without a name the plain no_servers reason is used."
   },
   "browse.auth.refused": {
-    "value": "Your Plex server refused the connection — check its network access settings.",
+    "value": "The Stremio bridge refused the connection. Restart the app and try again.",
     "description": "browse auth refused"
   },
   "browse.auth.unreachable": {
-    "value": "Couldn't reach any Plex server — check the connection.",
+    "value": "Couldn't reach Stremio. Check the connection.",
     "description": "browse auth unreachable"
   },
   "browse.auth.plex_unreachable": {
-    "value": "Couldn’t reach Plex. Check your internet connection. An internet connection is needed to sign in.",
+    "value": "Couldn’t reach Stremio. Check your internet connection. An internet connection is needed to sign in.",
     "description": "browse auth plex_unreachable"
   },
   "browse.auth.switch_failed": {
@@ -1486,11 +1649,11 @@
     }
   },
   "browse.auth.discovery_trouble": {
-    "value": "Plex isn't responding. Still trying…",
+    "value": "Stremio isn't responding. Still trying…",
     "description": "browse auth discovery_trouble"
   },
   "browse.auth.signin_refused": {
-    "value": "Plex didn't accept this sign-in. Try again.",
+    "value": "Stremio didn't accept this sign-in. Try again.",
     "description": "browse auth signin_refused"
   },
   "browse.auth.servers_unreachable": {
@@ -1498,15 +1661,15 @@
     "description": "Reason line when plex.tv listed the account's servers and none of them answered: on the sign-in read-out (no server reachable after sign-in), and on Who's watching when a picked profile found no server answering (and none refused it or presented a certificate this TV does not trust: those have no_source_access and tls_untrusted). Two-line read-out slot, and one centred line on the picker, so keep the whole sentence at 125 characters or fewer."
   },
   "browse.auth.plex_tls": {
-    "value": "This TV couldn't make a secure connection to plex.tv. Check the TV's date and time, then try again.",
+    "value": "This TV couldn't make a secure connection to Stremio. Check the TV's date and time, then try again.",
     "description": "browse auth plex_tls"
   },
   "browse.auth.plex_unavailable": {
-    "value": "plex.tv is having trouble right now, so your servers weren't checked. Try again in a few minutes.",
+    "value": "Stremio is having trouble right now. Try again in a few minutes.",
     "description": "browse auth plex_unavailable"
   },
   "browse.auth.profile_signin_refused": {
-    "value": "plex.tv refused {profile}’s sign-in. Try again.",
+    "value": "Stremio refused {profile}’s sign-in. Try again.",
     "description": "browse auth profile_signin_refused",
     "args": {
       "profile": "str"
@@ -1633,19 +1796,19 @@
     "description": "Plex account preferences: stale error"
   },
   "browse.preferences.refused": {
-    "value": "Plex did not authorize this account request. Sign in again and retry.",
+    "value": "Stremio did not authorize this account request. Sign in again and retry.",
     "description": "Plex account preferences: refused error"
   },
   "browse.preferences.timed_out": {
-    "value": "Plex took too long to respond. Please retry.",
+    "value": "Stremio took too long to respond. Please retry.",
     "description": "Plex account preferences: timed out error"
   },
   "browse.preferences.unavailable": {
-    "value": "Could not reach Plex. Check your connection and retry.",
+    "value": "Could not reach Stremio. Check your connection and retry.",
     "description": "Plex account preferences: unavailable error"
   },
   "browse.preferences.invalid_response": {
-    "value": "Plex returned an unexpected response. Please retry.",
+    "value": "Stremio returned an unexpected response. Please retry.",
     "description": "Plex account preferences: invalid response error"
   },
   "browse.preferences.invalid_preference": {
@@ -2062,5 +2225,25 @@
   "browse.clock.key_changed": {
     "value": "Your server’s key has changed. Connect the TV to the internet once so the app can check it again.",
     "description": "Reason line under the failed Home or Library read-out when the Plex server presented a different key than the one the app remembered, so the app will not trust it while the television's clock cannot be checked. Same two-line slot as the no-key line; keep the whole sentence under 140 characters."
+  },
+  "browse.menu.choose_stream": {
+    "value": "Choose Stream",
+    "description": "Item menu row: pick which of the addons' streams plays this film or episode"
+  },
+  "browse.menu.streams_title": {
+    "value": "Streams",
+    "description": "Header of the stream picker menu"
+  },
+  "browse.menu.no_streams": {
+    "value": "No streams found for this title.",
+    "description": "Notice when the stream picker finds nothing to play or cannot reach the addons"
+  },
+  "browse.menu.library_add": {
+    "value": "Add to My Library",
+    "description": "Item menu row: save the title in the Stremio library"
+  },
+  "browse.menu.library_remove": {
+    "value": "Remove from My Library",
+    "description": "Item menu row: take the title out of the Stremio library"
   }
 }

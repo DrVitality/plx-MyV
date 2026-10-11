@@ -636,6 +636,10 @@ pub struct Session {
     /// committed replay fixtures included — serializes exactly as it did before.
     #[serde(default, deserialize_with = "de_soft_deck_press", skip_serializing_if = "is_default_deck_press")]
     pub deck_press: DeckPress,
+    /// **The viewer's look** (Settings › Appearance) — see [`Appearance`]. Install-wide; absent is
+    /// the default look, and it is skipped at the default so older sessions serialize unchanged.
+    #[serde(default, deserialize_with = "de_soft_appearance", skip_serializing_if = "Appearance::is_default")]
+    pub appearance: Appearance,
     /// **Device-wide ambient memory**: the last hero `UltraBlurColors` envelope Home actually
     /// rendered on this television, so a route in the Settings/first-run family that opens
     /// BEFORE Home has fetched anything this boot — first-run consent moved ahead of the
@@ -748,6 +752,8 @@ struct CanonicalSessionPreferences {
     skip_interval: SkipInterval,
     #[serde(default, deserialize_with = "de_soft_deck_press", skip_serializing_if = "is_default_deck_press")]
     deck_press: DeckPress,
+    #[serde(default, deserialize_with = "de_soft_appearance", skip_serializing_if = "Appearance::is_default")]
+    appearance: Appearance,
     #[serde(default, deserialize_with = "de_soft_vec", skip_serializing_if = "Vec::is_empty")]
     plaintext_consent: Vec<PlaintextConsent>,
     #[serde(default, deserialize_with = "de_soft_vec", skip_serializing_if = "Vec::is_empty")]
@@ -785,7 +791,8 @@ impl Default for CanonicalSessionPreferences {
             subtitle_position: SubtitlePosition::Low,
             next_episode_mode: NextEpisodeMode::Countdown,
             skip_interval: SkipInterval::Seconds10,
-            deck_press: DeckPress::Details,
+            deck_press: DeckPress::Play,
+            appearance: Appearance::default(),
             plaintext_consent: Vec::new(),
             server_key_pins: Vec::new(),
             audio_enhancements: crate::plex::AudioEnhancements::NONE,
@@ -838,6 +845,7 @@ fn split_public(session: &Session) -> Result<plx_platform::storage::state::Publi
         next_episode_mode: session.next_episode_mode,
         skip_interval: session.skip_interval,
         deck_press: session.deck_press,
+        appearance: session.appearance,
         plaintext_consent: session.plaintext_consent.clone(),
         server_key_pins: session.server_key_pins.clone(),
         audio_enhancements: session.audio_enhancements,
@@ -912,6 +920,7 @@ pub fn join_canonical(
         next_episode_mode: preferences.next_episode_mode,
         skip_interval: preferences.skip_interval,
         deck_press: preferences.deck_press,
+        appearance: preferences.appearance,
         plaintext_consent: preferences.plaintext_consent,
         server_key_pins: preferences.server_key_pins,
         audio_enhancements: preferences.audio_enhancements,
@@ -945,6 +954,7 @@ fn public_session(public: &plx_platform::storage::state::PublicPayload) -> Sessi
         next_episode_mode: preferences.next_episode_mode,
         skip_interval: preferences.skip_interval,
         deck_press: preferences.deck_press,
+        appearance: preferences.appearance,
         plaintext_consent: preferences.plaintext_consent,
         server_key_pins: preferences.server_key_pins,
         audio_enhancements: preferences.audio_enhancements,
@@ -1390,15 +1400,51 @@ impl SkipInterval {
     }
 }
 
-/// What OK does on a Continue Watching card — install-wide, like [`SubtitleTone`]. Absence is
-/// `Details`: OK opens the movie or episode page, exactly as on any other shelf, and the card's
-/// menu leads with Play (and the card draws no amber ▶, which promises a press that plays).
-/// `Play` is what every build before this preference did: OK plays or resumes at once.
+/// **The viewer's look** — Settings › Appearance: the accent, the background, how round corners
+/// are drawn and when a card's details bubble opens. Each field is an index into its ladder in
+/// `plx_ui::theme::appearance` (`Accent`, `Ground`, `Corners`, `Peek`), whose first entry is the
+/// default; an index this build does not know reads as the default there, so a newer build's
+/// choice never fails an older one's parse.
+#[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(default)]
+pub struct Appearance {
+    pub accent: u8,
+    pub ground: u8,
+    pub corners: u8,
+    pub peek: u8,
+    /// The stream picker's resolution cap (Settings > Video & playback > Stream quality): an index
+    /// into the bridge's ladder, 0 = best available. Kept beside the look because it is the same
+    /// kind of install-wide, locally saved choice and travels through the same save.
+    pub stream_res: u8,
+    /// 1 = only streams that start at once (debrid-cached); 0 = any.
+    pub stream_source: u8,
+    /// Settings > Video & playback > Skip intros: 1 = skip a marked intro on its own; 0 = offer
+    /// the Skip Intro button.
+    pub skip_intros: u8,
+    /// The player's More › Audio delay, in milliseconds (0 = none): a soundbar's lag is the set's,
+    /// not one film's, so it is kept.
+    pub audio_delay_ms: i16,
+    /// Settings > Appearance > Home opens on: 1 = the Continue Watching row, 0 = the hero.
+    pub home_start: u8,
+}
+
+impl Appearance {
+    pub fn is_default(&self) -> bool {
+        *self == Appearance::default()
+    }
+}
+
+/// What OK does on a movie, show or episode card — on every shelf, grid and search result, not
+/// only Continue Watching (the name is the preference's history) — install-wide, like
+/// [`SubtitleTone`]. Absence is `Play`: OK starts the film, or resumes the show at the episode it
+/// stopped on, and the focused card wears the amber ▶ that promises it. `Details` opens the page
+/// instead, and the card's menu then leads with Play. Either way the menu, opened by holding OK,
+/// has the other.
 #[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeckPress {
-    #[default]
     #[serde(rename = "details")]
     Details,
+    #[default]
     #[serde(rename = "play")]
     Play,
 }
@@ -1417,8 +1463,8 @@ impl DeckPress {
         Self::LADDER.iter().position(|&m| m == self).unwrap_or(0) as u8
     }
 
-    /// Whether a press on a Continue Watching card starts the video — the one fact the deck's
-    /// triangle, its press and its menu's Play row are all derived from.
+    /// Whether a press on a card starts the video — the one fact the cards' triangle, their press
+    /// and their menu's Play row are all derived from.
     pub fn press_plays(self) -> bool {
         self == DeckPress::Play
     }
@@ -2364,7 +2410,8 @@ fn is_default_skip_interval(interval: &SkipInterval) -> bool {
     *interval == SkipInterval::default()
 }
 
-/// The deck-press mode is a preference too: a spelling this build does not know degrades to Details.
+/// The card-press mode is a preference too: a spelling this build does not know degrades to the
+/// default (Play).
 fn de_soft_deck_press<'de, D>(d: D) -> Result<DeckPress, D::Error>
 where
     D: Deserializer<'de>,
@@ -2378,6 +2425,17 @@ where
 /// `skip_serializing_if` needs a function, not just `PartialEq` with `Default::default()`.
 fn is_default_deck_press(mode: &DeckPress) -> bool {
     *mode == DeckPress::default()
+}
+
+/// The appearance is a preference too: a shape this build cannot read degrades to the default look.
+fn de_soft_appearance<'de, D>(d: D) -> Result<Appearance, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Ok(v) = serde_json::Value::deserialize(d) else {
+        return Ok(Appearance::default());
+    };
+    Ok(serde_json::from_value::<Appearance>(v).unwrap_or_default())
 }
 
 /// The audio-enhancement toggle is a preference too: an unknown shape degrades to both flags
@@ -2612,6 +2670,16 @@ impl Session {
 
     pub fn deck_press(&self) -> DeckPress {
         self.deck_press
+    }
+
+    pub fn appearance(&self) -> Appearance {
+        self.appearance
+    }
+
+    pub fn with_appearance(&self, look: Appearance) -> Self {
+        let mut next = self.clone();
+        next.appearance = look;
+        next
     }
 
     pub fn with_deck_press(&self, mode: DeckPress) -> Self {
@@ -5684,7 +5752,7 @@ mod deck_press_tests {
     use super::*;
 
     #[test]
-    fn absent_or_malformed_is_details() {
+    fn absent_or_malformed_is_the_default_play() {
         for value in [
             serde_json::json!({}),
             serde_json::json!({"deck_press": null}),
@@ -5693,14 +5761,14 @@ mod deck_press_tests {
         ] {
             let session: Session = serde_json::from_value(value.clone())
                 .unwrap_or_else(|e| panic!("{value}: a bad preference must not fail the session: {e}"));
-            assert_eq!(session.deck_press(), DeckPress::Details, "{value}");
+            assert_eq!(session.deck_press(), DeckPress::Play, "{value}");
         }
     }
 
     #[test]
     fn the_default_is_not_serialized() {
         let session = Session::default();
-        assert_eq!(session.deck_press(), DeckPress::Details);
+        assert_eq!(session.deck_press(), DeckPress::Play);
         assert!(!serde_json::to_string(&session).unwrap().contains("deck_press"));
         let prefs = serde_json::to_string(&split_public(&session).unwrap().preferences).unwrap();
         assert!(!prefs.contains("deck_press"), "{prefs}");
@@ -5708,15 +5776,15 @@ mod deck_press_tests {
 
     #[test]
     fn a_pick_round_trips_through_both_formats() {
-        let session = Session::default().with_deck_press(DeckPress::Play);
+        let session = Session::default().with_deck_press(DeckPress::Details);
         let json = serde_json::to_string(&session).unwrap();
         assert!(json.contains("deck_press"), "{json}");
         let round: Session = serde_json::from_str(&json).unwrap();
-        assert_eq!(round.deck_press(), DeckPress::Play);
+        assert_eq!(round.deck_press(), DeckPress::Details);
 
         let (public, protected) = split_canonical(&session).unwrap();
-        assert_eq!(join_canonical(&public, &protected).unwrap().deck_press(), DeckPress::Play);
-        assert_eq!(public_session(&public).deck_press(), DeckPress::Play);
+        assert_eq!(join_canonical(&public, &protected).unwrap().deck_press(), DeckPress::Details);
+        assert_eq!(public_session(&public).deck_press(), DeckPress::Details);
     }
 
     #[test]
@@ -6156,5 +6224,33 @@ mod server_key_pin_tests {
         plx_base::storage_worker::drain_for_test();
         let _ = peek();
         assert_eq!(plx_net::net::keypin::pin_for_test(&key), None, "the late probe did not repopulate it");
+    }
+}
+
+/// `Session::appearance`: omitted at the default, soft-parsed, round-tripped through both formats.
+#[cfg(test)]
+mod appearance_tests {
+    use super::*;
+
+    #[test]
+    fn the_default_look_is_not_written_and_a_bad_shape_reads_as_default() {
+        let session = Session::default();
+        assert!(session.appearance().is_default());
+        assert!(!serde_json::to_string(&session).unwrap().contains("appearance"));
+        for value in [serde_json::json!({"appearance": "blue"}), serde_json::json!({"appearance": 7})] {
+            let s: Session = serde_json::from_value(value.clone()).unwrap_or_else(|e| panic!("{value}: {e}"));
+            assert!(s.appearance().is_default(), "{value}");
+        }
+    }
+
+    #[test]
+    fn a_look_round_trips_through_both_formats() {
+        let look = Appearance { accent: 5, ground: 2, corners: 3, peek: 1, stream_res: 1, stream_source: 1, skip_intros: 1, audio_delay_ms: -50, home_start: 1 };
+        let session = Session::default().with_appearance(look);
+        let round: Session = serde_json::from_str(&serde_json::to_string(&session).unwrap()).unwrap();
+        assert_eq!(round.appearance(), look);
+        let (public, protected) = split_canonical(&session).unwrap();
+        assert_eq!(join_canonical(&public, &protected).unwrap().appearance(), look);
+        assert_eq!(public_session(&public).appearance(), look);
     }
 }

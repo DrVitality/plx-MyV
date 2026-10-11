@@ -150,7 +150,10 @@ jobs:
       - uses: ./.github/actions/host-rust
 
       - name: make check-cargo-lint (clippy + the lab-diagnostics type-check)
-        run: make check-cargo-lint
+        shell: bash
+        run: |
+          set -o pipefail
+          make check-cargo-lint 2>&1 | tee "$RUNNER_TEMP/lint.log"
 
       - name: Type-check the RELEASE feature set
         # **`make check` cannot see a break in this configuration, and neither could this gate
@@ -184,6 +187,9 @@ jobs:
           cd rust-modules
           cargo "+$RUST_NIGHTLY" check --lib --features hostsim
           cargo "+$RUST_NIGHTLY" check --lib --no-default-features --features hostsim
+      - name: Surface build errors
+        if: failure()
+        run: sh ci/annotate-failure.sh "$RUNNER_TEMP"/*.log
 
   host-unit-default:
     name: host unit tests (default features)
@@ -244,6 +250,9 @@ jobs:
           path: rust-modules/target/cargo-timings/cargo-timing.html
           if-no-files-found: warn
           retention-days: 14
+      - name: Surface build errors
+        if: failure()
+        run: sh ci/annotate-failure.sh "$RUNNER_TEMP"/*.log
 
   host-unit-hostsim:
     name: host unit tests (hostsim)
@@ -279,6 +288,9 @@ jobs:
           { echo '```'; grep -E '^test result:' "$RUNNER_TEMP/make-check.log"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           echo "passed=$(grep -E '^test result:' "$RUNNER_TEMP/make-check.log" \
             | sed -E 's/.* ([0-9]+) passed;.*/\1/' | awk '{n += $1} END {print n+0}')" >> "$GITHUB_OUTPUT"
+      - name: Surface build errors
+        if: failure()
+        run: sh ci/annotate-failure.sh "$RUNNER_TEMP"/*.log
 
   host-python:
     name: host python/shell/C gates
@@ -303,7 +315,13 @@ jobs:
       # mention one use fakes) and links nothing. The ~70 gates are ci/check-python-steps.txt, run
       # concurrently by tools/check-parallel.py: as many at once as the runner has cores (4 here, cap 4).
       - name: make check-python-rest
-        run: make check-python-rest
+        shell: bash
+        run: |
+          set -o pipefail
+          make check-python-rest 2>&1 | tee "$RUNNER_TEMP/python-rest.log"
+      - name: Surface build errors
+        if: failure()
+        run: sh ci/annotate-failure.sh "$RUNNER_TEMP"/*.log
 
   # tests/test_harness.py alone: about 190 s of what used to be a 360 s `check-python` job. Most of
   # it is its `DepGates` class running ci/check-deps.sh over private copies of the tree on every
@@ -320,7 +338,13 @@ jobs:
           fetch-depth: 0
 
       - name: make check-python-harness
-        run: make check-python-harness
+        shell: bash
+        run: |
+          set -o pipefail
+          make check-python-harness 2>&1 | tee "$RUNNER_TEMP/python-harness.log"
+      - name: Surface build errors
+        if: failure()
+        run: sh ci/annotate-failure.sh "$RUNNER_TEMP"/*.log
 
   # The one name anything outside this file may refer to: it is what the single job was called, and
   # it is RED unless every host job above is green. `if: always()` because a job that needs a failed
@@ -416,7 +440,10 @@ jobs:
           key: ffmpeg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ci/build-ffmpeg.sh', 'ci/arm-cc.py', 'ci/check-link-evidence.py', 'ci/stage-link-evidence.py', '.github/actions/webos-ndk/action.yml') }}
 
       - name: Build
-        run: make WEBOS_SDK='${{ steps.ndk.outputs.sdk-dir }}' -j"$(nproc)"
+        shell: bash
+        run: |
+          set -o pipefail
+          make WEBOS_SDK='${{ steps.ndk.outputs.sdk-dir }}' -j"$(nproc)" 2>&1 | tee "$RUNNER_TEMP/arm-build.log"
 
       - name: Package
         # DELIBERATELY the developer id. This artifact is a DEV build — the whole point of a PR
@@ -539,3 +566,6 @@ jobs:
           # comment — that is a literal block scalar, and every line in it is a path.)
           path: |
             pkg/*.ipk
+      - name: Surface build errors
+        if: failure()
+        run: sh ci/annotate-failure.sh "$RUNNER_TEMP"/*.log

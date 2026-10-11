@@ -68,7 +68,7 @@
     "description": "Settings, account, onboarding or privacy UI: settings.about.detail"
   },
   "settings.root.copy": {
-    "value": "Manage this television and your Plex profile. Audio and subtitle language preferences sync with your Plex account; playback defaults and the app language apply to this television.",
+    "value": "Manage this television, the app’s look and your Stremio account.",
     "description": "Settings, account, onboarding or privacy UI: settings.root.copy"
   },
   "settings.libraries.count": {
@@ -628,7 +628,7 @@
     "description": "Settings, consent or sign-in UI: settings.audio.title"
   },
   "settings.audio.detail": {
-    "value": "Language preferences synced with your Plex account.",
+    "value": "Preferred audio and subtitle languages.",
     "description": "Settings, consent or sign-in UI: settings.audio.detail"
   },
   "settings.playback.quality": {
@@ -691,17 +691,145 @@
     "value": "Off",
     "description": "Next episode picker option: nothing is shown during the credits and the next episode does not start by itself."
   },
+  "settings.appearance.section": {
+    "value": "Appearance",
+    "description": "Settings root section header for the app's look."
+  },
+  "settings.appearance.title": {
+    "value": "Appearance",
+    "description": "Settings row and page title: the app's colours, corners and card details bubble."
+  },
+  "settings.appearance.detail": {
+    "value": "Colors, corners and card details",
+    "description": "Detail line under the Appearance row in the Settings root."
+  },
+  "settings.appearance.copy": {
+    "value": "Choose how the app looks. Changes apply right away.",
+    "description": "Explanation under the Appearance page title."
+  },
+  "settings.appearance.accent": {
+    "value": "Accent color",
+    "description": "Appearance field and picker title: the color focused buttons, progress bars and the play mark are drawn in."
+  },
+  "settings.appearance.accent.copy": {
+    "value": "The color of the highlighted button, progress bars and the play mark.",
+    "description": "Explanation under the Accent color picker title."
+  },
+  "settings.appearance.accent.crimson": {
+    "value": "Crimson",
+    "description": "Accent color option (the default)."
+  },
+  "settings.appearance.accent.orange": {
+    "value": "Orange",
+    "description": "Accent color option."
+  },
+  "settings.appearance.accent.gold": {
+    "value": "Gold",
+    "description": "Accent color option."
+  },
+  "settings.appearance.accent.emerald": {
+    "value": "Emerald",
+    "description": "Accent color option."
+  },
+  "settings.appearance.accent.teal": {
+    "value": "Teal",
+    "description": "Accent color option."
+  },
+  "settings.appearance.accent.blue": {
+    "value": "Blue",
+    "description": "Accent color option."
+  },
+  "settings.appearance.accent.violet": {
+    "value": "Violet",
+    "description": "Accent color option."
+  },
+  "settings.appearance.accent.pink": {
+    "value": "Pink",
+    "description": "Accent color option."
+  },
+  "settings.appearance.ground": {
+    "value": "Background",
+    "description": "Appearance field and picker title: the app's background tone."
+  },
+  "settings.appearance.ground.copy": {
+    "value": "The tone of the app's background and panels.",
+    "description": "Explanation under the Background picker title."
+  },
+  "settings.appearance.ground.ember": {
+    "value": "Ember",
+    "description": "Background option (the default): warm umber gray with a soft orange-to-gray gradient across the page."
+  },
+  "settings.appearance.ground.charcoal": {
+    "value": "Warm charcoal",
+    "description": "Background option: dark gray with a hint of red."
+  },
+  "settings.appearance.ground.graphite": {
+    "value": "Graphite",
+    "description": "Background option: neutral dark gray."
+  },
+  "settings.appearance.ground.midnight": {
+    "value": "Midnight",
+    "description": "Background option: near black, for a dark room."
+  },
+  "settings.appearance.corners": {
+    "value": "Corners",
+    "description": "Appearance field and picker title: how round the corners of cards, buttons and panels are."
+  },
+  "settings.appearance.corners.copy": {
+    "value": "How round the corners of cards, buttons and panels are drawn.",
+    "description": "Explanation under the Corners picker title."
+  },
+  "settings.appearance.corners.crisp": {
+    "value": "Crisp",
+    "description": "Corners option (the default): a slight softening."
+  },
+  "settings.appearance.corners.sharp": {
+    "value": "Sharp",
+    "description": "Corners option: square corners."
+  },
+  "settings.appearance.corners.soft": {
+    "value": "Soft",
+    "description": "Corners option: gently rounded."
+  },
+  "settings.appearance.corners.round": {
+    "value": "Round",
+    "description": "Corners option: fully rounded pills and cards."
+  },
+  "settings.appearance.peek": {
+    "value": "Details popup",
+    "description": "Appearance field and picker title: when the details bubble beside a highlighted card opens."
+  },
+  "settings.appearance.peek.copy": {
+    "value": "Shows a card's details beside it when you rest on it.",
+    "description": "Explanation under the Details popup picker title."
+  },
+  "settings.appearance.peek.normal": {
+    "value": "Normal",
+    "description": "Details popup option (the default)."
+  },
+  "settings.appearance.peek.quick": {
+    "value": "Quick",
+    "description": "Details popup option: opens sooner."
+  },
+  "settings.appearance.peek.slow": {
+    "value": "Slow",
+    "description": "Details popup option: opens later."
+  },
+  "settings.appearance.peek.off": {
+    "value": "Off",
+    "description": "Details popup option: never opens."
+  },
   "settings.playback.deck_press": {
-    "value": "Continue Watching",
-    "description": "Settings row title and picker title: what OK does on a card in the Continue Watching shelf."
+    "value": "OK on a card",
+    "description": "Settings row title and picker title: what OK does on a movie, show or episode card on any shelf, grid or search result."
   },
   "settings.playback.deck_press.details": {
     "value": "Open details",
-    "description": "Continue Watching picker option (the default): OK on a card opens the movie or episode page."
+    "description": "Card press picker option: OK on a card opens the movie, show or episode page."
   },
   "settings.playback.deck_press.play": {
     "value": "Play",
-    "description": "Continue Watching picker option: OK on a card starts or resumes the video at once."
+    "description": "Card press picker option (the default): OK on a card starts the movie, or resumes the show at its next episode, at once."
   },
   "settings.playback.skip_interval": {
     "value": "Skip interval",
@@ -742,7 +870,7 @@
     "description": "Settings, consent or sign-in UI: settings.playback.force_note"
   },
   "settings.audio.account_note": {
-    "value": "Saved to this Plex profile and shared with your other Plex apps. Changes may take time to affect playback; selections already made for an item still take priority.",
+    "value": "Saved for your Stremio account on this television. Changes apply to the next video you play.",
     "description": "Settings, consent or sign-in UI: settings.audio.account_note"
   },
   "settings.playback.copy": {
@@ -750,11 +878,11 @@
     "description": "Explanation under the title of the Video & playback page itself. Each picker opened from it has its own explanation (settings.playback.<field>.copy), so this one is about the page as a whole, not about any single setting."
   },
   "settings.playback.quality.copy": {
-    "value": "The highest quality a video plays at. Larger files are converted by your Plex server to fit. Also available in the player's More menu.",
+    "value": "The highest quality a video plays at. Also available in the player's More menu.",
     "description": "Explanation under the title of the Default quality picker (Settings, Video & playback). Describes the ceiling and says the same control is in the player's More menu (the More menu drops its Quality section only under Forced Direct Play, where this text is replaced by the Force note)."
   },
   "settings.playback.direct_play.copy": {
-    "value": "Auto plays the original file when this television can; otherwise your Plex server converts it. Disabled always converts. Force skips every check: for troubleshooting only.",
+    "value": "Auto plays the original file when this television can. Force skips every check: for troubleshooting only.",
     "description": "Explanation under the title of the Direct Play picker. Names its three modes in order: Auto, Disabled and Force (the picker's third option, 'Force Direct Play (advanced)'). While Force is on the Force note replaces it."
   },
   "settings.playback.subtitle_size.copy": {
@@ -770,8 +898,8 @@
     "description": "Explanation under the title of the Next episode picker. It names the three options by their picker labels (Up Next countdown, After credits, Off); keep those words identical to settings.playback.next_episode.countdown, .after_credits and .off. Only credits that run to the end of the item trigger the button."
   },
   "settings.playback.deck_press.copy": {
-    "value": "Open details shows the movie or episode page when you press OK on a Continue Watching card. Play starts or resumes it at once. The card's menu, opened by holding OK, always has the other.",
-    "description": "Explanation under the title of the Continue Watching picker. It names the two options by their picker labels (Open details, Play); keep those words identical to settings.playback.deck_press.details and .play."
+    "value": "Play starts a movie, or picks a show up at its next episode, when you press OK on a card. Open details shows its page instead. The card's menu, opened by holding OK, always has the other.",
+    "description": "Explanation under the title of the card press picker. It names the two options by their picker labels (Open details, Play); keep those words identical to settings.playback.deck_press.details and .play."
   },
   "settings.playback.skip_interval.copy": {
     "value": "How far one press of Left or Right jumps in the player.",
@@ -786,11 +914,11 @@
     "description": "Settings, consent or sign-in UI: settings.playback.force_question"
   },
   "settings.audio.saving": {
-    "value": "Saving to your Plex account…",
+    "value": "Saving…",
     "description": "Settings, consent or sign-in UI: settings.audio.saving"
   },
   "settings.audio.loading": {
-    "value": "Loading your Plex account preferences…",
+    "value": "Loading your preferences…",
     "description": "Settings, consent or sign-in UI: settings.audio.loading"
   },
   "settings.playback.saving": {
@@ -874,7 +1002,7 @@
     "description": "Settings, consent or sign-in UI: settings.audio.retry_detail"
   },
   "settings.audio.sign_in_again": {
-    "value": "Sign in to this Plex profile again to edit its account preferences.",
+    "value": "Sign in to Stremio again to edit these preferences.",
     "description": "Settings, consent or sign-in UI: settings.audio.sign_in_again"
   },
   "settings.playback.save_failed": {
@@ -958,7 +1086,7 @@
     "description": "Settings, consent or sign-in UI: settings.login.report_body"
   },
   "settings.login.unreachable": {
-    "value": "Can’t reach Plex. Check your TV’s internet connection.",
+    "value": "Can’t reach Stremio. Check your TV’s internet connection.",
     "description": "Settings, consent or sign-in UI: settings.login.unreachable"
   },
   "settings.login.report_sending": {
@@ -1186,5 +1314,268 @@
   "settings.consent.placeholder.webos_codename_short": {
     "value": "webOS codename",
     "description": "Placeholder shown inside angle brackets in the data preview, standing for the TV software's release codename."
+  },
+  "settings.playback.stream_quality": {
+    "value": "Stream quality",
+    "description": "Settings row: the highest resolution the stream picker offers"
+  },
+  "settings.playback.stream_quality.copy": {
+    "value": "The highest resolution a stream is picked at. A title with nothing at or under it still plays its best stream.",
+    "description": "Picker explanation for Stream quality"
+  },
+  "settings.playback.stream_quality.best": {
+    "value": "Best available",
+    "description": "Stream quality option: no cap"
+  },
+  "settings.playback.stream_quality.up_to_1080": {
+    "value": "Up to 1080p",
+    "description": "Stream quality option"
+  },
+  "settings.playback.stream_quality.up_to_720": {
+    "value": "Up to 720p",
+    "description": "Stream quality option"
+  },
+  "settings.playback.stream_source": {
+    "value": "Streams",
+    "description": "Settings row: whether only instantly-starting streams are offered"
+  },
+  "settings.playback.stream_source.copy": {
+    "value": "Instant only offers streams your debrid service already holds, so playback starts at once. A title with none still lists the rest.",
+    "description": "Picker explanation for Streams"
+  },
+  "settings.playback.stream_source.any": {
+    "value": "Any",
+    "description": "Streams option: every stream"
+  },
+  "settings.playback.stream_source.instant": {
+    "value": "Instant only",
+    "description": "Streams option: only debrid-cached streams"
+  },
+  "settings.playback.skip_intros": {
+    "value": "Skip intros",
+    "description": "Settings row: whether intros and recaps are skipped on their own"
+  },
+  "settings.playback.skip_intros.copy": {
+    "value": "Automatically jumps past an intro (or an anime recap) the moment it starts, where the episode marks one. Otherwise a Skip Intro button is offered.",
+    "description": "Picker explanation for Skip intros"
+  },
+  "settings.playback.skip_intros.button": {
+    "value": "Show a button",
+    "description": "Skip intros option: offer the Skip Intro button"
+  },
+  "settings.playback.skip_intros.auto": {
+    "value": "Automatically",
+    "description": "Skip intros option: skip without asking"
+  },
+  "settings.appearance.home_start": {
+    "value": "Home opens on",
+    "description": "Appearance row: where Home's focus starts"
+  },
+  "settings.appearance.home_start.copy": {
+    "value": "Where the focus sits when Home first opens: on the featured title at the top, or on the first card of Continue Watching.",
+    "description": "Picker explanation for Home opens on"
+  },
+  "settings.appearance.home_start.hero": {
+    "value": "Featured title",
+    "description": "Home opens on option: the hero at the top"
+  },
+  "settings.appearance.home_start.continue": {
+    "value": "Continue Watching",
+    "description": "Home opens on option: the Continue Watching row"
+  },
+  "settings.appearance.accent.silver": {
+    "value": "Silver",
+    "description": "Accent colour option"
+  },
+  "settings.appearance.ground.black": {
+    "value": "Black",
+    "description": "Background option: true black"
+  },
+  "settings.stremio.tv_section": {
+    "value": "This TV",
+    "description": "Addons & Home: section about this television"
+  },
+  "settings.stremio.phone": {
+    "value": "Phone remote",
+    "description": "Addons & Home row: search on a phone and send titles to the TV"
+  },
+  "settings.stremio.phone_detail": {
+    "value": "Open {url} on your phone · PIN {pin}",
+    "description": "Addons & Home: where the phone remote is and its PIN",
+    "args": {
+      "url": "str",
+      "pin": "str"
+    }
+  },
+  "settings.stremio.phone_off": {
+    "value": "Not available on this TV",
+    "description": "Addons & Home: the phone remote could not start"
+  },
+  "settings.stremio.updates": {
+    "value": "App updates",
+    "description": "Addons & Home row: whether a newer build is published"
+  },
+  "settings.stremio.update_current": {
+    "value": "Up to date",
+    "description": "Addons & Home: this is the newest build"
+  },
+  "settings.stremio.update_available": {
+    "value": "Update ready",
+    "description": "Addons & Home: a newer build is published"
+  },
+  "settings.stremio.update_unknown": {
+    "value": "Unknown",
+    "description": "Addons & Home: the update check failed"
+  },
+  "settings.stremio.devmode": {
+    "value": "Developer Mode",
+    "description": "Addons & Home row: the TV's Developer Mode session"
+  },
+  "settings.stremio.devmode_left": {
+    "value": "{hours} h left",
+    "description": "Addons & Home: hours left in Developer Mode",
+    "args": {
+      "hours": "str"
+    }
+  },
+  "settings.stremio.devmode_unknown": {
+    "value": "Unknown",
+    "description": "Addons & Home: Developer Mode's time left could not be read"
+  },
+  "settings.stremio.devmode_toast": {
+    "value": "Developer Mode ends in {hours} h. Open the Developer Mode app to extend it.",
+    "description": "Toast when Developer Mode is about to end",
+    "args": {
+      "hours": "str"
+    }
+  },
+  "settings.stremio.debrid": {
+    "value": "Real-Debrid",
+    "description": "Addons & Home row: the Real-Debrid account"
+  },
+  "settings.stremio.debrid_left": {
+    "value": "{days} days left",
+    "description": "Addons & Home: days of Real-Debrid premium left",
+    "args": {
+      "days": "str"
+    }
+  },
+  "settings.stremio.debrid_unknown": {
+    "value": "Unknown",
+    "description": "Addons & Home: no Real-Debrid key found or it did not answer"
+  },
+  "settings.stremio.debrid_toast": {
+    "value": "Real-Debrid premium ends in {days} days.",
+    "description": "Toast when Real-Debrid premium is about to end",
+    "args": {
+      "days": "str"
+    }
+  },
+  "settings.stremio.new_episodes_toast": {
+    "value": "New episodes: {list}",
+    "description": "Toast on opening the app: new episodes of saved shows",
+    "args": {
+      "list": "str"
+    }
+  },
+  "settings.stremio.title": {
+    "value": "Addons & Home",
+    "description": "Settings row and page title: Stremio addons and Home rows"
+  },
+  "settings.stremio.detail": {
+    "value": "Home rows, and what each addon is used for.",
+    "description": "Settings root row detail"
+  },
+  "settings.stremio.copy": {
+    "value": "Choose the rows Home shows and their order, and what each addon is used for.",
+    "description": "Addons & Home page explanation"
+  },
+  "settings.stremio.loading": {
+    "value": "Loading…",
+    "description": "While the list loads"
+  },
+  "settings.stremio.failed": {
+    "value": "Couldn’t reach Stremio. Check the connection and try again.",
+    "description": "Load or save failed"
+  },
+  "settings.stremio.retry": {
+    "value": "Try again",
+    "description": "Retry row"
+  },
+  "settings.stremio.gone": {
+    "value": "This is no longer available.",
+    "description": "The row or addon left the list"
+  },
+  "settings.stremio.rows_section": {
+    "value": "Home rows",
+    "description": "Section header"
+  },
+  "settings.stremio.addons_section": {
+    "value": "Addons",
+    "description": "Section header"
+  },
+  "settings.stremio.shown": {
+    "value": "On Home",
+    "description": "Row value: shown on Home"
+  },
+  "settings.stremio.hidden": {
+    "value": "Hidden",
+    "description": "Row value: not on Home"
+  },
+  "settings.stremio.on": {
+    "value": "On",
+    "description": "Switch value"
+  },
+  "settings.stremio.off": {
+    "value": "Off",
+    "description": "Switch value"
+  },
+  "settings.stremio.streams": {
+    "value": "Streams",
+    "description": "What an addon is used for"
+  },
+  "settings.stremio.catalogs": {
+    "value": "Catalogs",
+    "description": "What an addon is used for"
+  },
+  "settings.stremio.show_on_home": {
+    "value": "Show on Home",
+    "description": "Home row switch"
+  },
+  "settings.stremio.move_up": {
+    "value": "Move up",
+    "description": "Home row action"
+  },
+  "settings.stremio.move_down": {
+    "value": "Move down",
+    "description": "Home row action"
+  },
+  "settings.stremio.move_top": {
+    "value": "Move to top",
+    "description": "Home row action"
+  },
+  "settings.stremio.move_bottom": {
+    "value": "Move to bottom",
+    "description": "Home row action"
+  },
+  "settings.stremio.position": {
+    "value": "Place on Home:",
+    "description": "Followed by 'N / M'"
+  },
+  "settings.stremio.use_streams": {
+    "value": "Use for streams",
+    "description": "Addon switch"
+  },
+  "settings.stremio.use_streams_detail": {
+    "value": "Ask this addon where titles can be played.",
+    "description": "Addon switch detail"
+  },
+  "settings.stremio.use_catalogs": {
+    "value": "Use for catalogs",
+    "description": "Addon switch"
+  },
+  "settings.stremio.use_catalogs_detail": {
+    "value": "Show this addon’s catalogs on Home and in the libraries.",
+    "description": "Addon switch detail"
   }
 }

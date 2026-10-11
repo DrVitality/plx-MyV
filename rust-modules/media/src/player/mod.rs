@@ -43,6 +43,8 @@ mod shared;
 pub mod sidecar;
 pub mod subside; // the side subtitle reader's thread and state (dev trigger `plxnative-subside`)
 #[cfg(feature = "hostsim")]
+pub mod sim_audio; // the simulator's sound, beside its picture (see its doc)
+#[cfg(feature = "hostsim")]
 pub mod sim_video; // the simulator's decoded picture, for screenshots (see its doc)
 pub mod threads;
 pub mod video_geometry;
@@ -1676,6 +1678,25 @@ pub fn subtitle_tone() -> plx_plex::plex::session::SubtitleTone {
 /// `AtomicI32` rather than `I64`: the range fits trivially, and the 32-bit target gets a plain
 /// word load on the per-frame lookups.
 static SUBTITLE_OFFSET_MS: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// **Audio delay** (the player's More › Audio delay), in milliseconds: positive plays the sound
+/// later than the picture, negative earlier. It is applied in the feed — every audio access unit's
+/// PTS moves by it (`engine::feed_audio_lane`) — so the pipeline's own clock does the rest. A
+/// change takes effect from the next seek: the caller seeks to where the viewer is, which re-anchors
+/// both lanes, rather than letting the audio timeline jump under a running pipeline.
+static AUDIO_DELAY_MS: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// The delays offered, in milliseconds.
+pub const AUDIO_DELAY_LADDER: [i32; 11] = [-500, -250, -150, -100, -50, 0, 50, 100, 150, 250, 500];
+
+pub fn audio_delay_ms() -> i32 {
+    AUDIO_DELAY_MS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Set the audio delay (clamped to the ladder's span). The caller seeks so it lands.
+pub fn set_audio_delay_ms(ms: i32) {
+    AUDIO_DELAY_MS.store(ms.clamp(-500, 500), std::sync::atomic::Ordering::Relaxed);
+}
 
 /// The offset in milliseconds (the unit the menu speaks).
 pub fn subtitle_offset_ms() -> i64 {

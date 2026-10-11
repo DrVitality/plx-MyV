@@ -28,7 +28,7 @@ use plx_ui::theme;
 use plx_ui::widgets::{self, Art, PageGround, StatusKind, StatusOverlay};
 use plx_ui::{Env, Painter, Rect};
 
-use super::registry::{tile_facts, AppFx, CardKeys, CardPageMemory, CollectionLike, ContentArg,
+use super::registry::{tile_facts, AppFx, CardKeys, CardPageMemory, CollectionLike,
     ContentLike, ContentPanel, ContentReq, PageMemory};
 
 #[cfg(test)]
@@ -203,6 +203,9 @@ impl<H: Host<Elem = u32>> CardSource<H> for Members<'_> {
         self.collection.items.get(i).map(member_caption).unwrap_or_default()
     }
     fn progress(&self, i: usize) -> Option<f32> { self.collection.items.get(i)?.resume_frac() }
+    fn peek(&self, i: usize) -> Option<plx_ui::cards::Peek> {
+        self.collection.items.get(i).and_then(crate::registry::card_peek)
+    }
     fn overlay(&self, p: Painter, i: usize, tile: &Tile, measure: &dyn Measure) {
         let persistent = self.label_at(i);
         if persistent.is_empty() { return; }
@@ -695,8 +698,8 @@ impl<H: ContentLike + CollectionLike> Machine<H> for CollectionScreen {
                 if let Some(CardEvent::Activate(elem)) = card {
                     let key = plx_machine::machine::FocusKey { entry: self.entry(), elem };
                     if let Some(item) = self.focused_item(Some(key), cx) {
-                        fx.push(plx_machine::machine::Fx::App(AppFx::Content(ContentReq::Push(
-                            ContentArg::Detail { sid: item.sid, rk: item.rk.clone() }))));
+                        fx.push(plx_machine::machine::Fx::App(AppFx::Content(
+                            crate::registry::card_press_request(item))));
                     }
                 }
                 Handled::Yes
@@ -770,6 +773,7 @@ impl<H: ContentLike + CollectionLike> Screen<H> for CollectionScreen {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registry::ContentArg;
     use plx_ui::fixture::FixtureMeasure;
     use plx_ui::screen::Step;
     use plx_machine::machine::{FocusRead, Host, InputOwner, PressRead};
@@ -894,7 +898,7 @@ mod tests {
         let key = screen.key_at(store.view().current().unwrap(), 1);
         let out = step(&mut screen, ScreenEvent::PressCommit(plx_machine::machine::PressId(1)), &cx(store.view(), Some(key)));
         assert!(out.iter().any(|e| matches!(&e.fx, plx_machine::machine::Fx::App(AppFx::Content(
-            ContentReq::Push(ContentArg::Detail { rk, .. }))) if rk == "b")));
+            ContentReq::Push(ContentArg::Detail { rk, .. }) | ContentReq::PlayCard { rk, .. })) if rk == "b")));
     }
 
     /// The hold hint on a Collection page (`ui::hold_hint`): the first time it teaches like Home's

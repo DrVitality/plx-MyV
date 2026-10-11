@@ -22,6 +22,7 @@
 #![allow(dead_code)]
 
 pub mod chapters_panel;
+pub mod episodes_panel; // the in-player Episodes strip (switch episode / season without leaving playback)
 pub mod info_panel;
 pub mod more_menu; // the player's `…` overflow popover (holds the Stats for nerds toggle)
 pub mod player_hud;

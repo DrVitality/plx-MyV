@@ -17,6 +17,8 @@ pub struct RowCards<'a> {
     pub(super) elems: &'a [u32],
     pub(super) items: &'a [Item],
     pub(super) sources: &'a [ScopeSource],
+    /// The most cards shown: a shelf's capacity, unbounded for a grid ([`SearchScreen::row_cards`]).
+    pub(super) cap: usize,
 }
 
 impl RowCards<'_> {
@@ -28,17 +30,29 @@ impl RowCards<'_> {
 }
 
 impl<H: SearchLike> CardSource<H> for RowCards<'_> {
-    fn len(&self) -> usize { self.elems.len().min(self.items.len()) }
+    fn peek(&self, i: usize) -> Option<plx_ui::cards::Peek> {
+        match self.items.get(i) {
+            Some(Item::Media(media)) => crate::registry::card_peek(media),
+            _ => None,
+        }
+    }
+    fn len(&self) -> usize { self.elems.len().min(self.items.len()).min(self.cap) }
     fn elem(&self, i: usize) -> u32 { self.elems[i] }
     fn index_of(&self, e: &u32) -> Option<usize> {
-        self.elems.iter().position(|elem| elem == e).filter(|&i| i < self.items.len())
+        self.elems.iter().position(|elem| elem == e).filter(|&i| i < self.items.len().min(self.cap))
     }
     fn art(&self, i: usize) -> Art<'_> {
         self.items.get(i).map_or(Art::Poster(None), |item| render::tile_art(self.kind, item))
     }
     fn label(&self, i: usize) -> TileLabel {
         match self.items.get(i) {
-            Some(item) => TileLabel::titled(item.title(), &render::subtitle(self.kind, item, self.handle(item))),
+            Some(item) => {
+                let mut label = TileLabel::titled(item.title(), &render::subtitle(self.kind, item, self.handle(item)));
+                // The ▶ promises that OK plays (`registry::card_press_plays`); a person or a
+                // collection never does.
+                label.glyph = matches!(item, Item::Media(media) if crate::registry::card_press_plays(media.kind));
+                label
+            }
             None => TileLabel::default(),
         }
     }
@@ -50,7 +64,8 @@ impl<H: SearchLike> CardSource<H> for RowCards<'_> {
     }
     fn overlay(&self, p: Painter, i: usize, tile: &Tile, measure: &dyn Measure) {
         if let (Kind::Episode, Some(Item::Media(media))) = (self.kind, self.items.get(i)) {
-            plx_ui::widgets::still_overlay(p, &tile_facts::of(media), tile.rect, tile.radius, false, measure);
+            plx_ui::widgets::still_overlay(p, &tile_facts::of(media), tile.rect, tile.radius,
+                crate::registry::card_press_plays(media.kind), measure);
         }
     }
 }

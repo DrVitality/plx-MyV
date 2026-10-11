@@ -443,7 +443,9 @@ mod activate_card_tests {
         for (card, expect, season_index) in [(&show, "show-1", None), (&season, "show-1", Some(4))] {
             let mut menu_play_await = None;
             let req = |act, item| plx_screens::registry::ItemMenuReq {
-                act, sid, item, loaded_episode: false, from_home: false };
+                act, sid, item, loaded_episode: false, from_home: false,
+                origin: plx_screens::registry::MenuOrigin {
+                    host: plx_machine::machine::EntryId(0), focus: None, anchor: [0; 4] } };
             // a key that is not the captured row's: nothing happens
             unsafe { apply_item_action(&mut ps, &mut pa, req(Action::Play("other".into()), Some(card.clone())),
                 &mut pages, &mut bridge, &mut crate::app::playback::LivePlaybackResources,
@@ -554,7 +556,7 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
 ) {
     let mut playback = LiveItemPlayback(resources);
     use plx_screens::item_menu::Action;
-    let plx_screens::registry::ItemMenuReq { act, sid, item, loaded_episode, from_home } = req;
+    let plx_screens::registry::ItemMenuReq { act, sid, item, loaded_episode, from_home, origin: req_origin } = req;
     // `sid` is WHICH SERVER this menu's rows are about, captured when the panel was presented.
     // Every arm below turns an rk into a fetch, a scrobble or a play, and resolving one against
     // `plex::current_server()` is the reported bug itself: on a merged Continue Watching shelf,
@@ -563,6 +565,7 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
     //
     // The empty-rk guard the head of this function used to carry is the SURFACE's now
     // (`ItemMenuScreen::activate`): a row with no target never becomes a request at all.
+    let save_to_library = matches!(act, Action::SaveToLibrary(_));
     match act {
         Action::GoToItem(rk) => {
             let _ = from_home; // see the note below `apply_item_action`
@@ -684,6 +687,41 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
                 playback.captured_card(ps, pa, mm, true, pages, bridge);
             }
         }
+        // The stream picker: fetch the list on a worker (the bridge asks every stream addon, which
+        // takes seconds), then present it over the same card (`stream_pick_tick`).
+        Action::ChooseStream(rk) => {
+            if let Some(mm) = item.as_ref().filter(|m| m.rk == rk && matches!(m.kind, 0 | 3)) {
+                bridge.stream_pick = StreamPickAwait::start(StreamPickJob::List { instant: false }, sid, mm, req_origin, from_home, now);
+            }
+        }
+        // The picker's Instant only switch: the same list asked again, narrowed or not.
+        Action::StreamsInstant { rk, on } => {
+            if let Some(mm) = item.as_ref().filter(|m| m.rk == rk && matches!(m.kind, 0 | 3)) {
+                bridge.stream_pick = StreamPickAwait::start(StreamPickJob::List { instant: on }, sid, mm, req_origin, from_home, now);
+            }
+        }
+        // A picked stream: record the choice on a worker, then play the captured item.
+        Action::PlayStream { rk, index } => {
+            if let Some(mm) = item.as_ref().filter(|m| m.rk == rk && matches!(m.kind, 0 | 3)) {
+                bridge.stream_pick = StreamPickAwait::start(StreamPickJob::Choose(index), sid, mm, req_origin, from_home, now);
+            }
+        }
+        // My Library: the bridge writes the account's library and raises its Home-changed flag,
+        // which the run loop answers with one hubs refetch (the card's mark follows from it).
+        Action::SaveToLibrary(rk) | Action::RemoveFromLibrary(rk) if !rk.is_empty() => {
+            let add = save_to_library;
+            if let Some(client) = plx_plex::plex::client_for(sid) {
+                let started = plx_base::task::spawn_off_frame("my library", move |_| {
+                    if !client.stremio_library(&rk, add) {
+                        plx_base::eventlog::log("my library: the change was refused");
+                    }
+                });
+                if !started {
+                    plx_base::eventlog::log("my library: the worker was refused");
+                }
+            }
+        }
+        Action::SaveToLibrary(_) | Action::RemoveFromLibrary(_) => {}
         Action::PlayTrailer {
             rk,
             part,
@@ -730,6 +768,292 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
             );
         }
     }
+}
+
+/// Which half of the stream picker a [`StreamPickAwait`] is waiting on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StreamPickJob {
+    /// *Choose Stream*: the list of streams, to present as a menu (`instant`: only those that
+    /// start at once).
+    List { instant: bool },
+    /// A picked row: the choice of the stream at this index of the ranked list, then play.
+    Choose(i64),
+}
+
+/// What a stream-picker worker answers.
+pub(crate) enum StreamPickAnswer {
+    Listed(Vec<plx_screens::registry::StreamChoice>),
+    Chosen,
+    Failed,
+}
+
+/// **The stream picker between a press and its answer.** Both of its server calls go to the
+/// Stremio bridge, and the list one fans out to every stream addon, so neither may run on the
+/// frame thread: a worker makes the call and sends its answer here, and [`stream_pick_tick`]
+/// (every frame, route-unconditional, beside `menu_play_tick`) acts on it — presents the picker
+/// over the card it was asked from, or plays the captured item from the chosen stream. A new
+/// press replaces the wait (its receiver is dropped, so a late answer goes nowhere).
+pub(crate) struct StreamPickAwait {
+    job: StreamPickJob,
+    rx: std::sync::mpsc::Receiver<StreamPickAnswer>,
+    item: plx_data::pms::PmsMovie,
+    origin: plx_screens::registry::MenuOrigin,
+    from_home: bool,
+    deadline: u32,
+    /// The list, once it has arrived and until it is presented.
+    listed: Option<Vec<plx_screens::registry::StreamChoice>>,
+}
+
+/// How long a stream-picker answer is waited for. The bridge's own addon reads give up sooner.
+const STREAM_PICK_CEILING_MS: u32 = 45_000;
+
+/// The Detail page's *Streams* pill: list the leaf's streams and present the menu over `origin`
+/// (the page, anchored to the pill). The same worker and menu as the card menu's *Choose stream*.
+pub(super) fn choose_stream_for(
+    bridge: &mut super::bridge::Bridge,
+    item: &plx_data::pms::PmsMovie,
+    origin: plx_screens::registry::MenuOrigin,
+    now: u32,
+) {
+    bridge.stream_pick = StreamPickAwait::start(StreamPickJob::List { instant: false }, item.sid, item, origin, false, now);
+}
+
+impl StreamPickAwait {
+    /// Starts `job` for `item` on a worker. `None` when the server is not registered or the worker
+    /// was refused (logged), which leaves nothing waiting.
+    fn start(
+        job: StreamPickJob,
+        sid: plx_plex::plex::ServerId,
+        item: &plx_data::pms::PmsMovie,
+        origin: plx_screens::registry::MenuOrigin,
+        from_home: bool,
+        now: u32,
+    ) -> Option<Self> {
+        let client = plx_plex::plex::client_for(sid)?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let rk = item.rk.clone();
+        let started = plx_base::task::spawn_off_frame("stream picker", move |_| {
+            let answer = match job {
+                StreamPickJob::List { instant } => match client.stream_choices_narrowed(&rk, instant) {
+                    Some(mc) => StreamPickAnswer::Listed(plx_screens::registry::StreamChoice::from_container(&mc)),
+                    None => StreamPickAnswer::Failed,
+                },
+                StreamPickJob::Choose(index) => {
+                    if client.choose_stream(&rk, index) { StreamPickAnswer::Chosen } else { StreamPickAnswer::Failed }
+                }
+            };
+            let _ = tx.send(answer);
+            plx_machine::present::wake_from_worker();
+        });
+        if !started {
+            plx_base::eventlog::log("stream picker: the worker was refused");
+            return None;
+        }
+        Some(Self { job, rx, item: item.clone(), origin, from_home, deadline: now.wrapping_add(STREAM_PICK_CEILING_MS), listed: None })
+    }
+}
+
+/// The landing half of [`StreamPickAwait`]: called every frame while one is waiting.
+pub(super) fn stream_pick_tick<R: super::playback::PlaybackResources>(
+    ps: &mut plx_media::route::PlaybackSession,
+    pa: &mut plx_media::player::adapter::PlayerAdapter,
+    pages: &mut plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,
+    bridge: &mut super::bridge::Bridge,
+    resources: &mut R,
+    now: u32,
+) {
+    let Some(wait) = bridge.stream_pick.as_mut() else { return };
+    let timed_out = (now.wrapping_sub(wait.deadline) as i32) >= 0;
+    if wait.listed.is_none() {
+        match wait.rx.try_recv() {
+            Ok(StreamPickAnswer::Listed(choices)) => wait.listed = Some(choices),
+            Ok(StreamPickAnswer::Chosen) => {
+                let Some(wait) = bridge.stream_pick.take() else { return };
+                LiveItemPlayback(resources).captured_card(ps, pa, &wait.item, false, pages, bridge);
+                return;
+            }
+            Ok(StreamPickAnswer::Failed) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                let job = wait.job;
+                bridge.stream_pick = None;
+                plx_base::eventlog::log(match job {
+                    StreamPickJob::List { .. } => "stream picker: the stream list could not be read",
+                    StreamPickJob::Choose(_) => "stream picker: the choice could not be recorded",
+                });
+                notify(plx_platform::i18n::msg::browse_menu_no_streams());
+                return;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                if timed_out {
+                    plx_base::eventlog::log("stream picker: no answer in time");
+                    bridge.stream_pick = None;
+                }
+                return;
+            }
+        }
+    }
+    // the list is in; the menu it was asked from may still be closing, so present once it is gone
+    if super::bridge::item_menu_up(pages) {
+        if timed_out {
+            bridge.stream_pick = None;
+        }
+        return;
+    }
+    let Some(mut wait) = bridge.stream_pick.take() else { return };
+    let choices = wait.listed.take().unwrap_or_default();
+    present_stream_picker(pages, &wait, choices);
+}
+
+/// Present the picker over the card the list was asked from — or say there is nothing to pick.
+fn present_stream_picker(
+    pages: &mut plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,
+    wait: &StreamPickAwait,
+    choices: Vec<plx_screens::registry::StreamChoice>,
+) {
+    // an Instant only list that came back empty still opens, so its switch can be turned off
+    if choices.is_empty() && !matches!(wait.job, StreamPickJob::List { instant: true }) {
+        plx_base::eventlog::log("stream picker: no playable stream");
+        notify(plx_platform::i18n::msg::browse_menu_no_streams());
+        return;
+    }
+    let arg = plx_screens::registry::ItemMenuArg {
+        sid: wait.item.sid,
+        rk: wait.item.rk.clone(),
+        kind: plx_screens::registry::ItemMenuKind::Streams {
+            row: Box::new(wait.item.clone()),
+            choices: choices.into(),
+            instant: matches!(wait.job, StreamPickJob::List { instant: true }),
+        },
+        host: wait.origin.host,
+        focus: wait.origin.focus,
+        anchor: wait.origin.anchor,
+        loaded_episode: false,
+        from_home: wait.from_home,
+    };
+    super::bridge::open_item_menu(pages, arg);
+}
+
+/// **The player's Change stream page, its list**: fetched on a worker once per item played (the
+/// bridge already ranked the streams to start it, so the answer is quick) and published to the
+/// More menu (`more_menu::set_streams`), which shows the row once it is there.
+pub(super) fn player_streams_fetch(ps: &plx_media::route::PlaybackSession) {
+    let rk = plx_media::route::cur_rk(ps);
+    if rk.is_empty() || plx_appkit::more_menu::streams_rk() == rk {
+        return;
+    }
+    // claimed now, so the next frame does not ask again
+    plx_appkit::more_menu::set_streams(&rk, Some(Vec::new()), None);
+    let client = plx_plex::plex::client_for(plx_media::route::cur_sid(ps))
+        .or_else(|| plx_plex::plex::client_for(plx_plex::plex::current_server()));
+    let Some(client) = client else {
+        log("player streams: no server to ask");
+        plx_appkit::more_menu::set_streams(&rk, None, None);
+        return;
+    };
+    log("player streams: asking for the list (More > Change stream)");
+    let worker_rk = rk.clone();
+    let started = plx_base::task::spawn_off_frame("player streams", move |_| {
+        let listed = client.stream_choices(&worker_rk).map(|mc| plx_screens::registry::StreamChoice::from_container(&mc));
+        // a newer item may have claimed the list since; its answer is the one that stands
+        if plx_appkit::more_menu::streams_rk() != worker_rk {
+            return;
+        }
+        match listed {
+            Some(choices) if !choices.is_empty() => {
+                let playing = choices.iter().find(|c| c.playing).and_then(|c| u16::try_from(c.index).ok());
+                let rows = choices.into_iter()
+                    .filter_map(|c| Some(plx_appkit::more_menu::StreamRow {
+                        index: u16::try_from(c.index).ok()?, label: c.label, detail: c.detail }))
+                    .collect();
+                plx_appkit::more_menu::set_streams(&worker_rk, Some(rows), playing);
+                log("player streams: listed for More > Change stream");
+            }
+            _ => {
+                log("player streams: none offered for this item");
+                plx_appkit::more_menu::set_streams(&worker_rk, None, None);
+            }
+        }
+        plx_machine::present::wake_from_worker();
+    });
+    if !started {
+        log("player streams: the worker was refused");
+        plx_appkit::more_menu::set_streams(&rk, None, None);
+    }
+}
+
+/// **A Change stream pick**: record it with the bridge on a worker. `None` when there is no server
+/// or the worker was refused (logged).
+pub(super) fn start_player_stream(ps: &plx_media::route::PlaybackSession, index: u16) -> Option<std::sync::mpsc::Receiver<bool>> {
+    let rk = plx_media::route::cur_rk(ps);
+    let client = plx_plex::plex::client_for(plx_media::route::cur_sid(ps))?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let started = plx_base::task::spawn_off_frame("player stream", move |_| {
+        let _ = tx.send(client.choose_stream(&rk, i64::from(index)));
+        plx_machine::present::wake_from_worker();
+    });
+    if !started {
+        plx_base::eventlog::log("player stream: the worker was refused");
+        return None;
+    }
+    Some(rx)
+}
+
+/// The landing half of [`start_player_stream`]: once the bridge has the pick, the item playing is
+/// resolved again at the position on screen — the same request, now redirected to the new stream.
+pub(super) fn player_stream_tick(
+    ps: &mut plx_media::route::PlaybackSession,
+    pa: &mut plx_media::player::adapter::PlayerAdapter,
+    bridge: &mut super::bridge::Bridge,
+) {
+    let Some(rx) = bridge.player_stream.as_ref() else { return };
+    match rx.try_recv() {
+        Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        Ok(true) => {
+            bridge.player_stream = None;
+            plx_base::eventlog::log("player stream: switching");
+            if super::playback::retry_failed_playback(ps, pa, bridge.metadata_mut(), None) {
+                // the list's checkmark follows the new stream on its next fetch
+                plx_appkit::more_menu::set_streams("", Some(Vec::new()), None);
+            } else {
+                notify(plx_platform::i18n::msg::browse_menu_no_streams());
+            }
+        }
+        Ok(false) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            bridge.player_stream = None;
+            plx_base::eventlog::log("player stream: the choice could not be recorded");
+            notify(plx_platform::i18n::msg::browse_menu_no_streams());
+        }
+    }
+}
+
+/// **Search's suggested terms**: asked of the Stremio bridge once a run, on a worker, as soon as a
+/// server is registered, and handed to the Search screen (`search::set_suggestions`).
+pub(super) fn search_suggestions_fetch() {
+    static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if ASKED.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let Some(client) = plx_plex::plex::client_opt() else { return };
+    ASKED.store(true, std::sync::atomic::Ordering::Relaxed);
+    let started = plx_base::task::spawn_off_frame("search suggestions", move |_| {
+        let terms: Vec<String> = client.stremio_get("/stremio/suggest")
+            .and_then(|v| v.get("terms").and_then(|t| t.as_array()).cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|t| t.as_str().map(str::to_string))
+            .collect();
+        plx_screens::search::set_suggestions(terms);
+    });
+    if !started {
+        ASKED.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// A one-line notice through the television's own toast, off the frame thread (an LS2 call).
+fn notify(message: &str) {
+    let message = message.to_owned();
+    plx_base::task::spawn_small("stream picker notice", move || {
+        let _ = plx_platform::tv::toast::toast(&message);
+    });
 }
 
 #[cfg(test)]

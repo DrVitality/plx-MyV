@@ -708,7 +708,7 @@ pub mod host {
         fn draw(&self, alpha: f32, clear: bool) {
             if !self.valid() { return; }
             if clear {
-                let c = crate::theme::CLEAR_RGB;
+                let c = crate::theme::appearance::clear_rgb();
                 plx_gfx::gfx::frame_clear(c.0, c.1, c.2);
             }
             unsafe { (*std::ptr::addr_of!(CACHE)).draw_alpha(alpha); }

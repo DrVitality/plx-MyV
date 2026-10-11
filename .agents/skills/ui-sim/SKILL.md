@@ -15,8 +15,8 @@ description: >
 > lane holds it, the simulator is usually the answer rather than the queue — N instances run at
 > once, each with its own `PLXNATIVE_RUNTIME_DIR`. Come back to the TV only for what the simulator
 > provably cannot answer (frame rate, text rasterization, LG's decoder, the video plane) — a
-> shorter list on macOS since the streaming pipeline moved onto that simulator on 2026-08-28.
-> Windows/WSLg's UI-only path stops at the existing host no-video seam.
+> shorter list since the streaming pipeline moved onto the simulator on 2026-08-28 (macOS) and
+> 2026-10-10 (Linux / Windows-WSLg, which `tools/sim.ps1 run` arms for playback by default).
 
 `plxnative-sim` is the same application core the television runs, linked against desktop SDL2 and
 desktop GL. It draws the real interface against your real Plex Media Server on macOS or through
@@ -64,10 +64,12 @@ files off the Windows-mounted checkout. `-StageToken` copies the token from giti
 The staged token persists in that runtime directory, so use a fresh `-RuntimeDir` for QR sign-in
 after staging one. `-PmsHost` overrides the header's PMS host.
 
-This path deliberately calls `make sim-wsl`, the Windows-facing compatibility alias for the native
-Linux `make sim-linux` target. Both skip bundled host FFmpeg. UI, sign-in, Plex browsing,
-screenshots and remote commands work; playback reaches the existing host "no video path" result.
-Use macOS `make sim-macos` when the demux/clock-sink simulation is required.
+This path calls `make sim-wsl`, the Windows-facing compatibility alias for the native Linux
+`make sim-linux` target. Both build the host FFmpeg (`HOST=1 ci/build-ffmpeg.sh`, staged as
+`pkg/libav*-plx-host.so.*`), so the simulator streams: `sim.ps1 run` arms `plxnative-clocksink`
+and `plxnative-simvideo` in the runtime directory, which makes a play demux the real source, keep
+time, and — with the distribution's `ffmpeg` on `PATH` (`sim.ps1 setup` installs it) — paint the
+picture under the UI. No sound, and nothing about LG's decoder (`player/sim_video.rs`).
 
 Check `glxinfo -B` before interpreting local smoothness: `Device: D3D12 (<GPU>)` and
 `Accelerated: yes` prove WSLg is using the GPU; `llvmpipe`, `softpipe`, or `Accelerated: no` do not.

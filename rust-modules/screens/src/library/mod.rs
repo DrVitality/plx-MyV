@@ -735,7 +735,7 @@ impl LibraryScreen {
             let from_deck = self.from_deck(elem, cx);
             let req = if held {
                 LibraryReq::ItemMenu { sid: item.sid, rk: item.rk.clone(), from_deck }
-            } else if from_deck && plx_media::route::deck_press().press_plays() {
+            } else if crate::registry::card_press_plays(item.kind) {
                 LibraryReq::Play { sid: item.sid, rk: item.rk.clone(), resume_ns: plx_data::metadata::resume_ns(item.resume_ms, item.dur_ns / 1_000_000) }
             } else { LibraryReq::Detail { sid: item.sid, rk: item.rk.clone() } };
             fx.push(Fx::App(AppFx::Library(req)));
@@ -748,6 +748,7 @@ impl LibraryScreen {
             Some(2) => Some(LibraryReq::Tab(HomeTab::Shows)),
             Some(3) => Some(LibraryReq::Tab(HomeTab::Search)),
             Some(4) => Some(LibraryReq::Account),
+            Some(5) => Some(LibraryReq::Tab(HomeTab::Anime)),
             _ => None,
         };
         if let Some(req) = req { fx.push(Fx::App(AppFx::Library(req))); return Handled::Yes; }
@@ -1416,8 +1417,8 @@ impl<H: LibraryLike> Screen<H> for LibraryScreen {
 impl LogicalState for LibraryScreen {
     fn write(&self, c: &mut Canon) {
         c.u32(self.entry.0).u32(self.instance.0);
-        c.u32(match self.kind { SecKind::Movie => 0, SecKind::Show => 1 });
-        c.option(self.wanted_kind, |c, kind| { c.u32(match kind { SecKind::Movie => 0, SecKind::Show => 1 }); });
+        c.u32(self.kind.index() as u32);
+        c.option(self.wanted_kind, |c, kind| { c.u32(kind.index() as u32); });
         c.f32(self.scroll.pos).f32(self.scroll.vel).f32(self.scroll_target);
         c.option(self.restore_scroll, |c, value| { c.f32(value); });
         c.bool(self.live).bool(self.initial);

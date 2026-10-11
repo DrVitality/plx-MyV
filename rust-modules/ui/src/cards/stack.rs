@@ -396,6 +396,21 @@ impl<K: Copy + Eq> Stack<K> {
         }
     }
 
+    /// Grid `k`'s state (`None` while the layout has no such grid). Its page (top and scroll) is
+    /// the one the stack handed it on the last event, so a page that paints its own sections can
+    /// `draw` it as it stands.
+    pub fn grid(&self, k: K) -> Option<&Grid> {
+        match self.bodies.get(self.index(k)?) {
+            Some(Body::Grid(g)) => Some(g),
+            _ => None,
+        }
+    }
+
+    /// Section `k`'s top in document space (`None` while the layout has no such section).
+    pub fn top_of<H: Host, P: StackPage<H, Key = K>>(&self, p: &P, cx: &Cx<'_, H>, k: K) -> Option<f32> {
+        Some(self.top(p, cx, self.index(k)?))
+    }
+
     /// Where shelf `k`'s tiles sit now.
     pub fn shelf_frame<H: Host, P: StackPage<H, Key = K>>(&self, p: &P, cx: &Cx<'_, H>, k: K) -> Option<SectionFrame> {
         Some(self.frame(p, cx, self.index(k)?))
@@ -645,6 +660,13 @@ impl<K: Copy + Eq> Stack<K> {
             self.sync_pages(p, cx);
         }
         reported
+    }
+
+    /// Re-read the page's sections now, for a page whose own state just changed what they are
+    /// (a panel it opened) and which must be focusable before the next event reaches the stack.
+    pub fn relayout<H: Host<Elem = u32>, P: StackPage<H, Key = K>>(&mut self, p: &P, cx: &Cx<'_, H>) {
+        self.refresh(p, cx);
+        self.sync_pages(p, cx);
     }
 
     /// Under [`reveal_on_move`](Self::reveal_on_move): bring the focused element's block into view

@@ -110,7 +110,12 @@ impl Rig<TestHost> for TestRig {
     fn deliver(&mut self, _: MachineId, _: &AppMsg, _: &CxParts<u32>, _: &mut Effects<'_, TestHost>) -> Handled { Handled::No }
     fn timer(&mut self, _: MachineId, _: TimerId, _: &CxParts<u32>, _: &mut Effects<'_, TestHost>) {}
     fn app_fx(&mut self, _: MachineId, effect: AppFx, _: &CxParts<u32>, _: &mut Effects<'_, TestHost>) {
-        if let AppFx::Content(ContentReq::Push(arg)) = effect { self.opened.push(arg); }
+        match effect {
+            AppFx::Content(ContentReq::Push(arg)) => self.opened.push(arg),
+            // a card press that plays names the same item a push would open
+            AppFx::Content(ContentReq::PlayCard { sid, rk }) => self.opened.push(ContentArg::Detail { sid, rk }),
+            _ => {}
+        }
     }
     fn log(&mut self, _: &str) {}
     fn prepare(&mut self, _: &mut Budget, _: &mut Present) {}

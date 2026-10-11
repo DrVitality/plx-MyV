@@ -59,6 +59,33 @@ pub(super) fn execute(command: PreferenceCmd) {
                 plx_machine::idle::invalidate();
             });
         }
+        PreferenceCmd::Appearance { look, reply } => {
+            let _ = plx_base::storage_worker::submit_retained(move || {
+                let saved = plx_plex::plex::session::update_with_outcome(|s| Some(s.with_appearance(look)))
+                    .is_some_and(|write| matches!(write.classify(),
+                        plx_plex::plex::session::async_persistence::CompletionOutcome::Durable(_)));
+                // live only once durable, like every other local preference: a failed save claims nothing
+                if saved {
+                    super::boot::apply_appearance(look);
+                }
+                let _ = reply.send(saved);
+                plx_machine::idle::invalidate();
+            });
+        }
+        PreferenceCmd::Stremio { op, reply } => {
+            let Some(client) = plx_plex::plex::client_opt() else {
+                let _ = reply.send(None);
+                plx_machine::idle::invalidate();
+                return;
+            };
+            plx_base::task::spawn_small("stremio settings", move || {
+                let config = client.stremio_get(&op.path())
+                    .as_ref()
+                    .and_then(plx_screens::registry::StremioConfig::from_json);
+                let _ = reply.send(config);
+                plx_machine::idle::invalidate();
+            });
+        }
         PreferenceCmd::SkipInterval { interval, reply } => {
             let _ = plx_base::storage_worker::submit_retained(move || {
                 let _ = reply.send(plx_media::route::set_skip_interval(interval));

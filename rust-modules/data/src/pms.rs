@@ -109,6 +109,14 @@ pub struct PmsMovie {
     #[serde(with = "record::blur_bits")]
     pub blur: [[f32; 3]; 4],
     pub has_blur: bool,
+    /// Saved in the account's Stremio library (an episode: its show) — the card menu's Library
+    /// row reads it. Not recorded: it is the bridge's live answer, re-read on every fetch.
+    #[serde(skip)]
+    pub in_library: bool,
+    /// The audience score the row carries (`audienceRating`, 0–10; IMDb's, from the Stremio
+    /// bridge), 0 when none. Not recorded, like [`Self::in_library`]: the card bubble reads it live.
+    #[serde(skip)]
+    pub audience: f32,
     pub kind: c_int, // 0 = movie, 1 = show, 2 = season, 3 = episode, 4 = collection
     pub resume_ms: i64,  // viewOffset — drives the Continue Watching resume bar
     pub show_rk: String, // parent show rk (episode: grandparent; season: parent)
@@ -315,6 +323,8 @@ pub fn parse_item(it: &plx_plex::plex::Metadata, sid: ServerId) -> PmsMovie {
         sec: it.library_section_id,
         ..Default::default()
     };
+    m.in_library = it.in_library;
+    m.audience = it.audience_rating as f32;
     m.aired = clean(&it.originally_available_at);
     m.kind = match it.kind.as_str() {
         "show" => 1,
@@ -1309,19 +1319,13 @@ fn merge_with_scope(srcs: &[Src], scope: &BrowseScope) -> HubBuild {
     }
 
     // ---- 3. the rotating hero pool ----
-    // Continue Watching items first, then Recently Added, deduped by the item's IDENTITY. Require
-    // landscape `art` (the hero draws a full-bleed backdrop) and skip seasons (a bare "Season 1"
-    // makes a poor billboard). Capped at HERO_MAX.
+    // Featured (`.popular`) shelves first, then Continue Watching, then Recently Added
+    // ([`hero_candidates`]), deduped by the item's IDENTITY. Require landscape `art` (the hero
+    // draws a full-bleed backdrop) and skip seasons (a bare "Season 1" makes a poor billboard).
+    // Capped at HERO_MAX.
     let mut new_pool: Vec<HeroSlot> = Vec::new();
-    for hub in &new_hubs {
-        // Match on the locale-independent hubIdentifier, not the localized display title:
-        // "home.continue" plus every Recently Added variant (home.movies.recent,
-        // home.television.recent, promoted <type>.recentlyadded.<id>) all carry "recent".
-        let eligible = hub.hub_id == "home.continue" || hub.hub_id.contains("recent");
-        if !eligible {
-            continue;
-        }
-        for idx in hub.start..hub.start + hub.len {
+    for idx in hero_candidates(&new_hubs) {
+        {
             if new_pool.len() >= HERO_MAX {
                 break;
             }
@@ -1350,6 +1354,34 @@ fn merge_with_scope(srcs: &[Src], scope: &BrowseScope) -> HubBuild {
     // opens the door is not knowable until every shelf has contributed.
     own_items_first(&mut new_pool);
     (new_cat, new_hubs, new_pool)
+}
+
+/// The catalog indexes the hero pool is drawn from, in the order it prefers them. Matched on the
+/// locale-independent hubIdentifier, never the display title:
+///
+/// 1. **Featured** shelves — an id ending `.popular` (the Stremio bridge marks its popular and
+///    trending catalogs so), taken ROUND-ROBIN across those shelves, so a popular-films shelf and a
+///    popular-shows shelf alternate on the billboard rather than the first filling it;
+/// 2. `home.continue`, then every Recently Added variant (home.movies.recent,
+///    home.television.recent, promoted `<type>.recentlyadded.<id>` all carry "recent"), shelf by
+///    shelf, as before.
+fn hero_candidates(hubs: &[HubRow]) -> Vec<usize> {
+    let featured: Vec<&HubRow> = hubs.iter().filter(|h| h.hub_id.ends_with(".popular")).collect();
+    let mut out = Vec::new();
+    let deepest = featured.iter().map(|h| h.len).max().unwrap_or(0);
+    for i in 0..deepest {
+        for h in &featured {
+            if i < h.len {
+                out.push(h.start + i);
+            }
+        }
+    }
+    for hub in hubs {
+        if hub.hub_id == "home.continue" || hub.hub_id.contains("recent") {
+            out.extend(hub.start..hub.start + hub.len);
+        }
+    }
+    out
 }
 
 // ---- fetch state machine: PER SOURCE loading / ready / failed + the automatic-retry backoff ----
@@ -2723,5 +2755,31 @@ impl plx_base::tile::Tile for PmsMovie {
     }
     fn unwatched(&self) -> bool {
         self.unwatched
+    }
+}
+
+#[cfg(test)]
+mod hero_candidate_tests {
+    use super::*;
+
+    fn hub(id: &str, start: usize, len: usize) -> HubRow {
+        HubRow { title: String::new(), hub_id: id.into(), key: String::new(), source: String::new(),
+            total: len, start, len, offset: 0, more: false }
+    }
+
+    /// The billboard opens on the featured shelves, films and shows alternating, before Continue
+    /// Watching and Recently Added; shelves that are neither never reach it.
+    #[test]
+    fn featured_shelves_lead_the_hero_alternating_then_continue_and_recent() {
+        let hubs = [
+            hub("home.continue", 0, 2),
+            hub("stremio.shelf.0.popular", 2, 3),
+            hub("stremio.shelf.1.popular", 5, 2),
+            hub("stremio.genre.0.Action", 7, 2),
+            hub("home.movies.recent", 9, 1),
+        ];
+        assert_eq!(hero_candidates(&hubs), vec![2, 5, 3, 6, 4, 0, 1, 9]);
+        // a plain library keeps its old order
+        assert_eq!(hero_candidates(&hubs[3..]), vec![9]);
     }
 }

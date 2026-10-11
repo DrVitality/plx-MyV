@@ -39,7 +39,7 @@ pub use picker::{PickerPage, SHAPE as PICKER_SHAPE};
 pub const SHAPE: &str = "PreferencesV3{kind:u8,selection:u32,busy:bool,status:str,quality:u8,direct_play:u8,values:[str]}";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind { Playback, AudioSubtitles }
+pub enum Kind { Playback, AudioSubtitles, Appearance }
 impl PickerKind {
     fn title(self) -> &'static str { match self {
         Self::Quality => plx_platform::i18n::msg::settings_playback_quality(), Self::DirectPlay => plx_platform::i18n::msg::settings_playback_direct_play(),
@@ -49,6 +49,14 @@ impl PickerKind {
         Self::SkipInterval => plx_platform::i18n::msg::settings_playback_skip_interval(),
         Self::AudioLanguage => plx_platform::i18n::msg::settings_audio_language(), Self::SubtitleMode => plx_platform::i18n::msg::settings_audio_subtitles(),
         Self::SubtitleLanguage => plx_platform::i18n::msg::settings_audio_subtitle_language(), Self::ForcedSubtitles => plx_platform::i18n::msg::settings_audio_forced_subtitles(),
+        Self::Accent => plx_platform::i18n::msg::settings_appearance_accent(),
+        Self::Ground => plx_platform::i18n::msg::settings_appearance_ground(),
+        Self::Corners => plx_platform::i18n::msg::settings_appearance_corners(),
+        Self::Peek => plx_platform::i18n::msg::settings_appearance_peek(),
+        Self::StreamQuality => plx_platform::i18n::msg::settings_playback_stream_quality(),
+        Self::StreamSource => plx_platform::i18n::msg::settings_playback_stream_source(),
+        Self::SkipIntros => plx_platform::i18n::msg::settings_playback_skip_intros(),
+        Self::HomeStart => plx_platform::i18n::msg::settings_appearance_home_start(),
     }}
     /// What this field's picker says about it under its title. The four account fields share the
     /// account note (it is about where those values are saved); each local one has its own.
@@ -61,12 +69,22 @@ impl PickerKind {
         Self::DeckPress => plx_platform::i18n::msg::settings_playback_deck_press_copy(),
         Self::SkipInterval => plx_platform::i18n::msg::settings_playback_skip_interval_copy(),
         Self::AudioLanguage | Self::SubtitleMode | Self::SubtitleLanguage | Self::ForcedSubtitles => plx_platform::i18n::msg::settings_audio_account_note(),
+        Self::Accent => plx_platform::i18n::msg::settings_appearance_accent_copy(),
+        Self::Ground => plx_platform::i18n::msg::settings_appearance_ground_copy(),
+        Self::Corners => plx_platform::i18n::msg::settings_appearance_corners_copy(),
+        Self::Peek => plx_platform::i18n::msg::settings_appearance_peek_copy(),
+        Self::StreamQuality => plx_platform::i18n::msg::settings_playback_stream_quality_copy(),
+        Self::StreamSource => plx_platform::i18n::msg::settings_playback_stream_source_copy(),
+        Self::SkipIntros => plx_platform::i18n::msg::settings_playback_skip_intros_copy(),
+        Self::HomeStart => plx_platform::i18n::msg::settings_appearance_home_start_copy(),
     }}
     /// The field-list page this field belongs to.
     fn kind(self) -> Kind {
         match self {
-            Self::Quality | Self::DirectPlay | Self::SubtitleSize | Self::SubtitlePosition | Self::NextEpisode | Self::DeckPress | Self::SkipInterval => Kind::Playback,
+            Self::Quality | Self::DirectPlay | Self::SubtitleSize | Self::SubtitlePosition | Self::NextEpisode | Self::DeckPress | Self::SkipInterval
+            | Self::StreamQuality | Self::StreamSource | Self::SkipIntros => Kind::Playback,
             Self::AudioLanguage | Self::SubtitleMode | Self::SubtitleLanguage | Self::ForcedSubtitles => Kind::AudioSubtitles,
+            Self::Accent | Self::Ground | Self::Corners | Self::Peek | Self::HomeStart => Kind::Appearance,
         }
     }
 }
@@ -74,14 +92,17 @@ impl Kind {
     fn title(self) -> &'static str {
         match self {
             Kind::Playback => plx_platform::i18n::msg::settings_playback_title(), Kind::AudioSubtitles => plx_platform::i18n::msg::settings_audio_title(),
+            Kind::Appearance => plx_platform::i18n::msg::settings_appearance_title(),
         }
     }
     fn word(self) -> &'static str {
-        match self { Kind::Playback => word::PLAYBACK, Kind::AudioSubtitles => word::AUDIO }
+        match self { Kind::Playback => word::PLAYBACK, Kind::AudioSubtitles => word::AUDIO, Kind::Appearance => word::APPEARANCE }
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Value { Quality(Quality), DirectPlay(DirectPlayMode), SubtitleSize(SubtitleSize), SubtitlePosition(SubtitlePosition), NextEpisode(NextEpisodeMode), DeckPress(DeckPress), SkipInterval(SkipInterval), Language(String), Mode(i64), Forced(i64) }
+enum Value { Quality(Quality), DirectPlay(DirectPlayMode), SubtitleSize(SubtitleSize), SubtitlePosition(SubtitlePosition), NextEpisode(NextEpisodeMode), DeckPress(DeckPress), SkipInterval(SkipInterval), Language(String), Mode(i64), Forced(i64),
+    /// An Appearance choice: the field and its ladder index (`theme::appearance`).
+    Look(PickerKind, u8) }
 
 /// The hashed half of a transaction: what the page shows while a load or save is in flight.
 struct Io { busy: bool, status: String }
@@ -112,6 +133,7 @@ fn copy_text<'a>(subject: Subject, status: &'a str, direct_play: DirectPlayMode)
     Cow::Borrowed(match subject {
         Subject::Page(Kind::AudioSubtitles) => plx_platform::i18n::msg::settings_audio_account_note(),
         Subject::Page(Kind::Playback) => plx_platform::i18n::msg::settings_playback_copy(),
+        Subject::Page(Kind::Appearance) => plx_platform::i18n::msg::settings_appearance_copy(),
         Subject::Picker(field) => field.copy(),
     })
 }
@@ -211,6 +233,7 @@ impl Txn {
             Value::NextEpisode(mode) => PreferenceCmd::NextEpisode { mode, reply },
             Value::DeckPress(mode) => PreferenceCmd::DeckPress { mode, reply },
             Value::SkipInterval(interval) => PreferenceCmd::SkipInterval { interval, reply },
+            Value::Look(field, index) => PreferenceCmd::Appearance { look: look_with(field, index), reply },
             _ => return,
         };
         self.pending = Some(Pending::Local(rx)); io.busy = true; self.saving = true;
@@ -284,6 +307,14 @@ impl FormId for RowId {
             Self::Field(PickerKind::NextEpisode) => 4,
             Self::Field(PickerKind::SkipInterval) => 5,
             Self::Field(PickerKind::DeckPress) => 7,
+            Self::Field(PickerKind::Accent) => 0,
+            Self::Field(PickerKind::Ground) => 1,
+            Self::Field(PickerKind::Corners) => 2,
+            Self::Field(PickerKind::Peek) => 3,
+            Self::Field(PickerKind::StreamQuality) => 8,
+            Self::Field(PickerKind::StreamSource) => 9,
+            Self::Field(PickerKind::SkipIntros) => 10,
+            Self::Field(PickerKind::HomeStart) => 4,
             Self::Retry => 6,
         })
     }
@@ -321,6 +352,8 @@ pub struct PreferencesPage {
     next_episode: NextEpisodeMode,
     deck_press: DeckPress,
     skip_interval: SkipInterval,
+    /// The Appearance choices the rows were last built from (not canonical state, like `look`).
+    appearance: plx_plex::plex::session::Appearance,
 }
 impl PreferencesPage {
     pub fn new(entry: EntryId, kind: Kind) -> Self {
@@ -330,7 +363,7 @@ impl PreferencesPage {
             copy: String::new(), txn: Txn::new(false),
             look: (plx_media::route::subtitle_size(), plx_media::route::subtitle_position()),
             next_episode: plx_media::route::next_episode_mode(), deck_press: plx_media::route::deck_press(),
-            skip_interval: plx_media::route::skip_interval() };
+            skip_interval: plx_media::route::skip_interval(), appearance: live_look() };
         s.rebuild(None);
         s
     }
@@ -358,6 +391,7 @@ impl PreferencesPage {
         self.next_episode = plx_media::route::next_episode_mode();
         self.deck_press = plx_media::route::deck_press();
         self.skip_interval = plx_media::route::skip_interval();
+        self.appearance = live_look();
         self.copy = copy_text(Subject::Page(self.state.kind), &self.state.io.status, self.state.direct_play).into_owned();
         let inputs = FieldListInputs {
             kind: self.state.kind, quality: self.state.quality, direct_play: self.state.direct_play,
@@ -390,8 +424,10 @@ impl PreferencesPage {
 /// Which fields `kind`'s list shows: Audio & Subtitles has none until a snapshot has loaded.
 fn fields_of(inputs: &FieldListInputs<'_>) -> &'static [PickerKind] {
     match inputs.kind {
-        Kind::Playback => &[PickerKind::Quality, PickerKind::DirectPlay, PickerKind::SubtitleSize, PickerKind::SubtitlePosition, PickerKind::NextEpisode, PickerKind::DeckPress, PickerKind::SkipInterval],
+        Kind::Playback => &[PickerKind::Quality, PickerKind::DirectPlay, PickerKind::SubtitleSize, PickerKind::SubtitlePosition, PickerKind::NextEpisode, PickerKind::DeckPress, PickerKind::SkipInterval,
+            PickerKind::StreamQuality, PickerKind::StreamSource, PickerKind::SkipIntros],
         Kind::AudioSubtitles if inputs.prefs.is_some() => &[PickerKind::AudioLanguage, PickerKind::SubtitleMode, PickerKind::SubtitleLanguage, PickerKind::ForcedSubtitles],
+        Kind::Appearance => &[PickerKind::Accent, PickerKind::Ground, PickerKind::Corners, PickerKind::Peek, PickerKind::HomeStart],
         _ => &[],
     }
 }
@@ -411,6 +447,20 @@ fn resolve_value(field: PickerKind, quality: Quality, direct_play: DirectPlayMod
         PickerKind::SubtitleLanguage => Value::Language(prefs.and_then(|p| p.subtitle_language.as_deref()).map(plx_plex::plex::languages::canonical).unwrap_or_default().to_string()),
         PickerKind::SubtitleMode => Value::Mode(prefs.map_or(0, |p| p.subtitle_mode)),
         PickerKind::ForcedSubtitles => Value::Forced(prefs.map_or(0, |p| p.subtitle_forced)),
+        PickerKind::Accent | PickerKind::Ground | PickerKind::Corners | PickerKind::Peek
+        | PickerKind::StreamQuality | PickerKind::StreamSource | PickerKind::SkipIntros | PickerKind::HomeStart => {
+            let look = live_look();
+            Value::Look(field, match field {
+                PickerKind::Accent => look.accent,
+                PickerKind::Ground => look.ground,
+                PickerKind::Corners => look.corners,
+                PickerKind::StreamQuality => look.stream_res,
+                PickerKind::StreamSource => look.stream_source,
+                PickerKind::SkipIntros => look.skip_intros,
+                PickerKind::HomeStart => look.home_start,
+                _ => look.peek,
+            })
+        }
     }
 }
 /// `PickerKind`'s picker options.
@@ -434,6 +484,23 @@ fn field_options(field: PickerKind, quality: Quality, direct_play: DirectPlayMod
             .into_iter().map(|(label, mode)| (label.into(), Value::Mode(mode))).collect(),
         PickerKind::ForcedSubtitles => [plx_platform::i18n::msg::settings_audio_prefer_regular(), plx_platform::i18n::msg::settings_audio_prefer_forced(), plx_platform::i18n::msg::settings_audio_only_forced(), plx_platform::i18n::msg::settings_audio_only_regular()]
             .into_iter().enumerate().map(|(i, s)| (s.into(), Value::Forced(i as i64))).collect(),
+        PickerKind::Accent => look_options(field, &plx_ui::theme::appearance::Accent::LADDER, accent_label),
+        PickerKind::Ground => look_options(field, &plx_ui::theme::appearance::Ground::LADDER, ground_label),
+        PickerKind::Corners => look_options(field, &plx_ui::theme::appearance::Corners::LADDER, corners_label),
+        PickerKind::Peek => look_options(field, &plx_ui::theme::appearance::Peek::LADDER, peek_label),
+        PickerKind::StreamQuality => [plx_platform::i18n::msg::settings_playback_stream_quality_best(),
+            plx_platform::i18n::msg::settings_playback_stream_quality_up_to_1080(),
+            plx_platform::i18n::msg::settings_playback_stream_quality_up_to_720()]
+            .into_iter().enumerate().map(|(i, s)| (s.into(), Value::Look(field, i as u8))).collect(),
+        PickerKind::HomeStart => [plx_platform::i18n::msg::settings_appearance_home_start_hero(),
+            plx_platform::i18n::msg::settings_appearance_home_start_continue()]
+            .into_iter().enumerate().map(|(i, s)| (s.into(), Value::Look(field, i as u8))).collect(),
+        PickerKind::SkipIntros => [plx_platform::i18n::msg::settings_playback_skip_intros_button(),
+            plx_platform::i18n::msg::settings_playback_skip_intros_auto()]
+            .into_iter().enumerate().map(|(i, s)| (s.into(), Value::Look(field, i as u8))).collect(),
+        PickerKind::StreamSource => [plx_platform::i18n::msg::settings_playback_stream_source_any(),
+            plx_platform::i18n::msg::settings_playback_stream_source_instant()]
+            .into_iter().enumerate().map(|(i, s)| (s.into(), Value::Look(field, i as u8))).collect(),
         PickerKind::AudioLanguage | PickerKind::SubtitleLanguage => {
             let mut result = vec![(if field == PickerKind::AudioLanguage { plx_platform::i18n::msg::settings_audio_original() } else { plx_platform::i18n::msg::settings_audio_no_preference() }.into(), Value::Language(String::new()))];
             result.extend(plx_plex::plex::languages::picker()
@@ -515,6 +582,83 @@ fn deck_press_label(mode: DeckPress) -> &'static str {
         DeckPress::Play => plx_platform::i18n::msg::settings_playback_deck_press_play(),
     }
 }
+/// The live Appearance choices as the session stores them (ladder indexes).
+fn live_look() -> plx_plex::plex::session::Appearance {
+    use plx_ui::theme::appearance as a;
+    plx_plex::plex::session::Appearance {
+        accent: a::index_of(&a::Accent::LADDER, &a::accent_choice()),
+        ground: a::index_of(&a::Ground::LADDER, &a::ground_choice()),
+        corners: a::index_of(&a::Corners::LADDER, &a::corners_choice()),
+        peek: a::index_of(&a::Peek::LADDER, &a::peek_choice()),
+        // the stream choices have no live mirror in this crate: the session holds them
+        ..stream_choices()
+    }
+}
+/// The stored stream choices (the look fields of the result are the session's, not the live ones).
+fn stream_choices() -> plx_plex::plex::session::Appearance {
+    plx_plex::plex::session::peek().appearance()
+}
+/// The live look with `field` set to ladder `index` — the whole record an Appearance pick saves.
+fn look_with(field: PickerKind, index: u8) -> plx_plex::plex::session::Appearance {
+    let mut look = live_look();
+    match field {
+        PickerKind::Accent => look.accent = index,
+        PickerKind::Ground => look.ground = index,
+        PickerKind::Corners => look.corners = index,
+        PickerKind::Peek => look.peek = index,
+        PickerKind::StreamQuality => look.stream_res = index,
+        PickerKind::StreamSource => look.stream_source = index,
+        PickerKind::SkipIntros => look.skip_intros = index,
+        PickerKind::HomeStart => look.home_start = index,
+        _ => {}
+    }
+    look
+}
+fn look_options<T: Copy>(field: PickerKind, ladder: &[T], label: fn(T) -> &'static str) -> Vec<(String, Value)> {
+    ladder.iter().enumerate().map(|(i, &v)| (label(v).into(), Value::Look(field, i as u8))).collect()
+}
+fn accent_label(a: plx_ui::theme::appearance::Accent) -> &'static str {
+    use plx_ui::theme::appearance::Accent;
+    match a {
+        Accent::Crimson => plx_platform::i18n::msg::settings_appearance_accent_crimson(),
+        Accent::Orange => plx_platform::i18n::msg::settings_appearance_accent_orange(),
+        Accent::Gold => plx_platform::i18n::msg::settings_appearance_accent_gold(),
+        Accent::Emerald => plx_platform::i18n::msg::settings_appearance_accent_emerald(),
+        Accent::Teal => plx_platform::i18n::msg::settings_appearance_accent_teal(),
+        Accent::Blue => plx_platform::i18n::msg::settings_appearance_accent_blue(),
+        Accent::Violet => plx_platform::i18n::msg::settings_appearance_accent_violet(),
+        Accent::Pink => plx_platform::i18n::msg::settings_appearance_accent_pink(),
+        Accent::Silver => plx_platform::i18n::msg::settings_appearance_accent_silver(),
+    }
+}
+fn ground_label(g: plx_ui::theme::appearance::Ground) -> &'static str {
+    use plx_ui::theme::appearance::Ground;
+    match g {
+        Ground::Ember => plx_platform::i18n::msg::settings_appearance_ground_ember(),
+        Ground::Charcoal => plx_platform::i18n::msg::settings_appearance_ground_charcoal(),
+        Ground::Graphite => plx_platform::i18n::msg::settings_appearance_ground_graphite(),
+        Ground::Midnight => plx_platform::i18n::msg::settings_appearance_ground_midnight(),
+        Ground::Black => plx_platform::i18n::msg::settings_appearance_ground_black(),
+    }
+}
+fn corners_label(c: plx_ui::theme::appearance::Corners) -> &'static str {
+    use plx_ui::theme::appearance::Corners;
+    match c {
+        Corners::Crisp => plx_platform::i18n::msg::settings_appearance_corners_crisp(),
+        Corners::Sharp => plx_platform::i18n::msg::settings_appearance_corners_sharp(),
+        Corners::Soft => plx_platform::i18n::msg::settings_appearance_corners_soft(),
+        Corners::Round => plx_platform::i18n::msg::settings_appearance_corners_round(),
+    }
+}
+fn peek_label(p: plx_ui::theme::appearance::Peek) -> &'static str {
+    use plx_ui::theme::appearance::Peek;
+    match p {
+        Peek::Normal => plx_platform::i18n::msg::settings_appearance_peek_normal(),
+        Peek::Quick => plx_platform::i18n::msg::settings_appearance_peek_quick(),
+        Peek::Slow => plx_platform::i18n::msg::settings_appearance_peek_slow(),
+        Peek::Off => plx_platform::i18n::msg::settings_appearance_peek_off(),
+    }
+}
 fn skip_interval_label(interval: SkipInterval) -> String {
     plx_platform::i18n::msg::settings_playback_skip_interval_seconds(interval.seconds())
 }
@@ -561,7 +705,8 @@ impl Machine<InnerHost> for PreferencesPage {
                     || self.look != (plx_media::route::subtitle_size(), plx_media::route::subtitle_position())
                     || self.next_episode != plx_media::route::next_episode_mode()
                     || self.deck_press != plx_media::route::deck_press()
-                    || self.skip_interval != plx_media::route::skip_interval() {
+                    || self.skip_interval != plx_media::route::skip_interval()
+                    || self.appearance != live_look() {
                     self.rebuild_keeping();
                     // An empty loading table had no engine seat. Give its first landing (or
                     // Retry row) one so OK works immediately, without moving an existing

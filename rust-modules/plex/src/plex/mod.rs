@@ -30,6 +30,8 @@ mod servers;
 mod hubs;
 mod library;
 pub mod collections;
+/// The stream picker (this fork's bridge): which streams an item can play from, and choosing one.
+mod stream_choice;
 /// Agent-backed subtitle search & download. `docs/pms-api.md` §8 is the verified contract; the
 /// bundled OpenAPI spec is wrong about this endpoint and must not be read as authority for it.
 pub mod subtitles;

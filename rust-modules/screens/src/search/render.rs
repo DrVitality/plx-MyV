@@ -56,11 +56,11 @@ impl Resources {
             };
             let (_, head) = run_and_head(q, caret);
             self.head = cstring(head);
-            self.run_w = cx.measure.width(&self.run, theme::size::HERO, true);
+            self.run_w = cx.measure.width(&self.run, layout::FIELD_SIZE, true);
             self.head_w = if q.trim().is_empty() {
                 0.0
             } else {
-                cx.measure.width(&self.head, theme::size::HERO, true)
+                cx.measure.width(&self.head, layout::FIELD_SIZE, true)
             };
         }
         let scope = H::search(cx).scope();
@@ -139,12 +139,28 @@ pub(super) fn draw<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '
     screen.ground.draw(p, Rect::FULL);
     field(screen, f, p);
     let p = p.alpha(screen.fade.alpha());
+    // while the field is empty the filters stand where the empty statement would
     if !screen.recents.is_empty() {
         recents(screen, f, p);
-    } else if screen.rows.is_empty() {
+    } else if screen.rows.is_empty() && screen.filter_lines() == 0 {
         empty(screen, f, p);
     }
+    filter_rows(screen, f, p);
     for (i, row) in screen.rows.iter().enumerate() {
+        // a poster grid: its heading section above it, then the grid as the stack last placed it
+        if let Some(grid) = screen.stack.grid(screen.section(i)) {
+            let label = Sec::Label(row.kind, screen.rows_gen);
+            if let Some(top) = screen.stack.top_of(screen, f.cx, label) {
+                let y = top - screen.stack.scroll();
+                if plx_ui::on_axis(y, layout::HEAD_TO_ROW, SCR_H, 0.0) {
+                    grid_heading(screen, f, p, y);
+                }
+            }
+            if let Some(src) = screen.row_cards(H::search(f.cx), i) {
+                grid.draw(f, p, &src);
+            }
+            continue;
+        }
         let Some((frame, shelf)) = screen.row_frame(f.cx, i) else { continue };
         let top = frame.y - layout::HEAD_TO_ROW;
         if !plx_ui::on_axis(
@@ -155,53 +171,85 @@ pub(super) fn draw<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '
         ) {
             continue;
         }
-        let slot = layout::ordinal(row.kind) as usize;
-        let title = &screen.render.titles[slot];
-        let cap = f.cx.measure.cap_h(theme::size::HEADLINE);
-        let source = if screen.owner_row == Some(i) && screen.owner_alpha.pos > OWNER_FLOOR {
-            screen.render.owner.as_c_str()
-        } else {
-            c""
-        };
-        heading_flow(
-            title,
-            &screen.render.counts[slot],
-            source,
-            |run, dx, size, bold, ink, faded| {
-                let mut label = Label::new(run.as_ptr(), size, ink).v(VAlign::Baseline);
-                if bold != 0 {
-                    label = label.bold();
-                }
-                label.draw(
-                    if faded {
-                        p.alpha(screen.owner_alpha.pos.clamp(0.0, 1.0))
-                    } else {
-                        p
-                    },
-                    Rect::new(MARGIN_X + dx, top - shelf.heading_lift(), 0.0, cap),
-                );
-                f.cx.measure.width(run, size, bold != 0)
-            },
-        );
+        row_heading(screen, f, p, i, row.kind, top - shelf.heading_lift());
         if let Some(src) = screen.row_cards(H::search(f.cx), i) {
             shelf.draw(f, p, &src, frame);
         }
     }
     // A standing note, never a target: the page paints through here, not `StackView::paint`, so it
     // ends the draw itself, over everything the page painted.
+    // the open dropdown stands over everything the page drew
+    dropdown(screen, f, p);
     screen.stack.draw_hold_hint(f.painter.alpha(f.page_alpha), f.measure);
+}
+
+/// A result grid's heading: what the page is browsing ("Popular"), or "Results" over a search.
+/// The grid mixes films and shows, so it names no kind and counts nothing.
+fn grid_heading<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Painter, y: f32) {
+    let title = if screen.draft.query().trim().is_empty() {
+        super::filters::label(1, screen.filters().chosen_in(1))
+    } else {
+        plx_platform::i18n::msg::browse_search_results_heading_c()
+    };
+    let cap = f.cx.measure.cap_h(theme::size::HEADLINE);
+    Label::new(title.as_ptr(), theme::size::HEADLINE, theme::TEXT_HEADING)
+        .v(VAlign::Baseline)
+        .bold()
+        .draw(p, Rect::new(MARGIN_X, y, 0.0, cap));
+}
+
+/// Result row `i`'s heading — its kind, its count, and the server it came from while one of its
+/// cards is focused — with its text's top at `y`.
+fn row_heading<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Painter, i: usize, kind: Kind, y: f32) {
+    let slot = layout::ordinal(kind) as usize;
+    let title = &screen.render.titles[slot];
+    let cap = f.cx.measure.cap_h(theme::size::HEADLINE);
+    let source = if screen.owner_row == Some(i) && screen.owner_alpha.pos > OWNER_FLOOR {
+        screen.render.owner.as_c_str()
+    } else {
+        c""
+    };
+    heading_flow(
+        title,
+        &screen.render.counts[slot],
+        source,
+        |run, dx, size, bold, ink, faded| {
+            let mut label = Label::new(run.as_ptr(), size, ink).v(VAlign::Baseline);
+            if bold != 0 {
+                label = label.bold();
+            }
+            label.draw(
+                if faded {
+                    p.alpha(screen.owner_alpha.pos.clamp(0.0, 1.0))
+                } else {
+                    p
+                },
+                Rect::new(MARGIN_X + dx, y, 0.0, cap),
+            );
+            f.cx.measure.width(run, size, bold != 0)
+        },
+    );
 }
 
 fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: Painter) {
     let data = &screen.render;
-    let rect = Rect::new(
+    let hot = screen.hot.pos;
+    // the capsule stands a little outside the field's own rect, and the text sits inside it,
+    // clear of the magnifier
+    let bar = Rect::new(
         layout::FIELD.x,
-        layout::FIELD.y - screen.stack.scroll(),
+        layout::FIELD.y - layout::BAR_OUTSET - screen.stack.scroll(),
         layout::FIELD.w,
+        layout::FIELD.h + 2.0 * layout::BAR_OUTSET,
+    );
+    let inner = plx_ui::widgets::search_bar(p, bar, hot);
+    let rect = Rect::new(
+        inner.x,
+        layout::FIELD.y - screen.stack.scroll(),
+        inner.w,
         layout::FIELD.h,
     );
     let blank = data.query.trim().is_empty();
-    let hot = screen.hot.pos;
     let ink = if blank {
         theme::cross(theme::TEXT_TERTIARY, theme::TEXT_SECONDARY, hot)
     } else {
@@ -213,19 +261,19 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
         rect.w,
         screen.editing,
     );
-    let (cap_top, cap_base) = plx_gfx::text::text_cap_band(theme::size::HERO, 1);
+    let (cap_top, cap_base) = plx_gfx::text::text_cap_band(layout::FIELD_SIZE, 1);
     let pad = descent_pad(
         rect.h,
-        plx_gfx::text::text_height(theme::size::HERO, 1),
+        plx_gfx::text::text_height(layout::FIELD_SIZE, 1),
         cap_top,
         cap_base,
     );
     {
         let _clip = f.clip(p, Rect::new(rect.x, rect.y, rect.w, rect.h + pad));
-        Label::new(data.run.as_ptr(), theme::size::HERO, ink)
+        Label::new(data.run.as_ptr(), layout::FIELD_SIZE, ink)
             .bold()
             .draw(p, Rect::new(rect.x + run_dx, rect.y, rect.w, rect.h));
-        let text_y = plx_gfx::text::text_vcenter_y(theme::size::HERO, 1, rect.cy());
+        let text_y = plx_gfx::text::text_vcenter_y(layout::FIELD_SIZE, 1, rect.cy());
         if caret_shown(screen.editing, screen.blink_us < super::BLINK_US) {
             p.rect(
                 Rect::new(
@@ -241,7 +289,7 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
             );
         }
         if ghost_shown(&data.query) {
-            let y = plx_gfx::text::baseline_y(theme::size::BODY, 0, theme::size::HERO, 1, text_y);
+            let y = plx_gfx::text::baseline_y(theme::size::BODY, 0, layout::FIELD_SIZE, 1, text_y);
             p.text(
                 plx_platform::i18n::msg::browse_search_one_more_c().as_ptr(),
                 rect.x + caret_dx + CARET_W + GHOST_GAP,
@@ -257,9 +305,9 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
         Label::new(line.as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY).draw(
             p,
             Rect::new(
-                rect.x,
+                bar.x + bar.h * 0.5,
                 layout::SCOPE_Y - screen.stack.scroll(),
-                rect.w,
+                bar.w - bar.h,
                 layout::SCOPE_H,
             ),
         );
@@ -269,8 +317,13 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
 
 fn recents<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: Painter) {
     let env = Env::inert();
+    let suggested = screen.showing_suggestions();
     Label::new(
-        plx_platform::i18n::msg::browse_search_recents_c().as_ptr(),
+        if suggested {
+            plx_platform::i18n::msg::browse_search_suggested_c().as_ptr()
+        } else {
+            plx_platform::i18n::msg::browse_search_recents_c().as_ptr()
+        },
         theme::size::CAPTION,
         theme::TEXT_TERTIARY,
     )
@@ -288,9 +341,9 @@ fn recents<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p
         let Some(key) = screen.keys.iter().find(|key| key.elem == *elem) else {
             continue;
         };
-        let Identity::Recent(_) = &key.identity else {
+        if !matches!(&key.identity, Identity::Recent(_) | Identity::Suggested(_)) {
             continue;
-        };
+        }
         let rect = layout::recent(index, screen.stack.scroll());
         let focused = f.cx.focus.current == Some(screen.key(*elem));
         if focused {
@@ -306,8 +359,18 @@ fn recents<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p
                 theme::ACCENT,
             );
         }
-        let Some(run) = screen.render.recent_runs.get(index) else {
-            continue;
+        // a suggestion's run is made here: at most a handful of short titles, and only while no
+        // recents exist to have cached runs
+        let made;
+        let run = if suggested {
+            made = cstring(&elide(screen.chip_term(*elem).unwrap_or(""), 820.0 - 2.0 * plx_ui::table::CONTENT_X,
+                theme::size::HEADLINE, true, f.cx.measure));
+            &made
+        } else {
+            let Some(run) = screen.render.recent_runs.get(index) else {
+                continue;
+            };
+            run
         };
         Label::new(
             run.as_ptr(),
@@ -325,11 +388,64 @@ fn recents<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p
         );
         stop(screen, *elem, ElemKind::Bare, f, p);
     }
+    if suggested {
+        return; // nothing of the profile's to clear
+    }
     let rect = layout::clear(shown, screen.stack.scroll(), f.cx.measure);
     Button::new(plx_platform::i18n::msg::browse_search_clear_c().as_ptr(), theme::size::BODY, rect)
         .focused(f.cx.focus.current == Some(screen.key(CLEAR)))
         .draw(&env, p);
     stop(screen, CLEAR, ElemKind::Control, f, p);
+}
+
+/// The browse filters: one line of dropdown buttons, each naming its filter and its setting. A
+/// filter set away from its default wears the accent, so what narrows the page reads at a glance.
+fn filter_rows<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: Painter) {
+    use super::filters;
+    let env = Env::inert();
+    let scroll = screen.stack.scroll();
+    if screen.filter_lines() == 0 {
+        return;
+    }
+    let top = screen.filter_line_top(0) - scroll;
+    if !plx_ui::on_axis(top, filters::LINE_H, SCR_H, 0.0) {
+        return;
+    }
+    for k in 0..filters::DROPS {
+        let rect = filters::pill(k, top, screen.filters(), f.cx.measure);
+        let elem = filters::elem(0, k);
+        let text = filters::button_text(k, screen.filters());
+        let set = screen.filters().chosen_in(k) != 0;
+        let style = if set {
+            plx_ui::widgets::ControlStyle::Custom { fill: theme::ACCENT, ink: theme::ACCENT_INK }
+        } else {
+            plx_ui::widgets::ControlStyle::Accent
+        };
+        let open = screen.open_dropdown() == Some(k);
+        Button::new(text.as_ptr(), filters::PILL_SIZE, rect)
+            .style(style)
+            .trailing_icon(if open { plx_ui::icons::Icon::ChevronUp } else { plx_ui::icons::Icon::ChevronDown })
+            .focused(f.cx.focus.current == Some(screen.key(elem)) || open)
+            .draw(&env, p);
+        stop(screen, elem, ElemKind::Control, f, p);
+    }
+}
+
+/// The open dropdown: its options on a panel hung under its button, over whatever stands there.
+/// The chosen option carries a check; the focused one the accent.
+fn dropdown<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: Painter) {
+    use super::filters;
+    let Some(k) = screen.open_dropdown() else { return };
+    let panel = screen.drop_panel(k, f.cx.measure);
+    plx_ui::widgets::dropdown_panel(p, panel);
+    let chosen = screen.filters().chosen_in(k);
+    for i in 0..filters::options(k) {
+        let cell = filters::opt_rect(k, i, panel);
+        let elem = filters::opt_elem(k, i);
+        let focused = f.cx.focus.current == Some(screen.key(elem));
+        plx_ui::widgets::dropdown_option(p, cell, filters::label(k, i), filters::PILL_SIZE, focused, i == chosen);
+        stop(screen, elem, ElemKind::Control, f, p);
+    }
 }
 
 fn empty<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Painter) {
@@ -341,6 +457,13 @@ fn empty<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Pain
         return;
     };
     let mut rect = layout::empty_band(screen.editing);
+    let lines = screen.filter_lines();
+    if lines > 0 {
+        // under the filters, which stand between the field and any results
+        let below = screen.filter_line_top(lines) + super::filters::PANEL_V + theme::space::MD;
+        rect.h = (rect.y + rect.h - below).max(theme::space::XL * 4.0);
+        rect.y = below;
+    }
     rect.y -= screen.stack.scroll();
     if empty == EmptyState::Fault {
         StatusOverlay::new(rect, plx_platform::i18n::msg::browse_search_failed_c(), StatusKind::Failed)

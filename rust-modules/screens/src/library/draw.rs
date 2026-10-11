@@ -156,6 +156,9 @@ impl LibraryScreen {
                 let origin = self.layout.shelf_y(&self.run, index, self.scroll.pos);
                 if !shelf_on_screen(origin, self.layout.shelf_pitch(&self.run, index)) { continue; }
                 let heading_y = origin - plx_ui::consts::TITLE_DY - row.cards.heading_lift();
+                // the shelf's container, under its heading's line and its cards
+                plx_ui::widgets::shelf_tray(p, MARGIN_X, origin + plx_ui::consts::CARD_DY,
+                    row.cards.style().h, row.cards.under_band());
                 if let Some(heading) = self.heading_widget(index, f.cx) {
                     let focused = f.focus.current.is_some_and(|key| key.entry == self.entry
                         && Some(key.elem) == row.heading_elem());
@@ -294,6 +297,7 @@ impl HubSrc<'_> {
 }
 
 impl<H: Host<Elem = u32>> CardSource<H> for HubSrc<'_> {
+    fn peek(&self, i: usize) -> Option<ui_cards::Peek> { self.item(i).and_then(crate::registry::card_peek) }
     fn len(&self) -> usize { self.elems.len() }
     fn elem(&self, i: usize) -> u32 { self.elems.get(i).copied().unwrap_or(0) }
     fn index_of(&self, e: &u32) -> Option<usize> { self.elems.iter().position(|elem| elem == e) }
@@ -312,13 +316,13 @@ impl<H: Host<Elem = u32>> CardSource<H> for HubSrc<'_> {
     fn progress(&self, i: usize) -> Option<f32> {
         self.shelf.filter(|shelf| !shelf.landscape).and_then(|_| self.item(i)).and_then(|item| item.resume_frac())
     }
-    /// A landscape shelf's episode still carries its show line, and the Continue Watching deck its
-    /// play mark when a press plays.
+    /// A landscape shelf's episode still carries its show line, and its play mark when a press
+    /// plays.
     fn overlay(&self, p: plx_ui::Painter, i: usize, tile: &Tile, measure: &dyn Measure) {
         let (Some(shelf), Some(item)) = (self.shelf, self.item(i)) else { return };
         if shelf.landscape {
             plx_ui::widgets::still_overlay(p, &tile_facts::of(item), tile.rect, tile.radius,
-                shelf.is_continue && plx_media::route::deck_press().press_plays(), measure);
+                crate::registry::card_press_plays(item.kind), measure);
         }
     }
 }
@@ -343,7 +347,7 @@ pub(super) fn shelf_label(shelf: &plx_data::browse::section_hubs::Shelf, col: us
         return if fact.is_empty() { ui_cards::TileLabel::title(&name) }
         else { ui_cards::TileLabel::titled(&name, &fact) };
     }
-    let mut label = if shelf.is_continue && plx_media::route::deck_press().press_plays() { ui_cards::TileLabel::played(&item.title) }
+    let mut label = if crate::registry::card_press_plays(item.kind) { ui_cards::TileLabel::played(&item.title) }
         else { ui_cards::TileLabel::title(&item.title) };
     label.caption = ui_cards::focused_caption(&tile_facts::of(item), shelf.is_continue);
     label

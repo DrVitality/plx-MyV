@@ -2,8 +2,8 @@
   {
     "path": "rust-modules/screens/src/login.rs",
     "boundary": "TextView::new",
-    "text": "plex.tv/link",
-    "reason": "Plex sign-in URL is an exact service destination; it must not be translated."
+    "text": "link.stremio.com",
+    "reason": "Stremio's device-link address is an exact service destination; it must not be translated."
   },
   {
     "path": "rust-modules/src/app/diagnostics.rs",

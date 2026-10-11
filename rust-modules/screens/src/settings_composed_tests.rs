@@ -469,15 +469,15 @@ fn a_real_push_seats_the_new_page_fresh_and_a_pop_restores_the_row_that_opened_i
         path(&d, id)
     );
 
-    // Mounting the surface already seats row 0 (its own `Enter::Fresh`); three real DOWNs
-    // move focus — and the engine's remembered cursor for `(id, GroupId(0))` — to row 3.
-    for i in 1..=3u32 {
+    // Mounting the surface already seats row 0 (its own `Enter::Fresh`); four real DOWNs
+    // move focus — and the engine's remembered cursor for `(id, GroupId(0))` — to row 4.
+    for i in 1..=4u32 {
         frame(&mut d, &mut rig, 16 * i, vec![key(Key::Down, tick(16 * i))]);
     }
     let legal_row = d.focus().expect("a row is focused after a real DOWN");
-    assert_eq!(legal_row.elem, root_key(RootId::Legal), "the third DOWN is Legal notices in the signed-out fixture");
+    assert_eq!(legal_row.elem, root_key(RootId::Legal), "the fourth DOWN is Legal notices in the signed-out fixture");
 
-    frame(&mut d, &mut rig, 64, vec![key(Key::Ok, tick(64))]);
+    frame(&mut d, &mut rig, 80, vec![key(Key::Ok, tick(80))]);
     assert!(
         path(&d, id).contains("/legal:"),
         "OK on Legal notices pushed the index: {}",
@@ -491,14 +491,14 @@ fn a_real_push_seats_the_new_page_fresh_and_a_pop_restores_the_row_that_opened_i
     );
 
     // The leak, when present, survives an idle frame too — the seat is not a one-frame fluke.
-    frame(&mut d, &mut rig, 80, vec![]);
+    frame(&mut d, &mut rig, 96, vec![]);
     assert_eq!(
         d.focus().map(|k| k.elem),
         Some(0),
         "…and the fresh seat holds after an idle frame"
     );
 
-    frame(&mut d, &mut rig, 96, vec![key(Key::Back, tick(96))]);
+    frame(&mut d, &mut rig, 112, vec![key(Key::Back, tick(112))]);
     let p = path(&d, id);
     assert!(!p.contains("/legal:"), "BACK popped the index off the surface's stack: {p}");
     assert!(
@@ -692,10 +692,10 @@ fn audio_subtitles_pushed_from_the_root_seats_its_first_row_when_rows_land() {
     plx_plex::plex::session::publish_profile_for_test(Some(user.clone()), 72);
     let (request, snapshot) = PreferenceRequest::fixture_for_test(user, 72, AudioPreferences::default());
     let (mut d, mut rig, id) = opened();
-    // Audio & Subtitles is the signed-in root's third row (Favorite libraries, Video & playback,
-    // Audio & subtitles): walk DOWN twice.
+    // Audio & Subtitles is the signed-in root's fourth row (Favorite libraries, Addons & Home,
+    // Video & playback, Audio & subtitles): walk DOWN three times.
     let mut ms = 32;
-    for _ in 0..2 {
+    for _ in 0..3 {
         frame(&mut d, &mut rig, ms, vec![key(Key::Down, tick(ms))]);
         ms += 16;
     }
@@ -816,7 +816,7 @@ fn a_pop_after_the_list_changed_reseats_on_the_row_the_page_landed_on() {
     frame(&mut d, &mut rig, ms + 16, vec![key(Key::Back, tick(ms + 16))]);
     settle_frames(&mut d, &mut rig, ms + 16);
     assert!(path(&d, id).starts_with("settings/root:"), "{}", path(&d, id));
-    assert_eq!(d.focus().map(|k| k.elem), Some(root_key(RootId::Language)),
+    assert_eq!(d.focus().map(|k| k.elem), Some(root_key(RootId::Appearance)),
         "the stale remembered key reseats on the page's landing (next survivor), not row 0");
-    assert_eq!(sel_of(&d, id), root_key(RootId::Language));
+    assert_eq!(sel_of(&d, id), root_key(RootId::Appearance));
 }

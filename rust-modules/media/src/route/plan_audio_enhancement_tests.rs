@@ -50,6 +50,22 @@ fn resolve(
     item: impl FnOnce(ServerId) -> plx_data::metadata::PlayingItem,
     setup: impl FnOnce(&mut ResolveEnv, &plx_plex::plex::Client),
 ) -> Resolve {
+    resolve_row(ps, mde, mode, media_bytes, part, "hevc", acodec, item, setup)
+}
+
+/// [`resolve`] with the catalog row's video codec named (`resolve` passes the item's own, hevc).
+#[allow(clippy::too_many_arguments)]
+fn resolve_row(
+    ps: &mut PlaybackSession,
+    mde: &'static [u8],
+    mode: EnhMode,
+    media_bytes: usize,
+    part: &str,
+    row_vcodec: &str,
+    acodec: &str,
+    item: impl FnOnce(ServerId) -> plx_data::metadata::PlayingItem,
+    setup: impl FnOnce(&mut ResolveEnv, &plx_plex::plex::Client),
+) -> Resolve {
     assert!(plx_net::net::global_init() && crate::curlio::available());
     let (port, done, server) = enhancement_pms(mde, mode, media_bytes);
     let sid = plx_plex::plex::register_for_test("enh-pms", "127.0.0.1", port, "token", "enh-client");
@@ -61,7 +77,7 @@ fn resolve(
     env.audio_enhancements = PREF;
     env.cached_item = Some(item(sid));
     setup(&mut env, client);
-    let plan = build_stream(&plx_base::task::OffFrame::for_test(), "rk-enh", part, "hevc", acodec, &env);
+    let plan = build_stream(&plx_base::task::OffFrame::for_test(), "rk-enh", part, row_vcodec, acodec, &env);
     done.send(()).unwrap();
     let requests = server.join().unwrap();
     Resolve { plan, requests }
@@ -147,6 +163,23 @@ fn no_pass_is_direct_no_params() {
         env.pass = Subscription::No;
     });
     assert_direct_no_params(&r);
+    plx_plex::plex::reset_servers_for_test();
+}
+
+/// **The item's own codec outranks a stand-in on the row.** The Stremio bridge lists every title
+/// as `h264` until a stream is chosen; the 4K HEVC file behind it was declared H.264 in the Load
+/// and decoded nothing (a black picture). The fetched item says `hevc`, and that is what plays.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn a_row_that_says_h264_for_an_hevc_item_plays_as_hevc() {
+    let mut ps = PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+    let r = resolve_row(&mut ps, MDE_DIRECTPLAY, EnhMode::Honor("ac3"), 0, MKV, "h264", "ac3",
+        |sid| plx_data::metadata::PlayingItem { vcodec: "hevc".into(), ..ac3_item(sid) },
+        |env, _| { env.pass = Subscription::No; });
+    assert_direct_no_params(&r);
+    assert_eq!(r.plan.vcodec, "hevc", "the Load declares the file's codec, not the row's");
+    assert_eq!(r.plan.src_vcodec, "hevc");
     plx_plex::plex::reset_servers_for_test();
 }
 

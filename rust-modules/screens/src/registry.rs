@@ -87,9 +87,100 @@ pub enum PreferenceCmd {
     NextEpisode { mode: plx_plex::plex::session::NextEpisodeMode, reply: std::sync::mpsc::Sender<bool> },
     SkipInterval { interval: plx_plex::plex::session::SkipInterval, reply: std::sync::mpsc::Sender<bool> },
     DeckPress { mode: plx_plex::plex::session::DeckPress, reply: std::sync::mpsc::Sender<bool> },
+    /// Settings › Appearance: the whole look, saved together and made live once it is durable.
+    Appearance { look: plx_plex::plex::session::Appearance, reply: std::sync::mpsc::Sender<bool> },
     SubtitleSize { size: plx_plex::plex::session::SubtitleSize, reply: std::sync::mpsc::Sender<bool> },
     SubtitlePosition { position: plx_plex::plex::session::SubtitlePosition, reply: std::sync::mpsc::Sender<bool> },
     Language { language: plx_platform::i18n::Preference, reply: std::sync::mpsc::Sender<bool> },
+    /// Settings › Addons & Home: read (or change, then read) the Stremio bridge's Home rows and
+    /// addon switches. `None` when the bridge did not answer.
+    Stremio { op: StremioOp, reply: std::sync::mpsc::Sender<Option<StremioConfig>> },
+}
+
+/// One row Home can show, as Settings lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StremioRow {
+    pub id: String,
+    pub title: String,
+    pub detail: String,
+    pub shown: bool,
+}
+
+/// One installed addon, with the switches it has (`None`: it offers no such thing).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StremioAddon {
+    pub id: String,
+    pub name: String,
+    pub detail: String,
+    pub streams: Option<bool>,
+    pub catalogs: Option<bool>,
+}
+
+/// The bridge's Home rows (in Home's order) and addons.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StremioConfig {
+    pub rows: Vec<StremioRow>,
+    pub addons: Vec<StremioAddon>,
+    /// The phone remote's address and PIN, when it is listening.
+    pub phone: Option<(String, String)>,
+    /// Whether a newer build than this one is published (`None`: the check failed).
+    pub update: Option<bool>,
+    /// Hours left in the set's Developer Mode session, when it could be read.
+    pub devmode_hours: Option<i64>,
+    /// Days of Real-Debrid premium left, when the account's stream addon carries a key.
+    pub debrid_days: Option<i64>,
+}
+
+impl StremioConfig {
+    /// The bridge's `/stremio/config` answer.
+    pub fn from_json(v: &serde_json::Value) -> Option<StremioConfig> {
+        let field = |o: &serde_json::Value, k: &str| o.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let rows = v.get("rows")?.as_array()?.iter()
+            .map(|r| (field(r, "id"), field(r, "title"), field(r, "detail"),
+                      r.get("shown").and_then(|x| x.as_bool()).unwrap_or(false)))
+            .map(|(id, title, detail, shown)| StremioRow { id, title, detail, shown })
+            .collect();
+        let addons = v.get("addons")?.as_array()?.iter().map(|a| StremioAddon {
+            id: field(a, "id"), name: field(a, "name"), detail: field(a, "detail"),
+            streams: a.get("streams").and_then(|x| x.as_bool()),
+            catalogs: a.get("catalogs").and_then(|x| x.as_bool()),
+        }).collect();
+        let tv = v.get("tv");
+        let phone = tv.and_then(|t| t.get("phone")).filter(|p| p.is_object())
+            .map(|p| (field(p, "url"), field(p, "pin")));
+        let update = match tv.and_then(|t| t.get("update")).and_then(|u| u.as_str()) {
+            Some("available") => Some(true),
+            Some("current") => Some(false),
+            _ => None,
+        };
+        let devmode_hours = tv.and_then(|t| t.get("devmode_hours")).and_then(|h| h.as_i64());
+        let debrid_days = tv.and_then(|t| t.get("debrid_days")).and_then(|d| d.as_i64());
+        Some(StremioConfig { rows, addons, phone, update, devmode_hours, debrid_days })
+    }
+}
+
+/// What a Settings › Addons & Home press asks the bridge to change.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StremioOp {
+    Read,
+    ShowRow { id: String, shown: bool },
+    MoveRow { id: String, to: usize },
+    Streams { id: String, on: bool },
+    Catalogs { id: String, on: bool },
+}
+
+impl StremioOp {
+    /// The bridge path that performs it.
+    pub fn path(&self) -> String {
+        let enc = plx_plex::plex::urlenc_str;
+        match self {
+            StremioOp::Read => "/stremio/config".into(),
+            StremioOp::ShowRow { id, shown } => format!("/stremio/config?op=show&id={}&on={}", enc(id), u8::from(*shown)),
+            StremioOp::MoveRow { id, to } => format!("/stremio/config?op=move&id={}&to={to}", enc(id)),
+            StremioOp::Streams { id, on } => format!("/stremio/config?op=streams&id={}&on={}", enc(id), u8::from(*on)),
+            StremioOp::Catalogs { id, on } => format!("/stremio/config?op=catalogs&id={}&on={}", enc(id), u8::from(*on)),
+        }
+    }
 }
 
 /// Whether an item has a context menu to open (`item_menu::has_actions`): the one predicate the
@@ -132,6 +223,18 @@ pub struct ItemMenuReq {
     pub item: Option<plx_data::pms::PmsMovie>,
     pub loaded_episode: bool,
     pub from_home: bool,
+    /// Where the menu hung (its host page, that page's focused element, the anchor rect), so a
+    /// follow-up menu — the stream picker after *Choose stream* — opens in the same place.
+    pub origin: MenuOrigin,
+}
+
+/// Where an item menu hangs: [`ItemMenuArg`]'s `host`, `focus` and `anchor`, carried on its
+/// request so the app can present a second menu over the same card.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MenuOrigin {
+    pub host: plx_machine::machine::EntryId,
+    pub focus: Option<plx_machine::machine::FocusKey<u32>>,
+    pub anchor: [u32; 4],
 }
 
 /// **What a player overlay asks for**, once its own `step` has decided.
@@ -175,6 +278,9 @@ pub enum PlayerReq {
     Info(plx_appkit::info_panel::InfoAction),
     /// The panel took a DOWN past its own bottom: drop the HUD's ring onto the tabs row.
     FocusTabs,
+    /// The Episodes strip's OK: play this episode of the queue in place of the one playing
+    /// (`app::playback::play_successor`, the ritual Up Next uses).
+    PlayEpisode(plx_media::route::UpNext),
     /// Keep the transport alive while a panel is being read (`HUD_MENU_MS`), or hand it the
     /// ordinary linger as a panel closes (`HUD_LINGER_MS`).
     ExtendHud(u32),
@@ -209,6 +315,8 @@ pub enum PlayerReq {
 pub enum SearchReq {
     Back,
     Detail { sid: plx_plex::plex::ServerId, rk: String },
+    /// OK on a film, show or episode hit while the press plays ([`card_press_plays`]).
+    Play { sid: plx_plex::plex::ServerId, rk: String },
     Person { sid: plx_plex::plex::ServerId, key: String, guid: String, name: String, thumb: String },
     ItemMenu { sid: plx_plex::plex::ServerId, rk: String },
     /// OK on a Collections-shelf hit. `rk` is the collection's ratingKey (empty for a tag-shaped
@@ -238,6 +346,8 @@ pub enum HomeTab {
     Movies,
     Shows,
     Search,
+    /// The Anime library's pill (`SecKind::Anime`), drawn after TV Shows.
+    Anime,
 }
 
 /// Addressed bootstrap/diagnostic intentions. They use the same owned step and focus engine as
@@ -325,6 +435,103 @@ pub struct ItemMenuArg {
     pub from_home: bool,
 }
 
+/// Does OK on a card for this item START it (a film or episode plays, a show or season resumes
+/// at the episode it stopped on) rather than open its page — the Playback preference
+/// (`route::deck_press`), for every kind but a collection, which only ever opens. The one answer
+/// a card's press, its ▶ and its menu's Play row are derived from on every screen.
+pub fn card_press_plays(kind: std::os::raw::c_int) -> bool {
+    kind != plx_data::pms::KIND_COLLECTION && plx_media::route::deck_press().press_plays()
+}
+
+/// What OK on a content page's card asks for: [`ContentReq::PlayCard`] while the press plays,
+/// else the item's own page.
+pub fn card_press_request(m: &plx_data::pms::PmsMovie) -> ContentReq {
+    if card_press_plays(m.kind) {
+        ContentReq::PlayCard { sid: m.sid, rk: m.rk.clone() }
+    } else {
+        ContentReq::Push(ContentArg::Detail { sid: m.sid, rk: m.rk.clone() })
+    }
+}
+
+/// What a card's details bubble says ([`plx_ui::cards::peek`]): the title, a facts line (year ·
+/// length or seasons · rating), the synopsis, and the foot line saying what OK and a hold do.
+/// `None` for a row that is not a film, show, season or episode (a collection opens its page and
+/// has nothing to summarize here) or has no title.
+pub fn card_peek(m: &plx_data::pms::PmsMovie) -> Option<plx_ui::cards::Peek> {
+    if m.title.is_empty() || m.kind == plx_data::pms::KIND_COLLECTION || !(0..=3).contains(&m.kind) {
+        return None;
+    }
+    let episode = m.kind == 3;
+    let mut facts: Vec<String> = Vec::new();
+    if episode {
+        facts.push(plx_ui::fmt::episode_address(m.season_index as i64, m.ep_index as i64));
+    }
+    if m.year > 0 {
+        facts.push(m.year.to_string());
+    }
+    match m.kind {
+        1 if m.child_count > 0 => facts.push(plx_platform::i18n::msg::browse_detail_seasons(m.child_count)),
+        0 | 3 if m.dur_ns > 0 => facts.push(plx_ui::fmt::dur_short(m.dur_ns / 1_000_000)),
+        _ => {}
+    }
+    if !m.rating.is_empty() {
+        facts.push(m.rating.clone());
+    }
+    if m.audience > 0.0 {
+        facts.push(plx_platform::i18n::msg::browse_peek_imdb(&format!("{:.1}", m.audience)));
+    }
+    note_peeked(m);
+    let hint = if card_press_plays(m.kind) {
+        plx_platform::i18n::msg::browse_peek_hint_play()
+    } else {
+        plx_platform::i18n::msg::browse_peek_hint_details()
+    };
+    Some(plx_ui::cards::Peek {
+        // an episode's bubble leads with its show; the episode's own name is the summary's lead
+        title: if episode && !m.show_title.is_empty() { m.show_title.clone() } else { m.title.clone() },
+        facts: facts.join("  ·  "),
+        summary: if episode && !m.show_title.is_empty() && m.title != m.show_title {
+            if m.summary.is_empty() { m.title.clone() } else { format!("{} — {}", m.title, m.summary) }
+        } else {
+            m.summary.clone()
+        },
+        hint: hint.to_string(),
+        play: plx_platform::i18n::msg::browse_peek_play().to_string(),
+        details: plx_platform::i18n::msg::browse_peek_details().to_string(),
+        ok_plays: card_press_plays(m.kind),
+        key: peek_key(m),
+    })
+}
+
+/// The key a bubble's buttons hand back ([`plx_ui::cards::peek::hit`]): the server and the item.
+fn peek_key(m: &plx_data::pms::PmsMovie) -> String {
+    format!("{}/{}", m.sid.raw(), m.rk)
+}
+
+/// The rows the details bubble was last opened on, newest last — what a click on one of its
+/// buttons acts on ([`peeked_row`]). A handful, because a frame can draw a bubble per section.
+static PEEKED: std::sync::Mutex<Vec<plx_data::pms::PmsMovie>> = std::sync::Mutex::new(Vec::new());
+const PEEKED_KEEP: usize = 4;
+
+/// Remember `m` as a row a bubble is showing (a no-op when it already is the newest).
+fn note_peeked(m: &plx_data::pms::PmsMovie) {
+    let mut rows = PEEKED.lock().unwrap_or_else(|e| e.into_inner());
+    if rows.last().is_some_and(|r| r.sid == m.sid && r.rk == m.rk) {
+        return;
+    }
+    rows.retain(|r| !(r.sid == m.sid && r.rk == m.rk));
+    rows.push(m.clone());
+    if rows.len() > PEEKED_KEEP {
+        rows.remove(0);
+    }
+}
+
+/// The row a details bubble with this key ([`plx_ui::cards::Peek::key`]) was opened on.
+pub fn peeked_row(key: &str) -> Option<plx_data::pms::PmsMovie> {
+    let rows = PEEKED.lock().unwrap_or_else(|e| e.into_inner());
+    rows.iter().rev().find(|m| peek_key(m) == key).cloned()
+}
+
 /// Which of the three menus this is, and the data its row set is built from.
 ///
 /// No `Debug`, deliberately: `PmsMovie` is a wire DTO with none, and deriving one for it would put
@@ -348,6 +555,40 @@ pub enum ItemMenuKind {
     Episode { mark: plx_ui::widgets::PosterMark },
     /// The detail page's season tabs.
     Season { mark: plx_ui::widgets::PosterMark },
+    /// The stream picker for a film or episode card: one row per stream its addons offer, opened
+    /// from that card's menu once the list has arrived (`Action::ChooseStream`). `row` is the card
+    /// it was opened on, so a pick plays that very item.
+    Streams {
+        row: Box<plx_data::pms::PmsMovie>,
+        choices: std::sync::Arc<[StreamChoice]>,
+        /// The list shows only streams that start at once (the menu's own Instant only switch).
+        instant: bool,
+    },
+}
+
+/// One stream in the picker: its place in the bridge's ranked list (what a choice names), the
+/// picker line, the addon and file, and whether it is the one that plays now.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StreamChoice {
+    pub index: i64,
+    pub label: String,
+    pub detail: String,
+    pub playing: bool,
+}
+
+impl StreamChoice {
+    /// The picker rows of a `/stremio/choices` answer (`plx_plex` reads it as a container).
+    pub fn from_container(mc: &plx_plex::plex::MediaContainer) -> Vec<StreamChoice> {
+        mc.metadata
+            .iter()
+            .map(|m| StreamChoice {
+                index: m.index,
+                label: m.title.clone(),
+                detail: m.summary.clone(),
+                playing: m.index == mc.offset,
+            })
+            .collect()
+    }
 }
 
 /// **Identity, not contents.** `PmsMovie` is a wire DTO with no `PartialEq` of its own, and one
@@ -362,6 +603,8 @@ impl PartialEq for ItemMenuKind {
                 da == db && a.sid == b.sid && a.rk == b.rk && a.kind == b.kind,
             (Self::Episode { mark: a }, Self::Episode { mark: b }) => a == b,
             (Self::Season { mark: a }, Self::Season { mark: b }) => a == b,
+            (Self::Streams { row: a, choices: ca, instant: ia }, Self::Streams { row: b, choices: cb, instant: ib }) =>
+                a.sid == b.sid && a.rk == b.rk && ca == cb && ia == ib,
             _ => false,
         }
     }
@@ -385,6 +628,10 @@ impl plx_machine::machine::LogicalState for ItemMenuArg {
             ItemMenuKind::Card { row, from_deck } => { c.u32(0).bool(*from_deck).u32(row.kind as u32); }
             ItemMenuKind::Episode { mark } => { c.u32(1).u32(*mark as u32); }
             ItemMenuKind::Season { mark } => { c.u32(2).u32(*mark as u32); }
+            ItemMenuKind::Streams { choices, instant, .. } => {
+                c.u32(3).u32(choices.len() as u32).bool(*instant);
+                for ch in choices.iter() { c.u32(ch.index as u32).bool(ch.playing); }
+            }
         }
         c.u32(self.host.0);
         c.option(self.focus, |c, key| { c.u32(key.entry.0).u32(key.elem); });
@@ -840,6 +1087,11 @@ pub enum ContentReq {
     Push(ContentArg),
     Present(ContentArg),
     Back,
+    /// OK on a card while the press plays ([`card_press_plays`]): start the focused card's item
+    /// the way a Home card's press does (a film or episode plays, a show or season resumes through
+    /// its page). The loop re-reads the page's focused card and acts only when it is still this
+    /// item.
+    PlayCard { sid: plx_plex::plex::ServerId, rk: String },
     Play { play: PlayIntent, resume_ns: i64 },
     /// Start a hero preview. Does not push the player route.
     PreviewStart {
@@ -873,6 +1125,17 @@ pub enum ContentReq {
     /// all.
     PreviewSeek(i64),
     ItemMenu,
+    /// **Choose which stream plays** the page's film or episode (the Stremio bridge's ranked list),
+    /// presented as the stream menu anchored to the *Streams* pill (`anchor`, bit-preserving like
+    /// [`ContentPanel::AltSources`]). Carries the leaf itself, so the choice can play it.
+    ChooseStream {
+        sid: plx_plex::plex::ServerId,
+        rk: String,
+        part: String,
+        title: String,
+        episode: bool,
+        anchor: [u32; 4],
+    },
     /// **Present one of the Detail page's own panels** on the container tree (spec §6.2's
     /// "page-owned panels"). The page names WHICH and supplies whatever the panel needs to place
     /// itself; the loop knows the style and the page's identity, so neither is on this request.
@@ -1175,7 +1438,11 @@ pub mod word {
     /// `overlay=` word so a scene can tell them from the root.
     pub const PLAYBACK: &str = "playback";
     pub const AUDIO: &str = "audio";
+    /// The Appearance page (`screens::preferences`, `Kind::Appearance`).
+    pub const APPEARANCE: &str = "appearance";
     pub const PICKER: &str = "picker";
+    /// Settings › Addons & Home and its two child pages (`screens::stremio_settings`).
+    pub const ADDONS: &str = "addons";
     pub const CONSENT: &str = "consent";
     pub const ONBOARD: &str = "onboard";
     /// The QR sign-in (`screens::login::LoginScreen`). Same spelling as `app::words::route_word`'s

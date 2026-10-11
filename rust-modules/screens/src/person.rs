@@ -341,6 +341,9 @@ impl<H: ContentLike> CardSource<H> for ShelfCards<'_> {
     fn art(&self, i: usize) -> Art<'_> {
         Art::Poster(self.person.shelf(self.kind).get(i).map(tile_facts::of))
     }
+    fn peek(&self, i: usize) -> Option<plx_ui::cards::Peek> {
+        self.person.shelf(self.kind).get(i).and_then(crate::registry::card_peek)
+    }
     fn label(&self, i: usize) -> TileLabel {
         match self.person.shelf(self.kind).get(i) {
             Some(m) => TileLabel::titled(&m.title, self.person.role(self.kind, i)),
@@ -873,10 +876,7 @@ impl Page {
         let item = self.person(cx).and_then(|p| self.focused_movie_in(p, Some(elem)));
         if let Some(m) = item {
             fx.push(plx_machine::machine::Fx::App(AppFx::Content(
-                ContentReq::Push(ContentArg::Detail {
-                    sid: m.sid,
-                    rk: m.rk.clone(),
-                }),
+                crate::registry::card_press_request(m),
             )));
         }
     }
@@ -2174,7 +2174,8 @@ mod tests {
         }
         assert!(buf.iter().any(|st| matches!(
             &st.fx,
-            plx_machine::machine::Fx::App(AppFx::Content(ContentReq::Push(ContentArg::Detail { sid, rk })))
+            plx_machine::machine::Fx::App(AppFx::Content(
+                ContentReq::Push(ContentArg::Detail { sid, rk }) | ContentReq::PlayCard { sid, rk }))
                 if *sid == ServerId::UNSET && rk == "m0"
         )));
         store.run(PersonCmd::Close);

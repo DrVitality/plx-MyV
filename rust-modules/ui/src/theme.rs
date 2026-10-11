@@ -41,15 +41,22 @@ const COOL_150: [f32; 4] = rgb8(0xdb, 0xe0, 0xeb);
 const COOL_200: [f32; 4] = rgb8(0xcd, 0xd3, 0xdd);
 const COOL_300: [f32; 4] = rgb8(0xb8, 0xbf, 0xcc);
 const COOL_400: [f32; 4] = rgb8(0x94, 0x99, 0xa3);
-const COOL_850: [f32; 4] = rgb8(0x1f, 0x21, 0x29);
-const COOL_900: [f32; 4] = rgb8(0x14, 0x17, 0x1c);
+// Artwork that has not loaded sits a step below the charcoal ground, on its warm side.
+const COOL_850: [f32; 4] = rgb8(0x21, 0x1c, 0x1e);
+const COOL_900: [f32; 4] = rgb8(0x17, 0x13, 0x14);
 
-// Neutral — achromatic: the shelf, panels, control plates, inks.
-const NEUTRAL_600: [f32; 4] = rgb8(0x25, 0x25, 0x27);
-const NEUTRAL_650: [f32; 4] = rgb8(0x22, 0x22, 0x24);
-const NEUTRAL_750: [f32; 4] = rgb8(0x1b, 0x1b, 0x1d);
-const NEUTRAL_850: [f32; 4] = rgb8(0x14, 0x14, 0x16);
-const NEUTRAL_950: [f32; 4] = rgb8(0x08, 0x08, 0x0a);
+// Neutral — warm charcoal: the shelf, panels, control plates, inks. A hair of red in every stop,
+// so the surfaces belong to the crimson accent instead of fighting it as a cold grey.
+const NEUTRAL_600: [f32; 4] = rgb8(0x23, 0x1d, 0x1f);
+const NEUTRAL_650: [f32; 4] = rgb8(0x20, 0x1b, 0x1c);
+const NEUTRAL_750: [f32; 4] = rgb8(0x1a, 0x16, 0x17);
+const NEUTRAL_850: [f32; 4] = rgb8(0x13, 0x10, 0x11);
+const NEUTRAL_950: [f32; 4] = rgb8(0x0a, 0x07, 0x08);
+
+// Crimson — the brand accent. Used where the eye should go and nowhere else: the focused control,
+// progress, and the play mark. Never a surface.
+const CRIMSON_400: [f32; 4] = rgb8(0xe8, 0x3a, 0x48);
+const CRIMSON_500: [f32; 4] = rgb8(0xd0, 0x1c, 0x2c);
 const WHITE: [f32; 4] = rgb8(0xff, 0xff, 0xff);
 const BLACK: [f32; 4] = rgb8(0x00, 0x00, 0x00);
 
@@ -89,7 +96,7 @@ const SAND_100: [f32; 4] = rgb8(0xe9, 0xe6, 0xe0);
 // an authored key light would use — bright near one corner, dark at its opposite — while every
 // corner still clears 3:1 against `TEXT_TERTIARY` and 7:1 against `TEXT_PRIMARY`, the same floors
 // `AmbientWash::keyed` holds a real hero to.
-const ATMOS_CHARCOAL: [f32; 4] = rgb8(0x18, 0x18, 0x1a);
+const ATMOS_CHARCOAL: [f32; 4] = rgb8(0x0e, 0x0c, 0x0d);
 const ATMOS_WARM_GREY: [f32; 4] = rgb8(0x4a, 0x46, 0x40);
 const ATMOS_UMBER: [f32; 4] = rgb8(0x5e, 0x3e, 0x24);
 const ATMOS_ASH: [f32; 4] = rgb8(0x42, 0x42, 0x4a);
@@ -178,6 +185,51 @@ pub mod space {
     pub const XL: f32 = 64.0;
 }
 
+/// The **shape axis** — how round a corner is drawn, beside [`size`] (type) and [`space`] (gaps).
+///
+/// The app's shape language is crisp rectangles with a hairline of softening: a card, a control,
+/// a pill, a panel all draw with at most [`CORNER`] of rounding, whatever radius their widget was
+/// laid out with. [`corner`] is the rule and `Painter` applies it to every radius it draws (its
+/// private `corner`), so the widgets keep their geometry and the look is decided in one place.
+pub mod shape {
+    /// The largest corner radius any shape is drawn with, in px at 1080p. Enough that an edge does
+    /// not read as a jagged stair on a television, small enough that nothing reads as a bubble.
+    pub const CORNER: f32 = 3.0;
+    /// The radius to draw a `w`×`h` shape whose widget asked for `rad`. A true CIRCLE (a square
+    /// box asked for half its side or more — an avatar, a disc, a spinner dot) keeps its shape,
+    /// and so does anything too small to have a visible corner; every other radius is capped at
+    /// [`CORNER`].
+    pub fn corner(w: f32, h: f32, rad: f32) -> f32 {
+        corner_under(super::appearance::corner_cap(), w, h, rad)
+    }
+
+    /// [`corner`] under an explicit cap (the viewer's Corners choice; [`CORNER`] by default).
+    pub fn corner_under(cap: f32, w: f32, h: f32, rad: f32) -> f32 {
+        let short = w.min(h);
+        let circle = (w - h).abs() < 1.0 && rad >= short * 0.5 - 0.5;
+        if circle || short <= 2.0 * cap { rad } else { rad.min(cap) }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{corner_under, CORNER};
+
+        #[test]
+        fn pills_and_cards_are_crisp_but_circles_stay_round() {
+            let corner = |w, h, r| corner_under(CORNER, w, h, r);
+            assert_eq!(corner(300.0, 64.0, 32.0), CORNER, "a pill");
+            assert_eq!(corner(220.0, 330.0, 14.0), CORNER, "a poster");
+            assert_eq!(corner(800.0, 600.0, 32.0), CORNER, "a panel");
+            assert_eq!(corner(120.0, 120.0, 60.0), 60.0, "an avatar");
+            assert_eq!(corner(10.0, 10.0, 5.0), 5.0, "a spinner dot");
+            assert_eq!(corner(400.0, 6.0, 3.0), 3.0, "a thin rail keeps its rounded ends");
+            assert_eq!(corner(200.0, 100.0, 2.0), 2.0, "a smaller radius is untouched");
+            // Round draws every widget's own radius
+            assert_eq!(corner_under(f32::INFINITY, 300.0, 64.0, 32.0), 32.0);
+        }
+    }
+}
+
 /// **Panel geometry tokens** — widths a whole class of popover shares, so no panel carries a width
 /// literal of its own.
 pub mod layout {
@@ -255,20 +307,17 @@ pub mod logo {
 /// pair collapsed onto this one. Both survivors of that collapse are elsewhere and neither is a
 /// control: the warm off-white is [`WASH_WARM`], a page ground; the cool plate is
 /// [`SURFACE_QR_PLATE`], a scan surface.
-pub const ACCENT: [f32; 4] = COOL_0;
-/// Near-black ink/glyphs drawn over [`ACCENT`].
-pub const ACCENT_INK: [f32; 4] = NEUTRAL_950;
+///
+/// **Crimson since the red theme**: the focus fill is the brand accent, and every focused control —
+/// on a page and over the video — lights up in it, with white ink.
+pub const ACCENT: [f32; 4] = CRIMSON_500;
+/// White ink/glyphs drawn over [`ACCENT`].
+pub const ACCENT_INK: [f32; 4] = WHITE;
 /// Alias for [`ACCENT_INK`] read from the "ink over accent" intent. The one legitimate alias in this
 /// file: it is the same ROLE under a second name, not a second role that happens to share a stop.
 pub const INK_ON_ACCENT: [f32; 4] = ACCENT_INK;
-/// Fixed OKLCH lightness of a keyed focused control's lit top. The rendered ground contributes hue
-/// and a measured fraction of chroma only; it may never make the focus face darker.
-pub const CONTROL_FOCUS_FACE_L: f32 = 0.972;
-/// Fraction of the ambient key's OKLCH chroma carried by a focused face. Above roughly .45 the
-/// control reads as a coloured button instead of white material catching the page's light.
-pub const CONTROL_FOCUS_AMBIENT_C: f32 = 0.36;
-/// Pure OKLCH-lightness step from the focused face's lit top to its body. Both stops keep the same
-/// hue and chroma, so the gradient reads as glare rather than grey laid over the tint.
+/// Pure OKLCH-lightness step from a focused face's lit top ([`ACCENT`]) to its body. Both stops keep
+/// the same hue and chroma, so the gradient reads as glare rather than a darker red laid over it.
 pub const CONTROL_FOCUS_BODY_STEP: f32 = 0.06;
 /// Fixed OKLCH lightness of an idle control face on a keyed page.
 pub const CONTROL_IDLE_FACE_L: f32 = 0.215;
@@ -285,7 +334,7 @@ pub const CONTROL_SPENT_FOCUS_W: f32 = 0.76;
 /// focus state changing. Deliberately close enough to `ACCENT` that [`ACCENT_INK`] stays legible on
 /// BOTH sides — the first version flipped the ink at the sweep line and cut the label in half
 /// mid-word.
-pub const CONTROL_SPENT_FILL: [f32; 4] = mix(COOL_0, NEUTRAL_500, 1.0 - CONTROL_SPENT_FOCUS_W);
+pub const CONTROL_SPENT_FILL: [f32; 4] = mix(CRIMSON_500, NEUTRAL_500, 1.0 - CONTROL_SPENT_FOCUS_W);
 
 /// The Search query field's **editing** ink — the bright endpoint of the `hot` cross-fade in
 /// `search::field::draw` (idle end: `TEXT_SECONDARY`) while the television's keyboard is up. Its own
@@ -772,8 +821,9 @@ pub const fn dim(c: [f32; 4], k: f32) -> [f32; 4] {
 pub const RAIL_TRACK: [f32; 4] = with_a(WHITE, 0.20);
 /// Buffered-ahead / resume-track band.
 pub const RAIL_BUFFERED: [f32; 4] = with_a(WHITE, 0.28);
-/// Played/filled portion of a rail.
-pub const RAIL_FILL: [f32; 4] = with_a(WHITE, 0.95);
+/// Played/filled portion of a rail — the scrubber's elapsed run. Crimson, the accent's progress
+/// role, like [`RESUME_FILL`].
+pub const RAIL_FILL: [f32; 4] = with_a(CRIMSON_400, 0.95);
 /// An intro/credits SEGMENT on the player scrubber — a band lit a step above the track, drawn
 /// between the track and the fill so the played part of a segment reads as played. Stays inside the
 /// rail's monochrome language on purpose: a hue here would compete with the amber resume fill for
@@ -795,7 +845,10 @@ pub const WASH_WARM: [f32; 4] = SAND_100;
 pub const ROUTE_GROUND_FALLBACK: [[f32; 4]; 4] =
     [ATMOS_WARM_GREY, ATMOS_CHARCOAL, ATMOS_UMBER, ATMOS_ASH];
 /// Warm amber Continue-Watching progress fill (Plex-specific; no player equivalent). `#fab82e`.
-pub const RESUME_FILL: [f32; 4] = with_a(AMBER_300, 0.95);
+///
+/// Crimson since the red theme — the same accent as focus, a step brighter so a thin bar carries
+/// on dark artwork. It is also the ▶ "this press plays" mark ([`crate::widgets::still_glyph`]).
+pub const RESUME_FILL: [f32; 4] = with_a(CRIMSON_400, 0.95);
 /// Plex's own "Plex Pass" gold, `#e5a00d` — a BRAND REFERENCE, not a palette member
 /// (`Plex Pass Awareness.dc.html`, "the amber decision"). Two ambers exist ON PURPOSE and stay
 /// two tokens: [`RESUME_FILL`] is ours and tunable; this one names somebody else's colour and
@@ -823,19 +876,18 @@ pub const RESUME_TRACK: [f32; 4] = with_a(WHITE, 0.22);
 /// **No consumer today** — its one user was the amber watched DISC, which the 2026-08-13 evening
 /// sync replaced with a bare tick over a veil ([`TILE_MARK_INK`]). Kept because the design system
 /// still carries the role, and because the next amber surface needs exactly this ink.
-pub const INK_ON_RESUME: [f32; 4] = NEUTRAL_850;
+pub const INK_ON_RESUME: [f32; 4] = WHITE;
 
 // ── A list row's trailing VALUE read-out ─────────────────────────────────────
 /// The word at a row's trailing edge that says what it is SET to (`On`/`Off`, "English"), over the
-/// FOCUSED row's near-white pill. One step behind the label so the label is what you read and the
-/// value is what you check — and an ALPHA of the pill's own ink rather than a grey, because a grey
-/// over near-white goes muddy where black at a weight stays clean. Unfocused rows use
+/// FOCUSED row's crimson pill. One step behind the label so the label is what you read and the
+/// value is what you check — and an ALPHA of the pill's own white ink rather than a grey, because a
+/// grey over the accent goes muddy where white at a weight stays clean. Unfocused rows use
 /// [`TEXT_SECONDARY`] (and [`TEXT_TERTIARY`] when quietened), which need no token of their own,
 /// and [`ROW_VALUE_INK_DIM`] on a dim row.
-pub const ROW_VALUE_INK_ON: [f32; 4] = with_a(BLACK, 0.60);
+pub const ROW_VALUE_INK_ON: [f32; 4] = with_a(WHITE, 0.72);
 /// The same read-out a further step back — see [`ROW_VALUE_INK_ON`]. Derived from [`ACCENT_INK`]
-/// rather than black: at .38 the ink is thin enough that its HUE starts to show, and the pill's own
-/// near-black is the one this must not look tinted against.
+/// so it is the pill's own ink at a lighter weight.
 pub const ROW_VALUE_INK_ON_DIM: [f32; 4] = with_a(ACCENT_INK, 0.38);
 /// An unfocused **dim** row's read-out (`table::Row::dim` — an unavailable step, a limit reached).
 /// The dim row's label is already [`TEXT_TERTIARY`], and the value keeps its one step behind the
@@ -910,6 +962,66 @@ pub const DIAG_NETWORK_MEAN: [f32; 4] = AMBER_300;
 /// The fixed-slot plot's overwrite cursor. Near-white survives every state colour and a phone
 /// camera's chroma subsampling, which is the output format of this surface.
 pub const DIAG_SWEEP_CURSOR: [f32; 4] = COOL_0;
+/// A shelf TRAY's body (`widgets::shelf_tray`): the faint full-width band a row of cards sits on
+/// so each titled shelf reads as one container. White at a whisper, so it takes the page's own colour (the
+/// ground's gradient, an item-keyed wash) rather than adding one; brighter at the top, the way the
+/// app's light falls.
+pub const SHELF_TRAY_TOP: [f32; 4] = with_a(WHITE, 0.055);
+/// …and its foot, fading toward the page.
+pub const SHELF_TRAY_BOT: [f32; 4] = with_a(WHITE, 0.008);
+/// A shelf tray's perimeter: quieter than [`HAIRLINE`], with the brighter top line carried by the
+/// rim's `rim_top` weight ([`SHELF_TRAY_RIM_TOP`]) — the divider the eye reads between two shelves.
+pub const SHELF_TRAY_RIM: [f32; 4] = with_a(WHITE, 0.045);
+/// Extra rim weight on a shelf tray's top edge.
+pub const SHELF_TRAY_RIM_TOP: f32 = 0.10;
+/// The short accent mark on a shelf tray's top edge, under the start of its heading: its length
+/// and thickness, px at 1080p.
+pub const SHELF_TRAY_MARK_W: f32 = 72.0;
+pub const SHELF_TRAY_MARK_H: f32 = 3.0;
+/// The details bubble's body (`cards::peek`): the panel's own dark, its top leaning toward the
+/// live accent by [`PEEK_ACCENT_W`] (mixed at draw time, so it follows the Accent choice).
+pub const PEEK_TOP: [f32; 4] = with_a(NEUTRAL_650, 0.97);
+/// …and its foot, the panel's deeper stop.
+pub const PEEK_BOT: [f32; 4] = with_a(NEUTRAL_850, 0.97);
+/// How far the bubble's top leans toward the accent.
+pub const PEEK_ACCENT_W: f32 = 0.24;
+/// The accent light pooled along the bubble's top edge, at its brightest.
+pub const PEEK_GLOW_A: f32 = 0.30;
+/// The bubble's perimeter, with a brighter top line ([`PEEK_RIM_TOP`]).
+pub const PEEK_RIM: [f32; 4] = with_a(WHITE, 0.12);
+/// Extra rim weight on the bubble's top edge.
+pub const PEEK_RIM_TOP: f32 = 0.12;
+/// The shadow the bubble casts on the shelf it stands over.
+pub const PEEK_SHADOW: [f32; 4] = with_a(BLACK, 0.55);
+/// The search bar's capsule (`widgets::search_bar`): a lit film over the page, brighter at the top.
+pub const SEARCH_BAR_TOP: [f32; 4] = with_a(WHITE, 0.11);
+/// …and its foot.
+pub const SEARCH_BAR_BOT: [f32; 4] = with_a(WHITE, 0.045);
+/// The capsule's perimeter at rest; the live focus crosses it toward [`ACCENT`].
+pub const SEARCH_BAR_RIM: [f32; 4] = with_a(WHITE, 0.16);
+/// Extra rim weight on the capsule's top edge.
+pub const SEARCH_BAR_RIM_TOP: f32 = 0.10;
+/// The capsule's glyph column (the magnifier) and the gap after it, px at 1080p.
+pub const SEARCH_BAR_ICON: f32 = 40.0;
+pub const SEARCH_BAR_PAD: f32 = 34.0;
+/// A soft grouping panel (`widgets::soft_panel`) — the Search page's browse filters stand on one:
+/// a whisper of light, brighter at its top, with a quiet perimeter.
+pub const SOFT_PANEL_TOP: [f32; 4] = with_a(WHITE, 0.065);
+/// …and its foot.
+pub const SOFT_PANEL_BOT: [f32; 4] = with_a(WHITE, 0.02);
+/// A soft panel's perimeter.
+pub const SOFT_PANEL_RIM: [f32; 4] = with_a(WHITE, 0.07);
+/// A soft panel's corner radius, px at 1080p.
+pub const SOFT_PANEL_RAD: f32 = 28.0;
+/// A dropdown's panel (`widgets::dropdown_panel`): the details bubble's own dark — opaque enough to
+/// stand over posters — with its rim and a deeper shadow.
+pub const DROPDOWN_TOP: [f32; 4] = PEEK_TOP;
+pub const DROPDOWN_BOT: [f32; 4] = PEEK_BOT;
+pub const DROPDOWN_RIM: [f32; 4] = PEEK_RIM;
+pub const DROPDOWN_SHADOW: [f32; 4] = PEEK_SHADOW;
+/// A dropdown panel's corner radius and an option's text inset, px at 1080p.
+pub const DROPDOWN_RAD: f32 = 24.0;
+pub const DROPDOWN_TEXT_X: f32 = 26.0;
 /// Section divider hairline.
 pub const HAIRLINE: [f32; 4] = with_a(WHITE, 0.10);
 /// A glass container's **perimeter line** — the design system's `--glass-rim`, one notch under the
@@ -1402,3 +1514,276 @@ const PURPLE_700: [f32; 4] = rgb8(0x70, 0x30, 0xa0);
 /// Opaque main-thread checker warning surface (developer builds only).
 #[cfg(feature = "threadcheck")]
 pub const RUNTIME_WARNING: [f32; 4] = PURPLE_700;
+
+/// **Appearance — the viewer's own choices of accent, background, corners and the details bubble**
+/// (Settings › Appearance), applied at the paint door rather than at each call site.
+///
+/// The palette above is the DEFAULT look (crimson on warm charcoal, crisp 3px corners) and every
+/// role token keeps naming it. What a viewer picks is applied where every colour and every radius
+/// already passes: `Painter`'s colour step runs [`remap`] and its radius step runs
+/// [`super::shape::corner`], which reads [`corner_cap`]. So a choice restyles the whole app at once
+/// without a role token turning into a function or a call site learning about preferences, and with
+/// the defaults chosen the paint door does exactly what it did before (one relaxed load, no compare).
+///
+/// [`remap`] matches by exact colour: the accent's two stops (and the spent-fill mix derived from
+/// them), and the ground stops the surfaces are built from. Shades computed at run time from the
+/// accent (a focused face's body) read [`accent`] instead of [`super::ACCENT`]. The choices are
+/// persisted by the application (`Session::appearance`) and handed in with [`apply`]; nothing here
+/// reads storage.
+pub mod appearance {
+    use super::rgb8;
+    use std::sync::atomic::{AtomicU8, Ordering::Relaxed};
+
+    /// The accent: what a focused control, progress and the ▶ mark are lit in.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Accent { Crimson, Orange, Gold, Emerald, Teal, Blue, Violet, Pink, Silver }
+    impl Accent {
+        pub const LADDER: [Accent; 9] = [Accent::Crimson, Accent::Orange, Accent::Gold, Accent::Emerald,
+            Accent::Teal, Accent::Blue, Accent::Violet, Accent::Pink, Accent::Silver];
+        /// `(base, light)`: the focused fill, and the brighter stop thin marks (progress, ▶) use.
+        /// Every base carries white ink at a contrast a television reads from the couch.
+        pub const fn stops(self) -> ([f32; 4], [f32; 4]) {
+            match self {
+                Accent::Crimson => (super::CRIMSON_500, super::CRIMSON_400),
+                Accent::Orange => (rgb8(0xd9, 0x55, 0x10), rgb8(0xf2, 0x7a, 0x30)),
+                Accent::Gold => (rgb8(0xb8, 0x86, 0x0b), rgb8(0xe0, 0xaa, 0x2a)),
+                Accent::Emerald => (rgb8(0x0e, 0x8a, 0x4f), rgb8(0x2c, 0xb8, 0x72)),
+                Accent::Teal => (rgb8(0x0b, 0x80, 0x88), rgb8(0x2a, 0xb0, 0xb8)),
+                Accent::Blue => (rgb8(0x1f, 0x5f, 0xd6), rgb8(0x4a, 0x86, 0xf2)),
+                Accent::Violet => (rgb8(0x74, 0x3c, 0xd0), rgb8(0x9a, 0x6a, 0xf0)),
+                Accent::Pink => (rgb8(0xc8, 0x1e, 0x6e), rgb8(0xee, 0x4c, 0x96)),
+                // a cool slate, for a colourless look
+                Accent::Silver => (rgb8(0x5c, 0x66, 0x75), rgb8(0x9c, 0xa8, 0xba)),
+            }
+        }
+    }
+
+    /// The ground: the app's background and the surfaces built on it.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Ground { Ember, Charcoal, Graphite, Midnight, Black }
+    impl Ground {
+        /// The order Settings lists them in and the session stores them by; the first is the
+        /// default a fresh install (and a session that never chose) gets.
+        pub const LADDER: [Ground; 5] = [Ground::Ember, Ground::Charcoal, Ground::Graphite, Ground::Midnight, Ground::Black];
+        /// The order the live static holds them in: the palette's own stops (`Charcoal`) are 0, so
+        /// [`remap`]'s fast path and every test that never calls [`apply`] draw the palette as
+        /// written, whatever the stored default is.
+        const LIVE: [Ground; 5] = [Ground::Charcoal, Ground::Ember, Ground::Graphite, Ground::Midnight, Ground::Black];
+        /// Its stops, in [`DEFAULT_GROUND`]'s order.
+        const fn stops(self) -> [[f32; 4]; 8] {
+            match self {
+                Ground::Charcoal => DEFAULT_GROUND,
+                // a warm umber gray: the surfaces lean toward the accent's red without competing
+                // with it; the page itself carries a soft ember-to-slate gradient (`EMBER_WASH`)
+                Ground::Ember => [rgb8(0x2a, 0x22, 0x1e), rgb8(0x26, 0x1e, 0x1a), rgb8(0x22, 0x1b, 0x18),
+                    rgb8(0x1c, 0x16, 0x13), rgb8(0x14, 0x10, 0x0e), rgb8(0x0a, 0x07, 0x06),
+                    rgb8(0x24, 0x1c, 0x18), rgb8(0x19, 0x13, 0x11)],
+                // the neutral gray of the original design, no warmth in it
+                Ground::Graphite => [rgb8(0x24, 0x24, 0x26), rgb8(0x25, 0x25, 0x27), rgb8(0x22, 0x22, 0x24),
+                    rgb8(0x1b, 0x1b, 0x1d), rgb8(0x14, 0x14, 0x16), rgb8(0x08, 0x08, 0x0a),
+                    rgb8(0x1f, 0x21, 0x29), rgb8(0x14, 0x17, 0x1c)],
+                // near-black with a cool cast, for a dark room
+                Ground::Midnight => [rgb8(0x0f, 0x10, 0x14), rgb8(0x17, 0x18, 0x1d), rgb8(0x14, 0x15, 0x1a),
+                    rgb8(0x10, 0x11, 0x15), rgb8(0x0b, 0x0c, 0x0f), rgb8(0x04, 0x04, 0x05),
+                    rgb8(0x16, 0x18, 0x1e), rgb8(0x0e, 0x10, 0x14)],
+                // true black, the surfaces lifted just enough to read as layers (OLED sets)
+                Ground::Black => [rgb8(0x00, 0x00, 0x00), rgb8(0x13, 0x13, 0x15), rgb8(0x10, 0x10, 0x12),
+                    rgb8(0x0b, 0x0b, 0x0c), rgb8(0x06, 0x06, 0x07), rgb8(0x00, 0x00, 0x00),
+                    rgb8(0x14, 0x15, 0x18), rgb8(0x0c, 0x0d, 0x10)],
+            }
+        }
+    }
+    /// How round a corner may be drawn.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Corners { Crisp, Sharp, Soft, Round }
+    impl Corners {
+        pub const LADDER: [Corners; 4] = [Corners::Crisp, Corners::Sharp, Corners::Soft, Corners::Round];
+        /// The largest radius drawn, px at 1080p; `Round` draws every widget's own radius.
+        pub const fn cap(self) -> f32 {
+            match self {
+                Corners::Crisp => super::shape::CORNER,
+                Corners::Sharp => 1.0,
+                Corners::Soft => 8.0,
+                Corners::Round => f32::INFINITY,
+            }
+        }
+    }
+
+    /// When a card's details bubble opens (`cards::peek`).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Peek { Normal, Quick, Slow, Off }
+    impl Peek {
+        pub const LADDER: [Peek; 4] = [Peek::Normal, Peek::Quick, Peek::Slow, Peek::Off];
+        /// How long focus rests before it opens, ms; `None` = never.
+        pub const fn dwell_ms(self) -> Option<f32> {
+            match self {
+                Peek::Normal => Some(650.0),
+                Peek::Quick => Some(350.0),
+                Peek::Slow => Some(1100.0),
+                Peek::Off => None,
+            }
+        }
+    }
+
+    /// The default ground's stops: the app ground, the five neutral surface stops, the two
+    /// unloaded-artwork stops.
+    // placeholder-exempt: a palette TABLE the paint door matches colours against, not a placeholder draw; the skeletons that use these stops are counted where they are drawn
+    const DEFAULT_GROUND: [[f32; 4]; 8] = [
+        plx_gfx::gfx::tokens::NEUTRAL_500,
+        super::NEUTRAL_600, super::NEUTRAL_650, super::NEUTRAL_750, super::NEUTRAL_850, super::NEUTRAL_950,
+        super::COOL_850, super::COOL_900, // placeholder-exempt: a match table for the paint door, not a draw
+    ];
+
+    static ACCENT: AtomicU8 = AtomicU8::new(0);
+    static GROUND: AtomicU8 = AtomicU8::new(0);
+    static CORNERS: AtomicU8 = AtomicU8::new(0);
+    static PEEK: AtomicU8 = AtomicU8::new(0);
+
+    fn pick<T: Copy>(ladder: &[T], i: u8) -> T {
+        ladder.get(i as usize).copied().unwrap_or(ladder[0])
+    }
+    /// Index of `v` in `ladder` (0 when absent), the form the choices are stored in.
+    pub fn index_of<T: PartialEq>(ladder: &[T], v: &T) -> u8 {
+        ladder.iter().position(|x| x == v).unwrap_or(0) as u8
+    }
+
+    /// Make the stored choices live: ladder indexes, out of range meaning the default.
+    pub fn apply(accent: u8, ground: u8, corners: u8, peek: u8) {
+        // stored by the Settings ladder, held by the live one
+        let ground = index_of(&Ground::LIVE, &pick(&Ground::LADDER, ground));
+        let changed = (ACCENT.swap(accent, Relaxed) != accent)
+            | (GROUND.swap(ground, Relaxed) != ground)
+            | (CORNERS.swap(corners, Relaxed) != corners)
+            | (PEEK.swap(peek, Relaxed) != peek);
+        if changed {
+            plx_machine::idle::invalidate();
+        }
+    }
+
+    pub fn accent_choice() -> Accent { pick(&Accent::LADDER, ACCENT.load(Relaxed)) }
+    pub fn ground_choice() -> Ground { pick(&Ground::LIVE, GROUND.load(Relaxed)) }
+    pub fn corners_choice() -> Corners { pick(&Corners::LADDER, CORNERS.load(Relaxed)) }
+    pub fn peek_choice() -> Peek { pick(&Peek::LADDER, PEEK.load(Relaxed)) }
+
+    /// The live accent (the focused fill) — what a shade computed from the accent starts from.
+    pub fn accent() -> [f32; 4] { accent_choice().stops().0 }
+    /// The live corner cap ([`super::shape::corner`]).
+    pub fn corner_cap() -> f32 { corners_choice().cap() }
+    /// The live details-bubble dwell.
+    pub fn peek_dwell_ms() -> Option<f32> { peek_choice().dwell_ms() }
+    /// The live GL clear colour (the app ground).
+    pub fn clear_rgb() -> (f32, f32, f32) {
+        let g = ground_choice().stops()[0];
+        (g[0], g[1], g[2])
+    }
+
+    /// The page gradient the Ember ground lays under a browsing screen, corner-major in the
+    /// wash's order (top-left, top-right, bottom-right, bottom-left): a burnt-orange glow in the top
+    /// left, warm enough to sit with the red accent, cooling through wine across the top to a deep
+    /// navy in the bottom right — a ground with colour in it, still dark enough that the fine print
+    /// keeps its contrast and the posters stay the brightest thing on screen.
+    const EMBER_WASH: [[f32; 4]; 4] = [rgb8(0x6c, 0x2d, 0x15), rgb8(0x42, 0x1e, 0x26),
+        rgb8(0x12, 0x19, 0x2b), rgb8(0x36, 0x1d, 0x17)];
+
+    /// Does the live ground draw a gradient of its own, so a page wash that has settled on the
+    /// flat surface must still be painted (`widgets::AmbientWash::is_flat`)?
+    #[inline]
+    pub fn ground_pass() -> bool {
+        GROUND.load(Relaxed) == 1 // `Ground::LIVE[1]`, Ember
+    }
+
+    /// What the live ground adds to a page-wash colour at the screen fraction `(u, v)` (0..1 from
+    /// the top left): the ground's own offset from the palette surface the wash was mixed from,
+    /// and, under Ember, the gradient. Zero under the palette's own ground, after one load.
+    pub fn wash_shift(u: f32, v: f32) -> [f32; 3] {
+        let g = GROUND.load(Relaxed);
+        if g == 0 {
+            return [0.0; 3];
+        }
+        let ground = pick(&Ground::LIVE, g);
+        let to = ground.stops()[0];
+        let from = DEFAULT_GROUND[0];
+        let (u, v) = (u.clamp(0.0, 1.0), v.clamp(0.0, 1.0));
+        std::array::from_fn(|i| {
+            let mut d = to[i] - from[i];
+            if ground == Ground::Ember {
+                let k = |q: usize| EMBER_WASH[q][i] - to[i];
+                let top = k(0) + (k(1) - k(0)) * u;
+                let bot = k(3) + (k(2) - k(3)) * u;
+                d += top + (bot - top) * v;
+            }
+            d
+        })
+    }
+
+    #[inline]
+    fn same(a: [f32; 4], b: [f32; 4]) -> bool {
+        a[0] == b[0] && a[1] == b[1] && a[2] == b[2]
+    }
+
+    /// The colour to draw for `c` under the live choices (its alpha untouched). With the defaults
+    /// chosen this returns `c` after two relaxed loads.
+    #[inline]
+    pub fn remap(c: [f32; 4]) -> [f32; 4] {
+        let (a, g) = (ACCENT.load(Relaxed), GROUND.load(Relaxed));
+        if a == 0 && g == 0 {
+            return c;
+        }
+        remap_slow(c, pick(&Accent::LADDER, a), pick(&Ground::LIVE, g))
+    }
+
+    fn remap_slow(c: [f32; 4], accent: Accent, ground: Ground) -> [f32; 4] {
+        let with = |to: [f32; 4]| [to[0], to[1], to[2], c[3]];
+        if accent != Accent::Crimson {
+            let (base, light) = accent.stops();
+            if same(c, super::CRIMSON_500) {
+                return with(base);
+            }
+            if same(c, super::CRIMSON_400) {
+                return with(light);
+            }
+            if same(c, super::CONTROL_SPENT_FILL) {
+                let spent = super::mix(base, ground.stops()[0], 1.0 - super::CONTROL_SPENT_FOCUS_W);
+                return with(spent);
+            }
+        }
+        if ground != Ground::Charcoal {
+            let to = ground.stops();
+            for (i, stop) in DEFAULT_GROUND.iter().enumerate() {
+                if same(c, *stop) {
+                    return with(to[i]);
+                }
+            }
+        }
+        c
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// Pure: the live statics are never touched, so no other test can see a remapped colour.
+        #[test]
+        fn the_defaults_draw_exactly_the_palette_and_a_choice_restyles_its_stops() {
+            let crimson = super::super::CRIMSON_500;
+            assert_eq!(remap_slow(crimson, Accent::Crimson, Ground::Charcoal), crimson);
+            let half = [crimson[0], crimson[1], crimson[2], 0.5];
+            let blue = Accent::Blue.stops().0;
+            assert_eq!(remap_slow(half, Accent::Blue, Ground::Midnight), [blue[0], blue[1], blue[2], 0.5], "the alpha is kept");
+            assert_eq!(remap_slow(DEFAULT_GROUND[0], Accent::Blue, Ground::Midnight), Ground::Midnight.stops()[0]);
+            let text = super::super::TEXT_PRIMARY;
+            assert_eq!(remap_slow(text, Accent::Blue, Ground::Midnight), text, "text is untouched");
+            assert_eq!(Corners::Crisp.cap(), super::super::shape::CORNER);
+            assert!(Corners::Round.cap().is_infinite());
+            assert_eq!(Peek::Off.dwell_ms(), None);
+            assert_eq!(pick(&Accent::LADDER, 200), Accent::Crimson, "out of range is the default");
+            // the stored order and the live order name the same grounds
+            for g in Ground::LADDER {
+                assert!(Ground::LIVE.contains(&g));
+            }
+            assert_eq!(Ground::LIVE[0], Ground::Charcoal, "the palette's own ground is the live zero");
+            assert_eq!(Ground::LIVE[1], Ground::Ember, "`ground_pass` reads index 1 as Ember");
+            assert_eq!(Ground::LADDER[0], Ground::Ember, "a fresh install opens on Ember");
+        }
+    }
+}

@@ -1,5 +1,6 @@
 #!/bin/sh
-# Stage the HOST FFmpeg beside pkg/ for the desktop simulator, with loader-relative names.
+# Stage the HOST FFmpeg beside pkg/ for the desktop simulator: loader-relative names on macOS, a
+# `-plx-host` file name on Linux (below).
 #
 # `ff.rs` dlopens the bundled libraries by ABSOLUTE PATH out of `paths::app_dir()`, which is
 # `pkg/` under `make sim` — so the Mach-O build has to sit there next to the ELF one. The two
@@ -19,6 +20,25 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PREFIX="$ROOT/vendor/ffmpeg-prefix-host"
 LIBS='libavutil-plx.61 libavcodec-plx.63 libavformat-plx.63 libswscale-plx.10'
 name=$1
+
+# LINUX: the same build is ELF named exactly like the shipped ARM libraries, so it is staged under
+# a `-plx-host` name (`libavformat-plx-host.so.63`) that neither collides with an ARM copy in pkg/
+# nor matches `make ipk`'s `lib*-plx.so.*` glob. The SONAME inside stays `libavformat-plx.so.63`,
+# and that is what makes the chain load: `ff.rs` opens avutil, avcodec, avformat in dependency
+# order by absolute path with RTLD_GLOBAL, and glibc satisfies the next library's DT_NEEDED with
+# an already-loaded object whose SONAME matches — no rpath and no rewrite needed.
+case "$name" in
+  *-plx-host.so.*)
+    base=$(printf '%s' "$name" | sed 's/-plx-host\.so\./-plx.so./')
+    src="$PREFIX/lib/$base"
+    [ -e "$src" ] || { echo "no host $base in $PREFIX — run 'HOST=1 ci/build-ffmpeg.sh'" >&2; exit 1; }
+    out="$ROOT/pkg/$name"
+    cp -L "$src" "$out.$$"
+    chmod 0644 "$out.$$"
+    mv -f "$out.$$" "$out"
+    exit 0
+    ;;
+esac
 
 src=$(ls "$PREFIX/lib/$name".*.*.dylib 2>/dev/null | head -1)
 [ -n "$src" ] || { echo "no host $name in $PREFIX — run 'HOST=1 ci/build-ffmpeg.sh'" >&2; exit 1; }

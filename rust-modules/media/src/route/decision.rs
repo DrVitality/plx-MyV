@@ -356,7 +356,11 @@ pub struct PlaybackSession {
     /// so even a whole show is tens of KB. The capping that matters is the DRAWING (a still per row
     /// is a GL texture); that belongs to the overlay, and `apply_plan` deliberately warms only
     /// `up_next`'s.
-    queue: Vec<plx_plex::plex::QueueRow>,
+    ///
+    /// Shared (`Arc`) so the per-frame [`publication`](Self::publication) can hand a screen the
+    /// rows — the player's Episodes strip draws them — for the price of a reference count, and so
+    /// `request_play` retiring the live copy cannot free rows a published copy still lends.
+    queue: Option<std::sync::Arc<[plx_plex::plex::QueueRow]>>,
     /// **This frame's millisecond stamp, mirrored from [`crate::player::machine::Player::now_ms`]**
     /// (spec §4.1), whose `set_now` is its ONLY writer — the loop calls it once per iteration from
     /// the same `fr.now` every other phase of the frame reads.
@@ -453,7 +457,7 @@ impl PlaybackSession {
         title: [0; 128],
         ctxline: [0; 96],
         up_next: None,
-        queue: Vec::new(),
+        queue: None,
         now_ms: 0,
         preview: false,
         resolved_as_preview: false,
@@ -470,10 +474,9 @@ impl PlaybackSession {
     /// from inside a draw), the loop publishes this copy into the rig once per frame, exactly as
     /// `capture_views` publishes every store's snapshot beside it.
     ///
-    /// **Everything except [`queue`](Self::queue).** The PlayQueue rows are the only unbounded
-    /// field and nothing outside this module reads them ([`with_queue`] has no caller in `ui/`,
-    /// `screens/` or `app/`), so they are the one thing a per-frame copy must not carry. The
-    /// destructuring is deliberate and load-bearing: adding a field to [`PlaybackSession`] without
+    /// **The PlayQueue rows ride along by reference.** They are the only unbounded field, so
+    /// they are shared (`Arc`) rather than copied: the player's Episodes strip reads them through
+    /// [`with_queue`] at the cost of a reference count per frame. The destructuring is deliberate and load-bearing: adding a field to [`PlaybackSession`] without
     /// deciding whether a screen may see it FAILS THE BUILD here rather than silently publishing
     /// it or silently dropping it.
     pub fn publication(&self) -> PlaybackSession {
@@ -526,7 +529,7 @@ impl PlaybackSession {
             ctxline,
             up_next,
             now_ms,
-            queue: _,
+            queue,
             preview: _,
             resolved_as_preview,
         } = self;
@@ -579,7 +582,7 @@ impl PlaybackSession {
             ctxline: *ctxline,
             up_next: up_next.clone(),
             now_ms: *now_ms,
-            queue: Vec::new(),
+            queue: queue.clone(),
             // A screen copy is not the live preview. The loop reads the real session.
             preview: false,
             resolved_as_preview: *resolved_as_preview,
@@ -6397,10 +6400,10 @@ pub fn set_skip_interval(interval: SkipInterval) -> bool {
     saved
 }
 
-/// What OK does on a Continue Watching card — install-wide, like [`NEXT_EPISODE_MODE`]. Read by
-/// every deck's press and draw (Home's and the Library's) and by the item menu when it builds its
-/// rows; `DeckPress::press_plays` is the one question they all ask of it.
-static DECK_PRESS: AtomicU8 = AtomicU8::new(0); // DeckPress::Details's index
+/// What OK does on a card — install-wide, like [`NEXT_EPISODE_MODE`]. Read by every card's press
+/// and draw (Home's, the Library's, Search's) and by the item menu when it builds its rows;
+/// `DeckPress::press_plays` is the one question they all ask of it.
+static DECK_PRESS: AtomicU8 = AtomicU8::new(1); // DeckPress::Play's index — the default
 
 pub fn deck_press() -> DeckPress {
     DeckPress::from_index(DECK_PRESS.load(Ordering::Relaxed))
@@ -7119,14 +7122,20 @@ pub fn up_next(ps: &PlaybackSession) -> Option<&UpNext> {
 /// plan lands, and whenever the queue POST failed.
 ///
 /// MAIN THREAD ONLY. Unlike [`up_next`] this lends the rows to a closure instead of handing out a
-/// `&'static`, and that is deliberate: `request_play` FREES this Vec as its first act, so a
+/// `&'static`, and that is deliberate: `request_play` drops the live reference as its first act, so a
 /// borrowed row used to start playback would be read after free — exactly the aliasing bug
 /// `request_play_up_next`'s by-value signature exists to make unrepresentable. A caller that wants
 /// to keep a row past the call clones it out (`with_queue(|q| q.get(i).cloned())`); the borrow
 /// checker cannot police a `&'static`, but it does police this.
-#[allow(dead_code)] // nothing reads the rows yet — the queue overlay that draws them is its own batch
 pub fn with_queue<R>(ps: &PlaybackSession, f: impl FnOnce(&[plx_plex::plex::QueueRow]) -> R) -> R {
-    f(&ps.queue)
+    f(ps.queue.as_deref().unwrap_or(&[]))
+}
+
+/// A queue row as the [`UpNext`] that plays it — what the player's Episodes strip hands to the
+/// same start path Up Next uses, so picking any episode of the queue costs no round trip either.
+/// Episodes only, by [`up_next_of`]'s own gate.
+pub fn up_next_from_row(r: &plx_plex::plex::QueueRow) -> Option<UpNext> {
+    up_next_of(r)
 }
 
 /// Create a PlayQueue for `rk` so the session is a first-class, remote-controllable player and
@@ -7625,9 +7634,9 @@ fn request_play_inner(
         // after the one that WAS playing, and leaving it up would offer the Up Next control a
         // stale "next" for the whole resolve window — including, when the user just started that
         // very episode from here, the one now on screen. The retained rows go with it, for the
-        // same reason and because a fresh `Vec` also hands their strings back to the allocator.
+        // same reason and because dropping the last reference hands their strings back to the allocator.
         s.up_next = None;
-        s.queue = Vec::new();
+        s.queue = None;
         // …and the PREVIOUS item's refusal, for the same reason and one more: `player::state()`
         // derives `Error` from it, so a verdict left standing would put the failure read-out over
         // the item now being resolved. `play_pending()` outranks it for this frame either way, but
@@ -8182,7 +8191,7 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut plx_data::stores::metadata::M
             title,
             ctxline,
             up_next: plan.up_next.map(std::sync::Arc::new),
-            queue: plan.queue,
+            queue: (!plan.queue.is_empty()).then(|| plan.queue.into()),
             // The frame tick is the MACHINE's, not the plan's: a landing replaces the session's
             // contents and must not rewind the stamp `Player::set_now` wrote this iteration.
             now_ms,

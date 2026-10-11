@@ -51,7 +51,8 @@ use plx_machine::machine::{
 };
 use plx_appkit::more_menu::{MoreMenuPart, MoreOk};
 use plx_ui::screen::{
-    At, Dir, DrawFrame, FocusSource, Focusable, GroupSpec, HitSource, Part, Placed, RenderStrategy,
+    Activate, At, Dir, DrawFrame, FocusSource, Focusable, GroupSpec, HitSource, Hover, Part, Placed,
+    RenderStrategy,
     Screen, ScreenEvent, Step,
 };
 use plx_appkit::timing_capsule::{CapsuleOut, TimingCapsule};
@@ -95,6 +96,10 @@ pub enum OverlayKind {
     /// overlay whose [`Self::hud_policy`] is [`HudPolicy::Hidden`] — the capsule sits where the
     /// transport's caption band and scrubber would, so the two must never be up together.
     Timing,
+    /// The show's episodes as a strip over the transport (`appkit/episodes_panel.rs`), opened from
+    /// the HUD's Episodes tab — switch episode or season without leaving playback. Owns its keys,
+    /// like Timing: the season jump is not a move the focus engine could express.
+    Episodes,
 }
 
 impl OverlayKind {
@@ -103,12 +108,13 @@ impl OverlayKind {
     /// navigation tests), so a new kind is added here once rather than to each of them.
     /// `every_kind_is_listed_once` fails to compile when a variant is added and not listed.
     #[cfg(any(test, feature = "test-support"))]
-    pub const ALL: [OverlayKind; 5] = [
+    pub const ALL: [OverlayKind; 6] = [
         OverlayKind::Tracks { tab: 0 },
         OverlayKind::Info,
         OverlayKind::Chapters,
         OverlayKind::More { quality: false },
         OverlayKind::Timing,
+        OverlayKind::Episodes,
     ];
 
     /// The heartbeat's `overlay=` word. These spellings are the ones `tests/manifest.json`'s
@@ -132,6 +138,7 @@ impl OverlayKind {
             OverlayKind::Chapters => 2,
             OverlayKind::More { .. } => 3,
             OverlayKind::Timing => 4,
+            OverlayKind::Episodes => 5,
         }
     }
 
@@ -142,6 +149,7 @@ impl OverlayKind {
             OverlayKind::Chapters => "chapters",
             OverlayKind::More { .. } => "more",
             OverlayKind::Timing => "timing",
+            OverlayKind::Episodes => "episodes",
         }
     }
 
@@ -154,7 +162,11 @@ impl OverlayKind {
     pub fn hud_policy(self) -> HudPolicy {
         match self {
             OverlayKind::Timing => HudPolicy::Hidden,
-            OverlayKind::Tracks { .. } | OverlayKind::Info | OverlayKind::Chapters | OverlayKind::More { .. } => {
+            OverlayKind::Tracks { .. }
+            | OverlayKind::Info
+            | OverlayKind::Chapters
+            | OverlayKind::More { .. }
+            | OverlayKind::Episodes => {
                 HudPolicy::Lifted
             }
         }
@@ -208,7 +220,7 @@ impl LogicalState for PlayerOverlayArg {
             OverlayKind::More { quality } => {
                 c.bool(quality);
             }
-            OverlayKind::Info | OverlayKind::Chapters | OverlayKind::Timing => {}
+            OverlayKind::Info | OverlayKind::Chapters | OverlayKind::Timing | OverlayKind::Episodes => {}
         }
     }
     fn probe(&self, out: &mut String) {
@@ -223,6 +235,7 @@ pub enum Panel {
     Chapters(plx_appkit::chapters_panel::ChaptersState),
     More(plx_appkit::more_menu::MoreMenuState),
     Timing(TimingCapsule),
+    Episodes(plx_appkit::episodes_panel::EpisodesState),
 }
 
 pub struct PlayerOverlayScreen {
@@ -319,6 +332,7 @@ impl PlayerOverlayScreen {
                 let (lo, hi) = plx_media::player::subtitle_offset_range_ms();
                 Panel::Timing(TimingCapsule::new(plx_media::player::subtitle_offset_ms(), lo, hi))
             }
+            OverlayKind::Episodes => Panel::Episodes(plx_appkit::episodes_panel::EpisodesState::new(ps)),
         };
         Self {
             entry,
@@ -365,6 +379,7 @@ impl PlayerOverlayScreen {
             // Timing exposes no rows and no cursor — the capsule is driven entirely by its own
             // `key()`, never by the engine's focus movement.
             Panel::Timing(_) => 0,
+            Panel::Episodes(p) => p.sel(),
         }
     }
 
@@ -592,7 +607,8 @@ impl PlayerOverlayScreen {
             // row (`Focusable::groups` answers empty, `key()` returns `Handled::Yes` for every
             // key before `Machine::step` ever reaches its `Activate`/`PressCommit` arms), so
             // nothing ever calls `activate()` while this variant is up. Exhaustiveness only.
-            Panel::Timing(_) => {}
+            // Episodes is the same: its own `key()` answers OK.
+            Panel::Timing(_) | Panel::Episodes(_) => {}
         }
     }
 
@@ -708,6 +724,47 @@ impl PlayerOverlayScreen {
             }
             return Handled::Yes;
         }
+        // The Episodes strip owns its keys the same way, for the same reason: its UP/DOWN is a
+        // season jump, not a focus move. Directions are paced by the shared `RepeatGate`.
+        if let Panel::Episodes(strip) = &mut self.panel {
+            use plx_appkit::episodes_panel::EpisodesKey;
+            let directional = matches!(key, Key::Up | Key::Down | Key::Left { .. } | Key::Right { .. });
+            match edge {
+                Edge::Down => self.repeat.rearm(now),
+                Edge::Repeat if !directional || !self.repeat.ready_every(now, PANEL_REPEAT_MS) => {
+                    return Handled::Yes
+                }
+                Edge::Up => return Handled::Yes,
+                _ => {}
+            }
+            let out = match key {
+                Key::Left { .. } => strip.step(ps, -1, 0),
+                Key::Right { .. } => strip.step(ps, 1, 0),
+                Key::Up => strip.step(ps, 0, -1),
+                Key::Down => strip.step(ps, 0, 1),
+                Key::Ok => strip.on_ok(ps),
+                Key::Back => {
+                    self.dismiss(fx);
+                    self.closing(fx);
+                    return Handled::Yes;
+                }
+                _ => EpisodesKey::Inert,
+            };
+            match out {
+                EpisodesKey::Moved => self.moved(fx),
+                EpisodesKey::Below => {
+                    self.dismiss(fx);
+                    Self::ask(fx, PlayerReq::FocusTabs);
+                    self.closing(fx);
+                }
+                EpisodesKey::Play(u) => {
+                    self.dismiss(fx);
+                    Self::ask(fx, PlayerReq::PlayEpisode(u));
+                }
+                EpisodesKey::Inert => {}
+            }
+            return Handled::Yes;
+        }
         // A held direction is paced; a FRESH press is never swallowed by the cadence before it.
         let directional = matches!(key, Key::Up | Key::Down | Key::Left { .. } | Key::Right { .. });
         if directional {
@@ -811,7 +868,7 @@ impl<H: crate::registry::PlayerLike + crate::registry::MetadataLike> Machine<H> 
                     // Timing has no cursor the engine could have moved — its own `key()` owns
                     // every press and always returns `Handled::Yes`, so this arm is unreached for
                     // it in practice.
-                    Panel::Timing(_) => {}
+                    Panel::Timing(_) | Panel::Episodes(_) => {}
                 }
                 self.moved(fx);
                 Handled::No
@@ -822,6 +879,19 @@ impl<H: crate::registry::PlayerLike + crate::registry::MetadataLike> Machine<H> 
             // `PressCommit`, on release — except `Info`, whose `PressCommit` defers instead to
             // the loop's own tvOS dip (`Self::activate`'s doc explains the split).
             ScreenEvent::Activate(elem) => {
+                // a click on an Episodes card: play that episode (the one playing stays put)
+                if let Panel::Episodes(strip) = &mut self.panel {
+                    use plx_appkit::episodes_panel::EpisodesKey;
+                    strip.select(ps, *elem as usize);
+                    match strip.on_ok(ps) {
+                        EpisodesKey::Play(u) => {
+                            self.dismiss(fx);
+                            Self::ask(fx, PlayerReq::PlayEpisode(u));
+                        }
+                        _ => self.moved(fx),
+                    }
+                    return Handled::No;
+                }
                 // the event names the row that was hit (its key for Tracks): seat the panel on
                 // THAT row before `activate` reads the panel's own cursor, so a click never acts
                 // on a neighbour the cursor happened to still hold
@@ -898,6 +968,7 @@ impl<H: crate::registry::PlayerLike + crate::registry::MetadataLike> Machine<H> 
                     Panel::Chapters(p) => p.update(dt, H::metadata(cx)),
                     Panel::More(p) => p.update(dt, cx.measure, ps),
                     Panel::Timing(p) => p.update(dt),
+                    Panel::Episodes(p) => p.update(dt, ps),
                 }
                 // The transport must not auto-hide out from under a panel a viewer is reading —
                 // the rule `app/run.rs` kept as "keep the HUD alive while the track menu / Info
@@ -934,6 +1005,23 @@ impl PlayerOverlayScreen {
             // Timing owns its own key ladder and never asks the engine for focus, so it has no
             // per-row geometry to register — `draw`, below, paints the capsule itself.
             Panel::Timing(_) => {}
+            // The Episodes strip owns its keys too, but a pointer must still land on a card: each
+            // card is a click target (no hover focus — the strip has no engine group), so a click
+            // plays it (`ScreenEvent::Activate`, below) instead of missing the panel and closing it.
+            Panel::Episodes(p) => {
+                let root = plx_ui::Painter::root();
+                let clip = plx_appkit::episodes_panel::EpisodesState::band();
+                for (i, rect) in p.card_rects(H::session(f.cx)) {
+                    f.stop(root, plx_ui::screen::Stop {
+                        key: plx_machine::machine::FocusKey { entry: self.entry, elem: i as u32 },
+                        rect,
+                        rest_rect: rect,
+                        clip,
+                        hover: Hover::Ignore,
+                        activate: Activate::Direct,
+                    });
+                }
+            }
         }
     }
 }
@@ -956,8 +1044,8 @@ impl<H: crate::registry::PlayerLike + crate::registry::MetadataLike> Focusable<H
             Panel::Chapters(p) => ChaptersPart { state: p, entry: self.entry, group: Self::GROUP, count: chapter_count(H::metadata(cx)) }.groups(cx, out),
             Panel::More(p) => MoreMenuPart { state: p, entry: self.entry, group: Self::GROUP }.groups(cx, out),
             // Timing declares no group at all — the capsule's own `key()` swallows every press
-            // (`Handled::Yes`) before the engine's focus machinery ever sees one.
-            Panel::Timing(_) => {}
+            // (`Handled::Yes`) before the engine's focus machinery ever sees one. So does Episodes.
+            Panel::Timing(_) | Panel::Episodes(_) => {}
         }
     }
     fn group_of(&self, key: &u32, cx: &Cx<'_, H>) -> Option<GroupId> {
@@ -966,7 +1054,7 @@ impl<H: crate::registry::PlayerLike + crate::registry::MetadataLike> Focusable<H
             Panel::Info(p) => InfoPanelPart { state: p, entry: self.entry, group: Self::GROUP }.group_of(key, cx),
             Panel::Chapters(p) => ChaptersPart { state: p, entry: self.entry, group: Self::GROUP, count: chapter_count(H::metadata(cx)) }.group_of(key, cx),
             Panel::More(p) => MoreMenuPart { state: p, entry: self.entry, group: Self::GROUP }.group_of(key, cx),
-            Panel::Timing(_) => None,
+            Panel::Timing(_) | Panel::Episodes(_) => None,
         }
     }
     fn neighbour(&self, key: FocusKey<u32>, dir: Dir, cx: &Cx<'_, H>) -> Step<u32> {
@@ -975,7 +1063,7 @@ impl<H: crate::registry::PlayerLike + crate::registry::MetadataLike> Focusable<H
             Panel::Info(p) => InfoPanelPart { state: p, entry: self.entry, group: Self::GROUP }.neighbour(key, dir, cx),
             Panel::Chapters(p) => ChaptersPart { state: p, entry: self.entry, group: Self::GROUP, count: chapter_count(H::metadata(cx)) }.neighbour(key, dir, cx),
             Panel::More(p) => MoreMenuPart { state: p, entry: self.entry, group: Self::GROUP }.neighbour(key, dir, cx),
-            Panel::Timing(_) => Step::Edge,
+            Panel::Timing(_) | Panel::Episodes(_) => Step::Edge,
         }
     }
     fn place(&self, key: &u32, cx: &Cx<'_, H>, at: At) -> Option<Placed> {
@@ -984,7 +1072,7 @@ impl<H: crate::registry::PlayerLike + crate::registry::MetadataLike> Focusable<H
             Panel::Info(p) => InfoPanelPart { state: p, entry: self.entry, group: Self::GROUP }.place(key, cx, at),
             Panel::Chapters(p) => ChaptersPart { state: p, entry: self.entry, group: Self::GROUP, count: chapter_count(H::metadata(cx)) }.place(key, cx, at),
             Panel::More(p) => MoreMenuPart { state: p, entry: self.entry, group: Self::GROUP }.place(key, cx, at),
-            Panel::Timing(_) => None,
+            Panel::Timing(_) | Panel::Episodes(_) => None,
         }
     }
     fn reconcile(&self, want: FocusKey<u32>, cx: &Cx<'_, H>) -> FocusKey<u32> {
@@ -993,7 +1081,7 @@ impl<H: crate::registry::PlayerLike + crate::registry::MetadataLike> Focusable<H
             Panel::Info(p) => InfoPanelPart { state: p, entry: self.entry, group: Self::GROUP }.reconcile(want, cx),
             Panel::Chapters(p) => ChaptersPart { state: p, entry: self.entry, group: Self::GROUP, count: chapter_count(H::metadata(cx)) }.reconcile(want, cx),
             Panel::More(p) => MoreMenuPart { state: p, entry: self.entry, group: Self::GROUP }.reconcile(want, cx),
-            Panel::Timing(_) => want,
+            Panel::Timing(_) | Panel::Episodes(_) => want,
         }
     }
     fn seat(&self, g: GroupId, from: Placed, cx: &Cx<'_, H>) -> FocusKey<u32> {
@@ -1002,7 +1090,7 @@ impl<H: crate::registry::PlayerLike + crate::registry::MetadataLike> Focusable<H
             Panel::Info(p) => InfoPanelPart { state: p, entry: self.entry, group: Self::GROUP }.seat(g, from, cx),
             Panel::Chapters(p) => ChaptersPart { state: p, entry: self.entry, group: Self::GROUP, count: chapter_count(H::metadata(cx)) }.seat(g, from, cx),
             Panel::More(p) => MoreMenuPart { state: p, entry: self.entry, group: Self::GROUP }.seat(g, from, cx),
-            Panel::Timing(_) => FocusKey { entry: self.entry, elem: 0 },
+            Panel::Timing(_) | Panel::Episodes(_) => FocusKey { entry: self.entry, elem: 0 },
         }
     }
 }
@@ -1044,7 +1132,7 @@ impl<H: crate::registry::PlayerLike + crate::registry::MetadataLike> Screen<H> f
             match &self.panel {
                 Panel::Tracks(p) => p.warm_open(cx.measure),
                 Panel::More(p) => p.warm_open(cx.measure),
-                Panel::Info(_) | Panel::Chapters(_) | Panel::Timing(_) => {}
+                Panel::Info(_) | Panel::Chapters(_) | Panel::Timing(_) | Panel::Episodes(_) => {}
             }
         }
     }
@@ -1063,7 +1151,9 @@ impl<H: crate::registry::PlayerLike + crate::registry::MetadataLike> Screen<H> f
             Panel::Tracks(_) => plx_ui::screen::Scrim::over_video(DIM_PLAYER, self.corners),
             Panel::More(_) => plx_ui::screen::Scrim::over_video(DIM_SHEET, self.corners),
             // The capsule sits over the video like the Info card and the Chapters strip — no dim.
-            Panel::Info(_) | Panel::Chapters(_) | Panel::Timing(_) => plx_ui::screen::Scrim::NONE,
+            Panel::Info(_) | Panel::Chapters(_) | Panel::Timing(_) | Panel::Episodes(_) => {
+                plx_ui::screen::Scrim::NONE
+            }
         }
     }
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>) {
@@ -1085,6 +1175,7 @@ impl<H: crate::registry::PlayerLike + crate::registry::MetadataLike> Screen<H> f
             Panel::More(p) => p.draw(appear, measure),
             // Fixed y, never the live caption's own baseline — see `player_hud::CAPSULE_BOTTOM_Y`.
             Panel::Timing(p) => p.draw(plx_appkit::player_hud::CAPSULE_BOTTOM_Y, appear),
+            Panel::Episodes(p) => p.draw(ps, appear, measure),
         }
         self.record_stops(f);
     }
@@ -1104,7 +1195,7 @@ impl<H: crate::registry::PlayerLike + crate::registry::MetadataLike> Screen<H> f
         match &self.panel {
             Panel::Tracks(p) => p.transitioning(),
             Panel::More(p) => p.transitioning(),
-            Panel::Info(_) | Panel::Chapters(_) | Panel::Timing(_) => false,
+            Panel::Info(_) | Panel::Chapters(_) | Panel::Timing(_) | Panel::Episodes(_) => false,
         }
     }
     fn as_any(&self) -> Option<&dyn std::any::Any> {

@@ -2292,7 +2292,7 @@ fn a_refused_token_is_reported_as_authorization_not_as_silence() {
             last, attempts: 3, elapsed: Duration::from_secs(6), trigger: DiscoveryTrigger::Login,
         })).expect("a failure");
         assert_eq!(incident.kind, IncidentKind::Discovery(DiscoveryClass::Silent), "{last:?}");
-        assert!(message.contains("plex.tv"));
+        assert!(message.contains("Stremio"), "{message}");
     }
 }
 
@@ -2308,10 +2308,10 @@ fn terminal_discovery_copy_names_the_target_cause_retry_and_action() {
     assert_eq!(message(failure(Some(28), plx_net::net::RequestError::TimedOut)),
         "This TV couldn't reach plex.tv, so your servers weren't checked. We tried 3 times. Check the TV's internet connection, then try again.");
     assert_eq!(message(failure(Some(60), plx_net::net::RequestError::Transport)),
-        "This TV couldn't make a secure connection to plex.tv. Check the TV's date and time, then try again.");
+        "This TV couldn't make a secure connection to Stremio. Check the TV's date and time, then try again.");
     for evidence in [Ok(200), Ok(408), Ok(429), Ok(503)] {
         assert_eq!(message(evidence),
-            "plex.tv is having trouble right now, so your servers weren't checked. Try again in a few minutes.");
+            "Stremio is having trouble right now. Try again in a few minutes.");
     }
     let servers = discovery_failure(&Discovery::ServersUnreachable {
         trigger: DiscoveryTrigger::Rediscover,

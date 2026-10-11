@@ -562,6 +562,12 @@ impl Client {
         r.ok().then_some(r.body)
     }
 
+    /// GET with `Accept: application/json`, the body as it came (a 2xx only).
+    #[track_caller]
+    pub(super) fn get_json_body(&self, path_no_token: &str) -> Option<Vec<u8>> {
+        self.body_2xx_bulk(path_no_token, &[ACCEPT_JSON])
+    }
+
     /// GET → parse the `{ "MediaContainer": … }` envelope into the flat container.
     #[track_caller]
     pub(super) fn get_json(&self, path_no_token: &str) -> Option<MediaContainer> {

@@ -130,11 +130,12 @@ fn every_picker_level_fits_its_column_in_every_language() {
     for language in SHIPPED {
         let _guard = language_on_this_thread_for_test(language);
         let tag = language.tag();
-        for kind in [Kind::Playback, Kind::AudioSubtitles] {
+        for kind in [Kind::Playback, Kind::AudioSubtitles, Kind::Appearance] {
             let prefs = AudioPreferences::default();
             let fields: &[PickerKind] = match kind {
-                Kind::Playback => &[PickerKind::Quality, PickerKind::DirectPlay, PickerKind::SubtitleSize, PickerKind::SubtitlePosition, PickerKind::NextEpisode, PickerKind::DeckPress, PickerKind::SkipInterval],
+                Kind::Playback => &[PickerKind::Quality, PickerKind::DirectPlay, PickerKind::SubtitleSize, PickerKind::SubtitlePosition, PickerKind::NextEpisode, PickerKind::DeckPress, PickerKind::SkipInterval, PickerKind::StreamQuality, PickerKind::StreamSource, PickerKind::SkipIntros],
                 Kind::AudioSubtitles => &[PickerKind::AudioLanguage, PickerKind::SubtitleMode, PickerKind::SubtitleLanguage, PickerKind::ForcedSubtitles],
+                Kind::Appearance => &[PickerKind::Accent, PickerKind::Ground, PickerKind::Corners, PickerKind::Peek, PickerKind::HomeStart],
             };
             for &field in fields {
                 let current = resolve_value(field, Quality::Original, DirectPlayMode::Auto, Some(&prefs));

@@ -474,7 +474,7 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
     drain_held_feature(app);
     home_requests(app, fr.now);
     library_requests(app, fr.now);
-    search_requests(app);
+    search_requests(app, fr.now);
     // The player's overlays are surfaces on its own stack, so what they decide reaches the
     // loop the same way every other owned screen's decision does — as requests, drained here,
     // after the dispatcher and before the frame's own arms (`playback::player_requests`).
@@ -515,6 +515,13 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
                 // being re-read at the commit: the user can still move focus during the dip, and
                 // BACK must return them to where they pressed.
                 bridge::nav_push_with_return(&mut app.pages, AppArg::Content(arg), ret);
+            }
+            ContentReq::PlayCard { sid, rk } => {
+                halt_preview(app);
+                let Some(item) = app.bridge.content_focused_item(&app.pages, entry, &ret) else { continue };
+                if item.sid != sid || item.rk != rk || item.rk.is_empty() { continue; }
+                unsafe { activate_card(&mut app.player.session, &mut app.adapters.player, &item, true, HUD_LINGER_MS,
+                    Some(ret), &mut app.pages, &mut app.bridge, &mut app.menu_play_await, fr.now); }
             }
             ContentReq::Present(arg) => {
                 halt_preview(app);
@@ -600,6 +607,19 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
                     &mut app.adapters.player,
                     target_ns,
                 );
+            }
+            ContentReq::ChooseStream { sid, rk, part, title, episode, anchor } => {
+                halt_preview(app);
+                let item = plx_data::pms::PmsMovie {
+                    sid,
+                    rk,
+                    part,
+                    title,
+                    kind: if episode { 3 } else { 0 },
+                    ..Default::default()
+                };
+                let origin = plx_screens::registry::MenuOrigin { host: entry, focus: ret.focus, anchor };
+                super::input::choose_stream_for(&mut app.bridge, &item, origin, fr.now);
             }
             ContentReq::Panel(panel) => {
                 halt_preview(app);
@@ -713,7 +733,7 @@ fn search_target(item: &plx_data::search::Item, request: &plx_screens::registry:
     }
 }
 
-fn search_requests(app: &mut App) {
+fn search_requests(app: &mut App, now: u32) {
     use plx_screens::registry::SearchReq;
     for (source, request, ret) in app.bridge.take_search_reqs() {
         let MachineId::Instance(instance) = source else { continue };
@@ -738,6 +758,15 @@ fn search_requests(app: &mut App) {
                 let Some((item, _)) = app.bridge.search_selection(&app.pages, entry, ret.focus) else { continue };
                 let Some(target) = search_target(&item, &request) else { continue };
                 bridge::nav_push_with_return(&mut app.pages, target, ret);
+            }
+            // OK on a hit while the press plays: the same start a shelf card's press takes (a film
+            // or episode plays, a show resumes through its page), checked against the retained
+            // selection first like every other request here.
+            SearchReq::Play { sid, rk } => {
+                let Some((plx_data::search::Item::Media(item), _)) = app.bridge.search_selection(&app.pages, entry, ret.focus) else { continue };
+                if item.sid != *sid || item.rk != *rk || item.rk.is_empty() { continue; }
+                unsafe { activate_card(&mut app.player.session, &mut app.adapters.player, &item, true, HUD_LINGER_MS,
+                    Some(ret), &mut app.pages, &mut app.bridge, &mut app.menu_play_await, now); }
             }
             SearchReq::ItemMenu { sid, rk } => {
                 let Some((plx_data::search::Item::Media(item), opener)) = app.bridge.search_selection(&app.pages, entry, ret.focus) else { continue };
@@ -869,6 +898,7 @@ fn home_tab_available(
     let kind = match tab {
         HomeTab::Movies => Some(plx_data::stores::browse::SecKind::Movie),
         HomeTab::Shows => Some(plx_data::stores::browse::SecKind::Show),
+        HomeTab::Anime => Some(plx_data::stores::browse::SecKind::Anime),
         _ => None,
     };
     kind.is_none_or(|kind| directory.tab_of_kind(kind).is_some())
@@ -1833,6 +1863,13 @@ mod library_publication_tests {
 
     fn requested_refresh_after_child(navigate: bool, settled_before_refresh: bool) {
         let _guard = plx_base::testlock::serial();
+        // OK on the Related card must OPEN its page here, so the card press opens pages
+        struct PressPlaysAgain;
+        impl Drop for PressPlaysAgain {
+            fn drop(&mut self) { plx_media::route::restore_deck_press(plx_media::route::DeckPress::Play); }
+        }
+        plx_media::route::restore_deck_press(plx_media::route::DeckPress::Details);
+        let _press = PressPlaysAgain;
         let sid = plx_plex::plex::ServerId::UNSET;
         let a = AppArg::Content(ContentArg::Detail { sid, rk: "detail-a".into() });
         let b = AppArg::Content(ContentArg::Detail { sid, rk: "detail-b".into() });

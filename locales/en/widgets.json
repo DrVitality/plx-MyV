@@ -19,6 +19,29 @@
     "value": "Quality",
     "description": "Option or section label in the player overflow menu."
   },
+  "widgets.menu.streams": {
+    "value": "Change stream",
+    "description": "Player overflow menu row and page title: play this from another of its streams"
+  },
+  "widgets.menu.streams_loading": {
+    "value": "Finding streams\u2026",
+    "description": "Player overflow menu: the stream list is still being fetched"
+  },
+  "widgets.menu.audio_delay": {
+    "value": "Audio delay",
+    "description": "Player overflow menu row and page title: move the sound against the picture"
+  },
+  "widgets.menu.audio_delay_off": {
+    "value": "Off",
+    "description": "Audio delay value: no delay"
+  },
+  "widgets.menu.audio_delay_ms": {
+    "value": "{ms} ms",
+    "description": "Audio delay value in milliseconds, signed, e.g. +100 ms",
+    "args": {
+      "ms": "str"
+    }
+  },
   "widgets.menu.stats": {
     "value": "Stats for nerds",
     "description": "Option or section label in the player overflow menu."
@@ -213,6 +236,22 @@
   "widgets.player.chapters": {
     "value": "Chapters",
     "description": "Bottom navigation tab in the player."
+  },
+  "widgets.player.episodes": {
+    "value": "Episodes",
+    "description": "Bottom navigation tab in the player that opens a strip of the show's episodes."
+  },
+  "widgets.player.specials": {
+    "value": "Specials",
+    "description": "Heading over the player's episode strip when the highlighted episode is a special (season 0)."
+  },
+  "widgets.player.season_hint": {
+    "value": "Up / Down to change season",
+    "description": "Key hint beside the player's episode strip: the up and down keys change season."
+  },
+  "widgets.player.now_playing": {
+    "value": "Now playing",
+    "description": "Caption under the episode in the player's episode strip that is currently playing."
   },
   "widgets.card.new_episode": {
     "value": "New episode",

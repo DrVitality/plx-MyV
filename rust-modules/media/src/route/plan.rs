@@ -1000,7 +1000,7 @@ pub(super) fn new_sess(rk: &str) -> String {
 ///
 /// It comes free with the `continuous=1` PlayQueue every playback already creates (see
 /// [`plx_plex::plex::Client::create_play_queue`]); nothing here asks the server "what's next".
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub struct UpNext {
     pub rk: String,
     pub part: String,
@@ -1015,6 +1015,15 @@ pub struct UpNext {
     pub resume_ms: i64,
 }
 
+
+/// Names the episode by its rating key and position only: the titles are viewing information
+/// this app never writes to a log (`app::playback::play_up_next`), and a `PlayerReq` carrying one
+/// may be printed.
+impl std::fmt::Debug for UpNext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "UpNext {{ rk: {:?}, S{}E{} }}", self.rk, self.season, self.index)
+    }
+}
 
 /// Build the Up Next descriptor from a queue row. Episodes only: `continuous=1` on a movie
 /// returns just the movie itself (verified live — total count 1), and "up next" is a show idea.
@@ -1365,6 +1374,20 @@ pub(super) fn build_stream(off: &plx_base::task::OffFrame, rk: &str, part: &str,
         .cached_item
         .clone()
         .or_else(|| plx_data::metadata::fetch_playing_item(env.sid, rk));
+    // The item's OWN video codec outranks the row's: a catalog row can carry a stand-in (the Stremio
+    // bridge lists every title as `h264` until a stream is chosen), and a Load declaring H.264 for
+    // an HEVC stream decodes nothing — a black picture on the set and in the simulator alike.
+    let item_vcodec = plan
+        .playing
+        .as_ref()
+        .map(|p| p.vcodec.to_ascii_lowercase())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| vcodec.to_string());
+    if item_vcodec != vcodec {
+        crate::player::log(&format!("resolve: video codec {item_vcodec} from the item (the row said {vcodec})"));
+        plan.src_vcodec = item_vcodec.clone();
+    }
+    let vcodec: &str = &item_vcodec;
     if let (Some(id), Some(item)) = (env.subtitle_override, plan.playing.as_mut()) {
         // The retry's explicit selection owns both embedded and sidecar restoration; a stale
         // server-side selection must not turn subtitles back on after the viewer chose Off.

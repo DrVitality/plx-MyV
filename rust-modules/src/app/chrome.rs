@@ -67,6 +67,16 @@ pub(crate) struct ChromeSnapshot {
     name_w: f32,
 }
 
+/// A library kind's pill key. Anime's is past the account chip's (`STRIP_BASE + 4`), so adding it
+/// moved no key every screen already handles; it is DRAWN after TV Shows, in `TAB_KINDS` order.
+fn strip_key(kind: SecKind) -> u32 {
+    STRIP_BASE + match kind {
+        SecKind::Movie => 1,
+        SecKind::Show => 2,
+        SecKind::Anime => 5,
+    }
+}
+
 impl ChromeSnapshot {
     pub(crate) fn refresh(&mut self, measure: &dyn Measure, directory: DirectoryView<'_>) {
         self.refresh_with_profile(measure, directory, None);
@@ -82,11 +92,12 @@ impl ChromeSnapshot {
             self.keys.push(STRIP_BASE);
             for i in 0..directory.tab_count() {
                 let Some(kind) = directory.tab_kind(i) else { continue };
-                self.labels.push(match kind { SecKind::Movie => plx_platform::i18n::msg::browse_kind_movies(), SecKind::Show => plx_platform::i18n::msg::browse_kind_tv_shows() }.into());
-                self.keys.push(STRIP_BASE + match kind {
-                    SecKind::Movie => 1,
-                    SecKind::Show => 2,
-                });
+                self.labels.push(match kind {
+                    SecKind::Movie => plx_platform::i18n::msg::browse_kind_movies(),
+                    SecKind::Show => plx_platform::i18n::msg::browse_kind_tv_shows(),
+                    SecKind::Anime => plx_platform::i18n::msg::browse_kind_anime(),
+                }.into());
+                self.keys.push(strip_key(kind));
             }
             self.labels.push(String::new());
             self.keys.push(STRIP_BASE + 3);
@@ -114,7 +125,7 @@ impl ChromeSnapshot {
     }
 
     pub(crate) fn library_selection(&self, kind: SecKind) -> u32 {
-        let elem = STRIP_BASE + match kind { SecKind::Movie => 1, SecKind::Show => 2 };
+        let elem = strip_key(kind);
         self.keys.iter().position(|key| *key == elem).unwrap_or(0) as u32
     }
 

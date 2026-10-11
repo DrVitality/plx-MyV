@@ -343,6 +343,9 @@ pub struct Painter {
     /// later `translate` moves it with the content. Set only through the scoped
     /// [`text_lift::draw`]; `Zoom::NONE` for every ordinary painter.
     zoom: Zoom,
+    /// Draw every radius as asked, past the viewer's Corners cap ([`rounded`](Self::rounded)): for
+    /// the few surfaces the design keeps round whatever the cap (the details bubble).
+    round: bool,
 }
 thread_local! {
     static RECORD_WALK: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
@@ -451,6 +454,7 @@ impl Painter {
             clip: Rect::FULL,
             text_recorder: false,
             zoom: Zoom::NONE,
+            round: false,
         }
     }
     pub const fn recording() -> Self {
@@ -555,6 +559,9 @@ impl Painter {
     }
     #[inline]
     fn c(self, c: [f32; 4]) -> [f32; 4] {
+        // the viewer's accent and ground (`theme::appearance`): the palette's own stops untouched
+        // under the defaults
+        let c = theme::appearance::remap(c);
         [
             c[0] * self.rgb,
             c[1] * self.rgb,
@@ -584,7 +591,26 @@ impl Painter {
             Zoom { ox: self.zoom.ox + self.dx, oy: self.zoom.oy + self.dy, ..self.zoom }
         }
     }
+    /// **Every corner radius passes through here** ([`theme::shape::corner`]): the app's shape
+    /// language is crisp rectangles, so a rounded rect, a pill or a card is drawn with at most
+    /// [`theme::shape::CORNER`] of rounding whatever radius its widget asks for — one rule, applied
+    /// at the one door every shape goes through, instead of a radius edited at each call site.
+    /// True circles (avatars, discs, dots) keep their shape.
+    #[inline]
+    fn corner(self, r: Rect, rad: f32) -> f32 {
+        if self.round {
+            return rad.min(r.w.min(r.h) * 0.5).max(0.0);
+        }
+        theme::shape::corner(r.w, r.h, rad)
+    }
+    /// This painter with every radius drawn as asked, past the viewer's Corners cap — for a
+    /// surface that is round by design (the details bubble), not a way around the choice for
+    /// ordinary chrome.
+    pub fn rounded(self) -> Self {
+        Self { round: true, ..self }
+    }
     pub fn rect(self, r: Rect, rad: f32, top: [f32; 4], bot: [f32; 4], focus: f32) {
+        let rad = self.corner(r, rad);
         if self.declare(r, 1, |data| {
             use frame::backdrop::Value;
             rad.record(data);
@@ -606,6 +632,8 @@ impl Painter {
         );
     }
     pub fn rrect(self, r: Rect, rl: f32, rr: f32, col: [f32; 4]) {
+        let rl = self.corner(r, rl);
+        let rr = self.corner(r, rr);
         if self.declare(r, 2, |data| {
             use frame::backdrop::Value;
             rl.record(data);
@@ -619,6 +647,7 @@ impl Painter {
     }
     /// Bottom artwork gradient; false asks the widget to use its shader-failure fallback.
     pub fn art_scrim(self, r: Rect, rad: f32, h: f32, col: [f32; 4]) -> bool {
+        let rad = self.corner(r, rad);
         if self.declare(r, 21, |data| {
             use frame::backdrop::Value;
             rad.record(data);
@@ -653,6 +682,7 @@ impl Painter {
     /// card's edge sheen; against a knockout that is wrong while the screen is STILL, it is the far
     /// better trade.
     pub fn rring(self, r: Rect, rad: f32, w: f32, col: [f32; 4]) {
+        let rad = self.corner(r, rad);
         if self.declare(r, 3, |data| {
             use frame::backdrop::Value;
             rad.record(data);
@@ -681,6 +711,7 @@ impl Painter {
     /// occluder's own rim, ending in a hard step. A tile hides that; anything you can see through
     /// wears it as a drawn frame — use [`shadow_outside`](Self::shadow_outside) there.
     pub fn shadow(self, r: Rect, radius: f32, blur: f32, off_y: f32, col: [f32; 4]) {
+        let radius = self.corner(r, radius);
         if self.declare(Rect::new(r.x-blur,r.y+off_y-blur,r.w+2.0*blur,r.h+2.0*blur), 4, |data| {
             use frame::backdrop::Value;
             radius.record(data);
@@ -711,6 +742,7 @@ impl Painter {
     /// `shadow`'s under-the-rim band would show as a frame; a separate entry point rather than a flag
     /// on the tile path, because a tile pays a rounded-rect SDF for a region it covers anyway.
     pub fn shadow_outside(self, r: Rect, radius: f32, blur: f32, off_y: f32, col: [f32; 4]) {
+        let radius = self.corner(r, radius);
         if self.declare(Rect::new(r.x-blur,r.y+off_y-blur,r.w+2.0*blur,r.h+2.0*blur), 5, |data| {
             use frame::backdrop::Value;
             radius.record(data);
@@ -738,6 +770,7 @@ impl Painter {
     /// with the pop `f` (0 = resting/close to the shelf, 1 = lifted). Card tiles fold this into their
     /// texture pass via [`tex_carded`](Self::tex_carded) instead; this remains for the non-folded chip.
     pub fn focus_shadow(self, r: Rect, radius: f32, f: f32) {
+        let radius = self.corner(r, radius);
         if self.declare({ let (b,o,_,_)=card_shadow_params(r.h,f,theme::CARD_SHADOW_CHIP_A); Rect::new(r.x-b,r.y+o-b,r.w+2.0*b,r.h+2.0*b) }, 6, |data| {
             use frame::backdrop::Value;
             radius.record(data);
@@ -751,6 +784,7 @@ impl Painter {
     /// ceiling with `f`, so it is exactly 0 at `f == 0`, and the ink stops at the block's own outline
     /// ([`shadow_outside`](Self::shadow_outside)).
     pub fn focus_shadow_outside(self, r: Rect, radius: f32, f: f32) {
+        let radius = self.corner(r, radius);
         let (blur, off, a) = text_shadow_params(r.h, f);
         self.shadow_outside(r, radius, blur, off, theme::with_a(theme::CARD_SHADOW, a));
     }
@@ -763,6 +797,7 @@ impl Painter {
     /// A rounded-rect FILL that also carries the 1px perimeter edge-sheen in the SAME pass (the
     /// no-texture counterpart of [`tex_stroked`](Self::tex_stroked)) — for skeleton / chip-disc tiles.
     pub fn rect_sheened(self, r: Rect, rad: f32, top: [f32; 4], bot: [f32; 4]) {
+        let rad = self.corner(r, rad);
         if self.declare(r, 7, |data| {
             use frame::backdrop::Value;
             rad.record(data);
@@ -796,6 +831,7 @@ impl Painter {
         rim: [f32; 4],
         rim_top: f32,
     ) {
+        let rad = self.corner(r, rad);
         if self.declare(r, 8, |data| {
             use frame::backdrop::Value;
             rad.record(data);
@@ -820,6 +856,7 @@ impl Painter {
         rim_top: f32,
         rim_w: f32,
     ) {
+        let rad = self.corner(r, rad);
         if self.declare(r, 9, |data| {
             use frame::backdrop::Value;
             rad.record(data);
@@ -866,6 +903,10 @@ impl Painter {
         rim_w: f32,
         glow: Option<[f32; 4]>,
     ) {
+        // A capsule is drawn to its own outline (`sdPill`), never to the capped corner — and the
+        // shader's interior early-out insets by `rad`: a radius capped to the Corners choice there
+        // painted the box's corners solid OUTSIDE the outline, the "spikes" on every focused pill.
+        let rad = if pill.is_some() { rad.max(r.h.min(r.w) * 0.5) } else { self.corner(r, rad) };
         if self.declare(r, 10, |data| {
             use frame::backdrop::Value;
             rad.record(data);
@@ -898,6 +939,7 @@ impl Painter {
     }
     /// Flat rounded-rect fill + the 1px perimeter edge-sheen in one pass (the flat-colour placeholder tile).
     pub fn rrect_sheened(self, r: Rect, rad: f32, col: [f32; 4]) {
+        let rad = self.corner(r, rad);
         if self.declare(r, 11, |data| {
             use frame::backdrop::Value;
             rad.record(data);
@@ -918,11 +960,13 @@ impl Painter {
         );
     }
     pub fn tex(self, tex: u32, r: Rect, rad: f32, tint: [f32; 4]) {
+        let rad = self.corner(r, rad);
         self.tex_uv(tex, plx_gfx::gfx::UV_FULL, r, rad, tint);
     }
     /// [`tex`](Self::tex) sampling only the `uv` window of the texture — [`Rect::cover_uv`]'s
     /// answer for a picture whose aspect is not `r`'s, so it is cropped rather than squashed.
     pub fn tex_uv(self, tex: u32, uv: [f32; 4], r: Rect, rad: f32, tint: [f32; 4]) {
+        let rad = self.corner(r, rad);
         #[cfg(any(test, feature = "test-support"))]
         if self.records() {
             draw_census::note_tex(tex, self.place(r), self.c(tint)[3]);
@@ -974,6 +1018,7 @@ impl Painter {
         face: plx_gfx::gfx::GlassFace,
         deep: f32,
     ) -> bool {
+        let rad = self.corner(r, rad);
         if self.records() { return false; }
         if frame::backdrop::discovering() {
             frame::backdrop::surface(self.place(r));
@@ -1006,6 +1051,7 @@ impl Painter {
     /// pass — rim only, no shadow — plus the focused tile's lit-glass edge, at the pop `f` (0 at
     /// rest). Used for the profile chip avatar. `uv` as [`tex_uv`](Self::tex_uv).
     pub fn tex_stroked(self, tex: u32, uv: [f32; 4], r: Rect, rad: f32, tint: [f32; 4], f: f32) {
+        let rad = self.corner(r, rad);
         if self.declare(r, 13, |data| {
             use frame::backdrop::Value;
             tex.record(data);
@@ -1037,6 +1083,7 @@ impl Painter {
     /// every art tile gets its resting-and-rising shadow without a separate soft-shadow pass.
     /// `uv` is the window of the texture the card shows ([`tex_uv`](Self::tex_uv)).
     pub fn tex_carded(self, tex: u32, uv: [f32; 4], r: Rect, rad: f32, tint: [f32; 4], f: f32) {
+        let rad = self.corner(r, rad);
         if self.declare({ let (b,o,_,_)=card_shadow_params(r.h,f,theme::CARD_SHADOW[3]); Rect::new(r.x-b,r.y+o-b,r.w+2.0*b,r.h+2.0*b) }, 14, |data| {
             use frame::backdrop::Value;
             tex.record(data);
@@ -1078,6 +1125,7 @@ impl Painter {
     pub fn tex_carded_still(
         self, tex: u32, uv: [f32; 4], r: Rect, rad: f32, f: f32, band: f32, scrim: [f32; 4],
     ) -> bool {
+        let rad = self.corner(r, rad);
         // Discovery describes the same pixels even when the optional program uses its fallback.
         // Missing artwork and cascaded fades keep the component's ordinary card/ground path.
         if tex == 0 || self.c(theme::TINT_WHITE) != [1.0; 4] || band <= 0.0
@@ -1157,8 +1205,8 @@ impl Painter {
             k.record(data);
         }) { return; }
         if self.records() { return; }
-        let k = self.wash_corners(k);
         let m = self.place(r);
+        let k = self.wash_corners(k, m);
         plx_gfx::gfx::draw_ambient(
             m.x, m.y, m.w, m.h,
             dim,
@@ -1207,7 +1255,7 @@ impl Painter {
         let (m, am) = (self.place(r), self.place(art));
         plx_gfx::gfx::draw_art_wash(
             (m.x, m.y, m.w, m.h),
-            self.wash_corners(k),
+            self.wash_corners(k, m),
             tex,
             (am.x, am.y, am.w, am.h),
             uv,
@@ -1230,9 +1278,9 @@ impl Painter {
             ink.1.record(data);
         }) { return; }
         if self.records() { return; }
-        let k = self.wash_corners(k);
-        let (ink, inka) = self.ink(ink);
         let m = self.place(r);
+        let k = self.wash_corners(k, m);
+        let (ink, inka) = self.ink(ink);
         plx_gfx::gfx::draw_ambient_inked(
             m.x, m.y, m.w, m.h,
             1.0,
@@ -1251,7 +1299,12 @@ impl Painter {
     /// [`ambient_art`](Self::ambient_art) must apply identically: the wash stays OPAQUE, so an alpha
     /// below 1 mixes it toward [`theme::SURFACE_APP`] rather than thinning it, and the rgb gain
     /// scales what is left.
-    fn wash_corners(self, k: [[f32; 3]; 4]) -> [[f32; 3]; 4] {
+    ///
+    /// `m` is the wash's PLACED rect: the live ground's own shift
+    /// ([`theme::appearance::wash_shift`] — another ground's offset from the palette surface, and
+    /// Ember's page gradient) is added at each corner's screen position, so a wash cut into bands
+    /// still paints one continuous gradient.
+    fn wash_corners(self, k: [[f32; 3]; 4], m: Rect) -> [[f32; 3]; 4] {
         let a = self.a.clamp(0.0, 1.0);
         let g = theme::SURFACE_APP; // `theme::mix` is rgba; a wash corner is rgb
         let k = if a >= 1.0 {
@@ -1259,7 +1312,16 @@ impl Painter {
         } else {
             k.map(|c| std::array::from_fn(|i| g[i] + (c[i] - g[i]) * a))
         };
-        k.map(|c| c.map(|v| v * self.rgb))
+        let full = Rect::FULL;
+        let at = [(m.x, m.y), (m.x + m.w, m.y), (m.x + m.w, m.y + m.h), (m.x, m.y + m.h)];
+        let mut out = k;
+        for (c, (x, y)) in out.iter_mut().zip(at) {
+            let d = theme::appearance::wash_shift(x / full.w, y / full.h);
+            for i in 0..3 {
+                c[i] = (c[i] + d[i]).clamp(0.0, 1.0) * self.rgb;
+            }
+        }
+        out
     }
     /// Bilinear 4-corner gradient with real per-corner ALPHA, folded through the cascade — the
     /// counterpart of [`ambient`](Self::ambient), which is opaque by contract and therefore cannot
@@ -1348,6 +1410,7 @@ impl Painter {
     /// `false` when the field program or texture is missing — the caller's cue to draw the flat
     /// sheet. `ui::underlay::UnderlayField::draw_panel` is the component; reach for that.
     pub fn field_panel(self, r: Rect, rad: f32, tex: u32, uv: [f32; 4], tint: [f32; 4]) -> bool {
+        let rad = self.corner(r, rad);
         if self.declare(r, 20, |data| {
             use frame::backdrop::Value;
             rad.record(data);

@@ -277,6 +277,10 @@ pub struct Preferences {
 /// The movie/show/season/episode item. Missing fields default (Plex omits optionals).
 #[derive(Deserialize, Default)]
 pub struct Metadata {
+    /// This fork's Stremio bridge: the title (or an episode's show) is saved in the account's
+    /// library. Not a Plex field; absent everywhere else.
+    #[serde(rename = "stremioInLibrary", default, deserialize_with = "de_bool")]
+    pub in_library: bool,
     /// Only on a read that asked `includePreferences=1` — see [`Preferences`].
     #[serde(rename = "Preferences", default)]
     pub preferences: Preferences,

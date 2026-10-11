@@ -818,7 +818,7 @@ fn a_rebuild_keeps_the_row_by_id_and_a_vanished_row_falls_to_its_neighbour() {
     assert_eq!(page.state.sel, RootId::Language.key());
 
     for (from, lands) in [
-        (RootId::AudioSubtitles, RootId::Language),
+        (RootId::AudioSubtitles, RootId::Appearance),
         (RootId::TrailerAutoplay, RootId::Privacy),
         (RootId::Favourites, RootId::Playback),
         (RootId::About, RootId::About),

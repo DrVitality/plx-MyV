@@ -98,8 +98,8 @@ fn shelf_activate_and_hold_keep_the_deck_promise_and_engine_item_identity() {
         assert_eq!(hubs.view().shelves()[row].is_continue, from_deck);
         let key = page.key(page.shelves[row].elems[1]);
         engine.set(owner, key, Some(page.shelves[row].group), By::Restore);
-        // OK on a deck card plays only under the Play setting (the default opens the page); the
-        // hold's menu is the same request either way.
+        // OK on any card plays under the Play setting (the default) and opens the page under
+        // Open details; the hold's menu is the same request either way.
         for (mode, held) in [
             (DeckPress::Play, false),
             (DeckPress::Details, false),
@@ -141,7 +141,7 @@ fn shelf_activate_and_hold_keep_the_deck_promise_and_engine_item_identity() {
                     rk: item.rk.clone(),
                     from_deck,
                 }
-            } else if from_deck && mode.press_plays() {
+            } else if mode.press_plays() {
                 LibraryReq::Play {
                     sid: item.sid,
                     rk: item.rk.clone(),

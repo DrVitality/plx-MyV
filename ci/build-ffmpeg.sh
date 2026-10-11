@@ -39,7 +39,8 @@
 # scope by SONAME when the next one names it. That is ordinary loader behaviour, it needs no build
 # flag to survive quoting, and unlike an rpath it can be asserted from inside the app.
 #
-# HOST=1 BUILDS THE SAME FFMPEG FOR THIS MAC INSTEAD, and it is the same script on purpose.
+# HOST=1 BUILDS THE SAME FFMPEG FOR THIS MAC (OR LINUX DESKTOP) INSTEAD, and it is the same script
+# on purpose.
 #
 # The desktop simulator (`make sim`) runs the real app core on macOS, but `ff.rs` dlopens the
 # bundled libraries by absolute path out of the app directory — where they are 32-bit ARM ELF. So
@@ -55,9 +56,10 @@
 # stop demuxing something it can, and the simulator would be answering about a different FFmpeg
 # while looking identical. The cross block is the only difference, and it is three lines.
 #
-# The output is `vendor/ffmpeg-prefix-host` and `libavformat-plx.63.dylib` — Mach-O naming, so
-# nothing here can be confused with the shipped ELF even by basename, and `make ipk`'s
-# `lib*-plx.so.*` glob cannot pick it up.
+# The output is `vendor/ffmpeg-prefix-host`. On a Mac that is `libavformat-plx.63.dylib` — Mach-O
+# naming, so nothing here can be confused with the shipped ELF even by basename. On Linux the
+# libraries ARE ELF named like the shipped ones, so `ci/stage-host-ffmpeg.sh` stages them into pkg/
+# as `libavformat-plx-host.so.63`: a name `make ipk`'s `lib*-plx.so.*` glob cannot pick up.
 set -eu
 
 VERSION=9.0
@@ -173,8 +175,15 @@ fi
 # `libz.so.1`, present on every firmware inventory `fwsym` holds (platform releases 1.2.0
 # to 11.2.0, zlib 1.2.7 to 1.3.1) and on macOS; `make check-ffmpeg` is the test that holds it in place.
 if [ -n "$HOST" ]; then
-  # No --arch/--cpu/--target-os: configure detects this Mac, which is the point.
+  # No --arch/--cpu/--target-os: configure detects this host, which is the point.
   set -- --prefix=/plx
+  # A LINUX host (the Windows/WSL simulator, `make sim-linux`) is x86-64, where configure insists
+  # on nasm for FFmpeg's hand-written x86 assembly. Nothing in this component list is a video or
+  # audio decoder, so that assembly would speed up nothing the app calls; turning it off spares
+  # every simulator machine a package rather than changing what the libraries do.
+  case "$(uname -s)-$(uname -m)" in
+    Linux-x86_64|Linux-i?86) set -- "$@" --disable-x86asm ;;
+  esac
 else
   set -- --prefix=/plx \
     --enable-cross-compile --cross-prefix="$CROSS" --host-cc=cc --cc=./plx-arm-cc.py \

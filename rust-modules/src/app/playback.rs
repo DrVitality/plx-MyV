@@ -72,6 +72,66 @@ pub(crate) fn frames() -> i32 {
 pub(crate) fn seek_pending() -> i64 {
     plx_media::player::seek_pending()
 }
+/// **"Are you still watching?"**: episodes started on their own (Up Next's countdown, or the end
+/// of the last one) since the viewer last pressed anything. Past [`STILL_WATCHING_AFTER`], the
+/// next one starts paused and asks ([`still_watching_tick`]), so a sleeping viewer does not run
+/// a debrid account through a whole season.
+static AUTO_IN_A_ROW: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// The next episode is to pause as soon as it shows a picture.
+static PAUSE_WHEN_SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The input time last seen, so any press resets the count.
+static LAST_INPUT_SEEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// Episodes in a row that start on their own before the next one asks.
+const STILL_WATCHING_AFTER: u32 = 3;
+
+/// An episode is about to start on its own: count it, and arm the pause once the count is past
+/// [`STILL_WATCHING_AFTER`].
+pub(crate) fn note_auto_advance() {
+    use std::sync::atomic::Ordering::Relaxed;
+    if AUTO_IN_A_ROW.fetch_add(1, Relaxed) + 1 > STILL_WATCHING_AFTER {
+        AUTO_IN_A_ROW.store(0, Relaxed);
+        PAUSE_WHEN_SHOWN.store(true, Relaxed);
+    }
+}
+
+/// Every frame: any press resets the count; an armed pause lands on the first picture of the
+/// episode that started, with a toast that says why.
+pub(crate) fn still_watching_tick(pa: &mut plx_media::player::adapter::PlayerAdapter, last_input: u32, player_up: bool) {
+    use std::sync::atomic::Ordering::Relaxed;
+    if LAST_INPUT_SEEN.swap(last_input, Relaxed) != last_input {
+        AUTO_IN_A_ROW.store(0, Relaxed);
+    }
+    if !PAUSE_WHEN_SHOWN.load(Relaxed) {
+        return;
+    }
+    if !player_up {
+        PAUSE_WHEN_SHOWN.store(false, Relaxed);
+        return;
+    }
+    if plx_media::player::seen_frame() && is_started() {
+        PAUSE_WHEN_SHOWN.store(false, Relaxed);
+        if plx_media::player::lifecycle::set_transport_paused(pa, true) {
+            log("still watching: paused after episodes in a row with no press");
+            let message = plx_platform::i18n::msg::browse_player_still_watching().to_owned();
+            plx_base::task::spawn_small("still watching notice", move || {
+                let _ = plx_platform::tv::toast::toast(&message);
+            });
+        }
+    }
+}
+
+/// Settings > Video & playback > Skip intros, as last applied (`boot::apply_appearance`).
+static AUTO_SKIP_INTROS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn set_auto_skip_intros(on: bool) {
+    AUTO_SKIP_INTROS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether a marked intro is skipped the moment it is offered, rather than offered as a button.
+pub(crate) fn auto_skip_intros() -> bool {
+    AUTO_SKIP_INTROS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 #[inline]
 pub(crate) fn request_seek(x: i64) {
     plx_media::player::request_seek(x)
@@ -128,6 +188,29 @@ pub(crate) fn apply_more_action(ps: &mut plx_media::route::PlaybackSession, pa: 
         // Lab builds only. Nothing about playback changes: the snapshot is taken and the toast
         // reports, over whatever the player is doing.
         plx_appkit::more_menu::Action::SendDiagnostics => crate::lab::request_upload("menu", ps),
+        // Change stream: the bridge records the pick on a worker; `input::player_stream_tick` then
+        // resolves the item again at the position on screen.
+        plx_appkit::more_menu::Action::PickStream(index) => {
+            bridge.player_stream = super::input::start_player_stream(ps, index);
+        }
+        // Audio delay: live at once, landed by a seek to where the viewer is (both lanes are
+        // re-anchored there, so the sound timeline never jumps under a running pipeline), and kept.
+        plx_appkit::more_menu::Action::SetAudioDelay(ms) => {
+            plx_media::player::set_audio_delay_ms(i32::from(ms));
+            if is_started() {
+                request_seek(intended_pos(ps));
+            }
+            let _ = plx_base::storage_worker::submit_retained(move || {
+                let saved = plx_plex::plex::session::update_with_outcome(|s| {
+                    let mut look = s.appearance();
+                    look.audio_delay_ms = ms;
+                    Some(s.with_appearance(look))
+                });
+                if saved.is_none() {
+                    log("audio delay: not saved; it holds for this run");
+                }
+            });
+        }
         plx_appkit::more_menu::Action::None => {}
     }
 }
@@ -578,6 +661,9 @@ pub(crate) fn player_requests(
                     player.publish();
                 }
             }
+            PlayerReq::PlayEpisode(u) => {
+                play_successor(ps, pa, u, HUD_LINGER_MS, pages, bridge);
+            }
             PlayerReq::FocusTabs => {
                 if let Some(player) = super::bridge::player_mut(pages) {
                     player.hud.nav.focus = 2;
@@ -729,6 +815,7 @@ pub(crate) fn finish_playback(
     if plx_media::route::next_episode_mode() != plx_media::route::NextEpisodeMode::Off
         && play_up_next(ps, pa, HUD_LINGER_MS, pages, bridge)
     {
+        note_auto_advance();
         return true;
     }
     exit_player(ps, pa, refresh_hubs_at, pages);
@@ -821,6 +908,20 @@ pub(crate) fn play_up_next(
     let Some(u) = super::bridge::player_mut(pages).and_then(|player| player.up_next.take(ps)) else {
         return false;
     };
+    play_successor(ps, pa, u, hud_ms, pages, bridge)
+}
+
+/// Start `u` in place of the episode now playing — the one ritual behind Up Next and the
+/// Episodes strip's pick (`PlayerReq::PlayEpisode`); [`play_up_next`]'s doc says why the stop
+/// comes first. Returns false when the play could not be requested.
+pub(crate) fn play_successor(
+    ps: &mut plx_media::route::PlaybackSession,
+    pa: &mut plx_media::player::adapter::PlayerAdapter,
+    u: plx_media::route::UpNext,
+    hud_ms: u32,
+    pages: &mut plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,
+    bridge: &mut super::bridge::Bridge,
+) -> bool {
     // The ratingKey, not the episode title: `rk` is the handle every other line and every harness
     // assertion already uses, and the title is LG's "Content Viewing Information" — the one
     // category this app's Data Safety declaration answers "Not collected" to. `eventlog::scrub` is a
@@ -1038,6 +1139,10 @@ pub(crate) unsafe fn activate_player_row(
             pages,
             bridge,
         );
+    } else if btn == plx_appkit::player_hud::BTN_STREAMS {
+        // The Streams disc: the same `…` popover, opened straight on its stream list.
+        plx_appkit::more_menu::open_next_on_streams();
+        super::bridge::open_player_overlay(ps, bridge.metadata_view(), pages, plx_screens::player::overlay::OverlayKind::More { quality: false });
     } else if btn == plx_appkit::player_hud::BTN_MORE {
         // …so the discs are what row 1 holds — the complement of the arm above, and the row's only
         // other occupant. OK on a control disc PRESENTS its panel on this page's own stack.

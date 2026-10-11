@@ -212,8 +212,8 @@ fn down_from_the_field_reaches_only_a_region_that_is_drawn() {
     let mut screen = fixture.screen();
     let mut engine = seated(&screen, &fixture);
     assert!(screen.recents.is_empty());
-    assert_eq!(step_dir(&mut screen, &fixture, &mut engine, Dir::Down), Some(screen.key(FIELD)),
-        "nothing is drawn below the field, so focus must not leave it");
+    assert_eq!(step_dir(&mut screen, &fixture, &mut engine, Dir::Down), Some(screen.key(filters::elem(0, 0))),
+        "under an empty field stand the browse filters, and nothing else");
 
     // (2) no query, terms remembered: the recents list.
     watching(&session, "owned-search-handoff-terms", &["gromit", "wallace"]);
@@ -401,8 +401,12 @@ fn the_recents_cursor_stops_on_the_clear_control() {
     for _ in 0..10 {
         seen.push(step_dir(&mut screen, &fixture, &mut engine, Dir::Down).unwrap().elem);
     }
-    let expected: Vec<u32> = screen.recents.iter().copied().chain(std::iter::repeat(CLEAR)).take(10).collect();
-    assert_eq!(seen, expected, "▼ walks every drawn term and then caps on Clear");
+    // …then Clear, then down the browse filters' lines, capping on the last
+    let lines: Vec<u32> = (0..filters::lines()).map(|line| filters::elem(line, 0)).collect();
+    let last = *lines.last().unwrap();
+    let expected: Vec<u32> = screen.recents.iter().copied().chain([CLEAR]).chain(lines)
+        .chain(std::iter::repeat(last)).take(10).collect();
+    assert_eq!(seen, expected, "▼ walks every drawn term, Clear and the filters, and caps on the last");
 
     // Clear is one row past the last term shown, and its own block is where the renderer draws it.
     let cx = fixture.cx(Some(screen.key(CLEAR)));
@@ -410,6 +414,11 @@ fn the_recents_cursor_stops_on_the_clear_control() {
     let last = <SearchScreen as Focusable<HostFixture>>::place(&screen, &screen.recents[2], &cx, At::Drawn).unwrap();
     assert!(clear.rect.y >= last.rect.y + last.rect.h, "Clear sits below the last DRAWN term");
     assert_eq!(clear.rect.y, layout::clear(3, 0.0, &fixture.measure).y);
+    // ▲ back up the filter lines to Clear
+    for _ in 0..filters::lines() {
+        step_dir(&mut screen, &fixture, &mut engine, Dir::Up);
+    }
+    assert_eq!(engine.current(OWNER).map(|k| k.elem), Some(CLEAR), "▲ climbs the filters back to Clear");
     assert!(step_dir(&mut screen, &fixture, &mut engine, Dir::Up).is_some_and(|k| k.elem == screen.recents[2]),
         "…and ▲ returns to the list rather than to the field");
 
@@ -694,7 +703,7 @@ fn the_panels_edit_keys_move_the_caret_clear_the_field_and_type_in_the_middle() 
     assert_eq!(screen.draft.query(), "сXуббота");
     assert_eq!(screen.draft.caret(), "сX".len(), "…leaving the caret after the inserted text");
     assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::App(AppFx::Store(StoreId::Search,
-        StoreCmd::Search(SearchCmd::SetQueryScoped { query, .. }))) if query == "сXуббота")),
+        StoreCmd::Search(SearchCmd::SetQueryScoped { query, .. }))) if filters::user_part(query) == "сXуббота")),
         "every accepted edit is one scoped store command");
     let (handled, _, _) = deliver(&mut screen, &fixture, field,
         key_event(Key::Other, plx_ui::consts::SDLK_BACKSPACE));
@@ -1377,4 +1386,44 @@ fn the_hold_hint_stands_on_a_resting_result_card_once_per_run() {
     assert!(!screen.stack.hint_visible(), "a menu taking focus hides it");
     rest(&mut screen, card, 4.0);
     assert!(!screen.stack.hint_visible(), "and not a second time on Search this run");
+}
+
+/// A filter is a dropdown: its button opens the options over the page with focus on the one set,
+/// a pick closes it and asks the store again under the new choice, and BACK closes it untouched.
+#[test]
+fn a_filter_opens_as_a_dropdown_and_a_pick_closes_it_and_asks_again() {
+    let _serial = plx_base::testlock::serial();
+    let session = plx_plex::plex::session::TempSession::new("owned-search-dropdown");
+    watching(&session, "owned-search-dropdown-fresh", &[]);
+    let fixture = Fixture::new();
+    let mut screen = fixture.screen();
+    let genre = filters::elem(0, 2);
+    assert_eq!(screen.open_dropdown(), None, "the options are not on the page until asked for");
+
+    let genre_key = screen.key(genre);
+    let (_, out, _) = deliver(&mut screen, &fixture, Some(genre_key), ScreenEvent::Activate(genre));
+    assert_eq!(screen.open_dropdown(), Some(2));
+    let all_genres = screen.key(filters::opt_elem(2, 0));
+    assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::Deliver(_, Delivery::Screen(ScreenEvent::Enter(
+        Enter::Fresh { focus: FocusTarget::Elem(key) }))) if *key == all_genres)),
+        "focus goes to the option that is set");
+    let cx = fixture.cx(Some(all_genres));
+    let mut groups = Vec::new();
+    <SearchScreen as Focusable<HostFixture>>::groups(&screen, &cx, &mut groups);
+    assert!(groups.iter().any(|g| g.id == DROP_GROUP && g.len == filters::options(2)));
+
+    let comedy = filters::opt_elem(2, 4);
+    let comedy_key = screen.key(comedy);
+    let (_, out, _) = deliver(&mut screen, &fixture, Some(comedy_key), ScreenEvent::Activate(comedy));
+    assert_eq!(screen.open_dropdown(), None, "a pick closes it");
+    assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::App(AppFx::Store(StoreId::Search,
+        StoreCmd::Search(SearchCmd::SetQueryScoped { query, .. }))) if query.ends_with("|Comedy"))),
+        "…and asks again under the genre");
+
+    deliver(&mut screen, &fixture, Some(genre_key), ScreenEvent::Activate(genre));
+    assert_eq!(screen.open_dropdown(), Some(2));
+    let (handled, _, _) = deliver(&mut screen, &fixture, Some(comedy_key), key_event(Key::Back, 0));
+    assert_eq!(handled, Handled::Yes);
+    assert_eq!(screen.open_dropdown(), None, "BACK closes it rather than leaving the page");
+    assert_eq!(screen.filters().chosen_in(2), 4, "…and changes nothing");
 }

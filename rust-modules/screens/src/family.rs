@@ -72,6 +72,8 @@ pub enum SettingsPage {
     Playback,
     /// Plex account audio and subtitle preferences.
     AudioSubtitles,
+    /// The viewer's look: accent, background, corners, the details bubble.
+    Appearance,
     /// Favorite libraries — the onboard screen in Settings mode.
     Favourites,
     /// Privacy & data — the consent screen in Settings mode.
@@ -88,6 +90,12 @@ pub enum SettingsPage {
     ConsentStage(u8),
     /// One playback / account preference's choice list, pushed from Playback or Audio & Subtitles.
     Picker(PickerKind),
+    /// Addons & Home: the Stremio bridge's Home rows and addon switches.
+    Stremio,
+    /// One Home row's switch and place, by its position in the list it was opened from.
+    StremioRow(u8),
+    /// One addon's switches, by its position in the list.
+    StremioAddon(u8),
 }
 
 /// Which preference a [`SettingsPage::Picker`] edits. The parent page (`Playback` for the local ones,
@@ -107,6 +115,22 @@ pub enum PickerKind {
     SubtitleMode,
     SubtitleLanguage,
     ForcedSubtitles,
+    /// Appearance: the accent colour.
+    Accent,
+    /// Appearance: the background.
+    Ground,
+    /// Appearance: how round corners are drawn.
+    Corners,
+    /// Appearance: when a card's details bubble opens.
+    Peek,
+    /// Video & playback: the highest resolution the stream picker offers.
+    StreamQuality,
+    /// Video & playback: any stream, or only those that start at once.
+    StreamSource,
+    /// Video & playback: skip a marked intro on its own, or offer the button.
+    SkipIntros,
+    /// Appearance: whether Home opens on the hero or on Continue Watching.
+    HomeStart,
 }
 
 impl SettingsPage {
@@ -125,8 +149,10 @@ impl PickerKind {
     /// The page that lists this field (its picker is pushed from there and returns there).
     pub fn parent(self) -> SettingsPage {
         match self {
-            PickerKind::Quality | PickerKind::DirectPlay | PickerKind::SubtitleSize | PickerKind::SubtitlePosition | PickerKind::NextEpisode | PickerKind::DeckPress | PickerKind::SkipInterval => SettingsPage::Playback,
+            PickerKind::Quality | PickerKind::DirectPlay | PickerKind::SubtitleSize | PickerKind::SubtitlePosition | PickerKind::NextEpisode | PickerKind::DeckPress | PickerKind::SkipInterval
+            | PickerKind::StreamQuality | PickerKind::StreamSource | PickerKind::SkipIntros => SettingsPage::Playback,
             PickerKind::AudioLanguage | PickerKind::SubtitleMode | PickerKind::SubtitleLanguage | PickerKind::ForcedSubtitles => SettingsPage::AudioSubtitles,
+            PickerKind::Accent | PickerKind::Ground | PickerKind::Corners | PickerKind::Peek | PickerKind::HomeStart => SettingsPage::Appearance,
         }
     }
 }
@@ -150,6 +176,10 @@ impl ScreenArg for SettingsPage {
             SettingsPage::Preview(_) => 106,
             SettingsPage::ConsentStage(_) => 107,
             SettingsPage::Picker(_) => 112,
+            SettingsPage::Appearance => 113,
+            SettingsPage::Stremio => 114,
+            SettingsPage::StremioRow(_) => 115,
+            SettingsPage::StremioAddon(_) => 116,
         })
     }
     fn title(&self) -> Option<&str> {
@@ -182,11 +212,14 @@ impl LogicalState for SettingsPage {
             | SettingsPage::Contribute
             | SettingsPage::Playback
             | SettingsPage::AudioSubtitles
+            | SettingsPage::Appearance
+            | SettingsPage::Stremio
             | SettingsPage::Favourites
             | SettingsPage::Privacy
             | SettingsPage::Legal
             | SettingsPage::About => 0,
-            SettingsPage::Document(i) | SettingsPage::Preview(i) | SettingsPage::ConsentStage(i) => *i,
+            SettingsPage::Document(i) | SettingsPage::Preview(i) | SettingsPage::ConsentStage(i)
+            | SettingsPage::StremioRow(i) | SettingsPage::StremioAddon(i) => *i,
             SettingsPage::Picker(kind) => *kind as u8,
         });
     }
@@ -197,6 +230,7 @@ impl LogicalState for SettingsPage {
             SettingsPage::Contribute => "contribute",
             SettingsPage::Playback => "playback",
             SettingsPage::AudioSubtitles => "audio-subtitles",
+            SettingsPage::Appearance => "appearance",
             SettingsPage::Favourites => "favourites",
             SettingsPage::Privacy => "privacy",
             SettingsPage::Legal => "legal",
@@ -205,8 +239,12 @@ impl LogicalState for SettingsPage {
             SettingsPage::Preview(_) => "preview",
             SettingsPage::ConsentStage(_) => "stage",
             SettingsPage::Picker(_) => "picker",
+            SettingsPage::Stremio => "addons",
+            SettingsPage::StremioRow(_) => "home-row",
+            SettingsPage::StremioAddon(_) => "addon",
         });
-        if let SettingsPage::Document(i) | SettingsPage::Preview(i) | SettingsPage::ConsentStage(i) = self {
+        if let SettingsPage::Document(i) | SettingsPage::Preview(i) | SettingsPage::ConsentStage(i)
+            | SettingsPage::StremioRow(i) | SettingsPage::StremioAddon(i) = self {
             out.push_str(&format!("[{i}]"));
         }
         if let SettingsPage::Picker(kind) = self {
@@ -355,6 +393,7 @@ mod tests {
             SettingsPage::Contribute,
             SettingsPage::Playback,
             SettingsPage::AudioSubtitles,
+            SettingsPage::Appearance,
             SettingsPage::Favourites,
             SettingsPage::Privacy,
             SettingsPage::Legal,
