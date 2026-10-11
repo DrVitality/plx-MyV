@@ -29,14 +29,20 @@ const SORT_WORDS: [&str; 4] = ["foryou", "popular", "rated", "new"];
 
 /// Pills on one line of a row.
 pub(super) const PER_LINE: usize = 7;
-/// One pill's size and the air between two.
-pub(super) const PILL_W: f32 = 206.0;
-pub(super) const PILL_H: f32 = 54.0;
+/// A pill's height, the narrowest it is drawn, and the air between two. Each is as wide as its
+/// label needs (a chip, not a column of equal boxes).
+pub(super) const PILL_H: f32 = 52.0;
+pub(super) const PILL_MIN_W: f32 = 120.0;
 pub(super) const PILL_GAP: f32 = 14.0;
+/// The pills' type size.
+pub(super) const PILL_SIZE: i32 = plx_ui::theme::size::LABEL;
 /// A line's height, pill and air.
-pub(super) const LINE_H: f32 = PILL_H + 18.0;
-/// The column the row labels stand in, left of the pills.
-pub(super) const LABEL_W: f32 = 168.0;
+pub(super) const LINE_H: f32 = PILL_H + 16.0;
+/// The panel's inset around its lines (`widgets::soft_panel`): beside them, and above and below.
+pub(super) const PANEL_PAD: f32 = 28.0;
+pub(super) const PANEL_V: f32 = 18.0;
+/// The column the row labels stand in, left of the pills, inside the panel.
+pub(super) const LABEL_W: f32 = 140.0;
 
 /// The focus element of pill `i` on line `line` — far above anything the page interns.
 pub(super) fn elem(line: usize, i: usize) -> u32 {
@@ -103,9 +109,21 @@ pub(super) fn row_label(line: usize) -> Option<&'static std::ffi::CStr> {
     }
 }
 
-/// Pill `i`'s rect on a line whose top is `y`.
-pub(super) fn pill(i: usize, y: f32) -> Rect {
-    Rect::new(MARGIN_X + LABEL_W + i as f32 * (PILL_W + PILL_GAP), y + (LINE_H - PILL_H) * 0.5, PILL_W, PILL_H)
+/// Pill `i` of line `line`'s width: its label's, never under [`PILL_MIN_W`].
+pub(super) fn pill_w(line: usize, i: usize, measure: &dyn plx_machine::machine::Measure) -> f32 {
+    plx_ui::widgets::Button::pill_w_measured(label(line, i), PILL_SIZE, false, false, measure).max(PILL_MIN_W)
+}
+
+/// Where a line's label column starts.
+pub(super) fn label_x() -> f32 {
+    MARGIN_X + PANEL_PAD
+}
+
+/// Pill `i` of line `line`'s rect on a line whose top is `y`: the pills before it laid end to end
+/// after the label column.
+pub(super) fn pill(line: usize, i: usize, y: f32, measure: &dyn plx_machine::machine::Measure) -> Rect {
+    let x = (0..i).fold(label_x() + LABEL_W, |x, j| x + pill_w(line, j, measure) + PILL_GAP);
+    Rect::new(x, y + (LINE_H - PILL_H) * 0.5, pill_w(line, i, measure), PILL_H)
 }
 
 /// The viewer's choices.

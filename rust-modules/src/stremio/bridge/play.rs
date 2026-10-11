@@ -74,6 +74,10 @@ pub(super) struct PlayState {
     pub(super) installed: Mutex<HashMap<String, Vec<ExternalSub>>>,
     /// Episodes whose successor has been warmed already this run.
     pub(super) next_warmed: Mutex<std::collections::HashSet<String>>,
+    /// One resolve at a time per item: the page, the warm-up, the play queue and the player's
+    /// decision all ask for the same item within a second of each other, and each used to probe
+    /// the same debrid links side by side. A second asker waits for the first and reads its memo.
+    resolving: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 impl Default for PlayState {
@@ -90,6 +94,7 @@ impl Default for PlayState {
             next_candidate: std::sync::atomic::AtomicI64::new(9_000_000_000),
             installed: Mutex::default(),
             next_warmed: Mutex::default(),
+            resolving: Mutex::default(),
         }
     }
 }
@@ -99,6 +104,18 @@ const NEXT_WARM_AT: f64 = 0.8;
 
 /// Streams tried at most before the first pick stands.
 const FALLBACK_TRIES: usize = 3;
+/// How long the next candidate waits for the one before it to answer before it is read too. The
+/// first pick is usually the one that plays, so it is not raced at once; a link that is slow to
+/// answer no longer costs its whole read budget before the next is even asked.
+const PROBE_STAGGER: Duration = Duration::from_millis(2500);
+/// How long a slow candidate keeps its place once a later one has answered: a link that has not
+/// handed over its first bytes by then would not play smoothly either.
+const PROBE_PATIENCE: Duration = Duration::from_secs(6);
+/// Past its own read budget, the most a probe's answer is waited for.
+const PROBE_SLACK: Duration = Duration::from_secs(3);
+/// How long a page read waits for the item's stream to be found. A page is about the title; what
+/// will play is found behind it and is ready for the player's own request, which waits.
+pub(super) const PAGE_WAIT: Duration = Duration::from_millis(1500);
 
 /// Could this stream start at once, as a fallback? Cached or direct, and not a camera copy.
 fn fallback_ok(f: &Facts) -> bool {
@@ -244,17 +261,111 @@ impl Bridge {
         self.warm(token, Rk::Episode { stype, id, video: next.video.clone() }.encode());
     }
 
+    /// The fresh memo of `rk_s`, if there is one.
+    fn memo(&self, rk_s: &str) -> Option<Arc<Resolved>> {
+        let memo = self.play.resolved.lock().unwrap_or_else(|e| e.into_inner());
+        memo.get(rk_s).filter(|r| r.at.elapsed() < RESOLVED_TTL).cloned()
+    }
+
+    /// [`Bridge::resolved`], waited for at most `wait`: the resolve carries on behind a page that
+    /// stopped waiting, so the player's request a moment later finds it done (or joins it).
+    pub(super) fn resolved_within(&self, token: &str, rk: &Rk, rk_s: &str, minutes: Option<i64>, wait: Duration)
+        -> Option<Arc<Resolved>> {
+        if let Some(r) = self.memo(rk_s) {
+            return Some(r);
+        }
+        let Some(me) = self.me.get().and_then(std::sync::Weak::upgrade) else {
+            return self.resolved(token, rk, rk_s, minutes);
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (token_c, rk_c, rk_s_c) = (token.to_string(), rk.clone(), rk_s.to_string());
+        let spawned = plx_base::task::spawn("stremio-resolve", move || {
+            let _ = tx.send(me.resolved(&token_c, &rk_c, &rk_s_c, minutes));
+        });
+        if spawned.is_none() {
+            return self.resolved(token, rk, rk_s, minutes);
+        }
+        rx.recv_timeout(wait).ok().flatten()
+    }
+
     /// The resolved choice for a film or episode, from the memo when fresh.
     pub(super) fn resolved(&self, token: &str, rk: &Rk, rk_s: &str, minutes: Option<i64>) -> Option<Arc<Resolved>> {
         if matches!(rk, Rk::Season { .. }) || matches!(rk, Rk::Item { kind: catalog::Kind::Show, .. }) {
             return None;
         }
-        {
-            let memo = self.play.resolved.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(r) = memo.get(rk_s).filter(|r| r.at.elapsed() < RESOLVED_TTL) {
-                return Some(r.clone());
+        if let Some(r) = self.memo(rk_s) {
+            return Some(r);
+        }
+        let flight = self.play.resolving.lock().unwrap_or_else(|e| e.into_inner())
+            .entry(rk_s.to_string()).or_default().clone();
+        let _one_at_a_time = flight.lock().unwrap_or_else(|e| e.into_inner());
+        // whoever held the flight before us has left its answer
+        if let Some(r) = self.memo(rk_s) {
+            return Some(r);
+        }
+        let r = self.resolve_now(token, rk, rk_s, minutes);
+        self.play.resolving.lock().unwrap_or_else(|e| e.into_inner()).remove(rk_s);
+        r
+    }
+
+    /// Read the first bytes of the candidates in `order` (indices into `streams`) for their
+    /// tracks, the first at once and each next one when the one before has not answered within
+    /// [`PROBE_STAGGER`]; `decide` is handed each answer in candidate order and says when to stop.
+    /// When `patient` is false a candidate still silent after [`PROBE_PATIENCE`] is passed over
+    /// (handed to `decide` as not answering) as soon as a later one has answered.
+    /// Without the shared bridge (a test's) every read is made in turn on this thread.
+    fn probe_candidates(&self, streams: &[(Stream, Facts, i64)], order: &[usize], patient: bool,
+        mut decide: impl FnMut(usize, usize, Result<Option<Probe>, ()>) -> bool) {
+        let me = self.me.get().and_then(std::sync::Weak::upgrade);
+        let (tx, rx) = std::sync::mpsc::channel::<(usize, Result<Option<Probe>, ()>)>();
+        let mut answers: Vec<Option<Result<Option<Probe>, ()>>> = vec![None; order.len()];
+        let mut asked: Vec<Instant> = Vec::new();
+        let started = Instant::now();
+        let mut next = 0;
+        while next < order.len() {
+            // ask the one being decided on, and each later one whose turn the clock has reached
+            while asked.len() < order.len()
+                && (asked.len() <= next || started.elapsed() >= PROBE_STAGGER * asked.len() as u32) {
+                let k = asked.len();
+                asked.push(Instant::now());
+                let url = streams[order[k]].0.url.clone().unwrap_or_default();
+                let tx = tx.clone();
+                let thread = me.clone().and_then(|me| {
+                    let url = url.clone();
+                    plx_base::task::spawn("stremio-probe", move || { let _ = tx.send((k, me.probe_url(&url))); })
+                });
+                if thread.is_none() {
+                    answers[k] = Some(self.probe_url(&url));
+                }
+            }
+            if let Some(answer) = answers[next].take() {
+                if decide(next, order[next], answer) {
+                    return;
+                }
+                next += 1;
+                continue;
+            }
+            let later_answered = answers[next + 1..].iter().any(|a| matches!(a, Some(Ok(_))));
+            let impatient_at = asked[next] + PROBE_PATIENCE;
+            if !patient && later_answered && Instant::now() >= impatient_at {
+                answers[next] = Some(Err(()));
+                continue;
+            }
+            let give_up = asked[next] + super::super::api::MEDIA_READ_BUDGET + PROBE_SLACK;
+            let next_turn = (asked.len() < order.len()).then(|| started + PROBE_STAGGER * asked.len() as u32);
+            let mut until = next_turn.map_or(give_up, |t| t.min(give_up));
+            if !patient && later_answered {
+                until = until.min(impatient_at);
+            }
+            match rx.recv_timeout(until.saturating_duration_since(Instant::now())) {
+                Ok((k, answer)) => answers[k] = Some(answer),
+                Err(_) if Instant::now() >= give_up => answers[next] = Some(Err(())),
+                Err(_) => {}
             }
         }
+    }
+
+    fn resolve_now(&self, token: &str, rk: &Rk, rk_s: &str, minutes: Option<i64>) -> Option<Arc<Resolved>> {
         let streams = self.ranked_streams(token, rk).ok()?;
         let first = self.chosen_index(rk_s, &streams);
         // The first pick, then the next streams that could start at once, until one answers: a
@@ -272,36 +383,34 @@ impl Bridge {
                 .and_then(super::subs::two_letter).unwrap_or_else(|| "en".into())
         };
         let mut foreign: Option<(usize, Option<Probe>)> = None;
-        let candidates = first.into_iter().chain(
-            (0..streams.len()).filter(|i| Some(*i) != first && fallback_ok(&streams[*i].1)));
-        for (tried, i) in candidates.enumerate() {
-            if tried >= FALLBACK_TRIES {
-                break;
-            }
-            let Some(url) = streams[i].0.url.as_deref() else { continue };
-            match self.probe_url(url) {
-                Ok(p) => {
-                    self.mark_alive(rk_s, &streams[i].0);
-                    if !picked && tried + 1 < FALLBACK_TRIES && lacks_language(p.as_ref(), &wanted) {
-                        plx_base::eventlog::log(&format!("stremio: stream {i} has no {wanted} audio; trying the next"));
-                        self.mark_dead(rk_s, &streams[i].0);
-                        foreign.get_or_insert((i, p));
-                        continue;
-                    }
-                    if tried > 0 {
-                        plx_base::eventlog::log(&format!("stremio: stream {} answered after {tried} that did not", i));
-                    }
-                    chosen = Some(i);
-                    probed = p;
-                    foreign = None;
-                    break;
-                }
-                Err(()) => {
+        let order: Vec<usize> = first.into_iter()
+            .chain((0..streams.len()).filter(|i| Some(*i) != first && fallback_ok(&streams[*i].1)))
+            .take(FALLBACK_TRIES)
+            .filter(|i| streams[*i].0.url.is_some())
+            .collect();
+        self.probe_candidates(&streams, &order, picked, |tried, i, answer| match answer {
+            Ok(p) => {
+                self.mark_alive(rk_s, &streams[i].0);
+                if !picked && tried + 1 < FALLBACK_TRIES && lacks_language(p.as_ref(), &wanted) {
+                    plx_base::eventlog::log(&format!("stremio: stream {i} has no {wanted} audio; trying the next"));
                     self.mark_dead(rk_s, &streams[i].0);
-                    plx_base::eventlog::log(&format!("stremio: stream {i} did not answer; trying the next"));
+                    foreign.get_or_insert((i, p));
+                    return false;
                 }
+                if tried > 0 {
+                    plx_base::eventlog::log(&format!("stremio: stream {i} answered after {tried} that did not"));
+                }
+                chosen = Some(i);
+                probed = p;
+                foreign = None;
+                true
             }
-        }
+            Err(()) => {
+                self.mark_dead(rk_s, &streams[i].0);
+                plx_base::eventlog::log(&format!("stremio: stream {i} did not answer; trying the next"));
+                false
+            }
+        });
         // nothing better answered: the foreign-language stream that did is still a picture
         if let Some((i, p)) = foreign {
             chosen = Some(i);
@@ -471,7 +580,7 @@ impl Bridge {
     pub(super) fn decision(&self, req: &Request, token: &str) -> Response {
         let Some(rk_s) = req.query("path").and_then(rk_in).map(str::to_string) else { return Response::empty(400) };
         let Some(rk) = Rk::decode(&rk_s) else { return Response::empty(404) };
-        let row = match self.metadata_row(token, &rk, &rk_s) {
+        let row = match self.metadata_row(token, &rk, &rk_s, None) {
             Ok(row) => row,
             Err(r) => return r,
         };
@@ -500,7 +609,9 @@ impl Bridge {
     }
 
     /// The single-item row for a film or episode, with its resolved version and resume point.
-    pub(super) fn metadata_row(&self, token: &str, rk: &Rk, rk_s: &str) -> Result<Value, Response> {
+    /// `wait` bounds how long the stream is waited for (a page's read); `None` waits for it (the
+    /// player's decision and play queue, which cannot start without it).
+    pub(super) fn metadata_row(&self, token: &str, rk: &Rk, rk_s: &str, wait: Option<Duration>) -> Result<Value, Response> {
         let t = self.rk_title_for(token, rk)?;
         let shelf = catalog::Shelf { section: Lib::of_title(&t.stype, &t.id).key(),
                                      section_title: Lib::of_title(&t.stype, &t.id).title() };
@@ -523,7 +634,11 @@ impl Bridge {
                 }
             }
         }
-        if let Some(r) = self.resolved(token, rk, rk_s, t.minutes) {
+        let resolved = match wait {
+            Some(wait) => self.resolved_within(token, rk, rk_s, t.minutes, wait),
+            None => self.resolved(token, rk, rk_s, t.minutes),
+        };
+        if let Some(r) = resolved {
             // what will play, said before the press: the first line of the synopsis
             let ready = match r.chosen.map(|i| &r.streams[i].1) {
                 Some(f) => format!("Ready to play: {}", super::content::choice_label(f)),
@@ -576,7 +691,7 @@ impl Bridge {
     pub(super) fn play_queue(&self, req: &Request, token: &str) -> Response {
         let Some(rk_s) = req.query("uri").and_then(rk_in).map(str::to_string) else { return Response::empty(400) };
         let Some(rk) = Rk::decode(&rk_s) else { return Response::empty(404) };
-        let row = match self.metadata_row(token, &rk, &rk_s) {
+        let row = match self.metadata_row(token, &rk, &rk_s, None) {
             Ok(row) => row,
             Err(r) => return r,
         };

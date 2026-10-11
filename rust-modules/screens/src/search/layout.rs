@@ -14,7 +14,11 @@ pub const FIELD: Rect = Rect {
     w: SCR_W - 2.0 * MARGIN_X,
     h: 80.0,
 };
-pub(super) const SCOPE_Y: f32 = FIELD.y + FIELD.h + 12.0;
+/// How far the search bar's capsule stands outside [`FIELD`], above and below.
+pub(super) const BAR_OUTSET: f32 = 10.0;
+/// The field's type size: the query is the page's headline, sized to sit inside its capsule.
+pub(super) const FIELD_SIZE: i32 = plx_ui::theme::size::DISPLAY;
+pub(super) const SCOPE_Y: f32 = FIELD.y + FIELD.h + BAR_OUTSET + 8.0;
 /// See [`FIELD`]'s doc: also reachable as `crate::search::CONTENT_TOP`. Value pinned at
 /// 300.0 — the overscan audit and the page's `Head` section height (`Stack` stacks the shelves
 /// below it) both depend on it.
@@ -36,6 +40,16 @@ pub(super) fn ordinal(kind: Kind) -> u32 {
 }
 pub(super) fn group(kind: Kind) -> GroupId {
     GroupId(0x5345_4200 + ordinal(kind))
+}
+/// The (unfocusable) heading section standing above a result grid: a group id of its own, since
+/// section ids must be unique on a page.
+pub(super) fn label_group(kind: Kind) -> GroupId {
+    GroupId(0x5345_4300 + ordinal(kind))
+}
+/// A result grid: the shared poster grid's six columns from the margin, its rows snapping to the
+/// content line under the search field.
+pub(super) fn grid_spec() -> plx_ui::cards::GridSpec {
+    plx_ui::cards::GridSpec::new(CONTENT_TOP, CONTENT_TOP)
 }
 static EPISODE: RowStyle = RowStyle { w: 420.0, h: 236.0, ..RowStyle::HOME };
 static PERSON: RowStyle = RowStyle { w: 250.0, h: 250.0, circular: true, ..RowStyle::HOME };

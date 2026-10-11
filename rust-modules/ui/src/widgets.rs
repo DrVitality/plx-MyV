@@ -3563,6 +3563,46 @@ pub fn shelf_tray(p: Painter, margin_x: f32, cards_top: f32, cards_h: f32, band:
     p.rect(mark, theme::SHELF_TRAY_MARK_H * 0.5, theme::ACCENT, theme::ACCENT, 0.0);
 }
 
+/// **The search bar**: a capsule standing around a text field `rect`, a magnifier at its leading
+/// end, its rim and glyph lit toward the accent by `hot` (0 at rest, 1 while the field is focused
+/// or being typed into). Answers the rect the field's text belongs in, inside the capsule and
+/// clear of the glyph.
+pub fn search_bar(p: Painter, rect: Rect, hot: f32) -> Rect {
+    let hot = hot.clamp(0.0, 1.0);
+    p.rounded().rect_rimmed(
+        rect,
+        rect.h * 0.5,
+        theme::SEARCH_BAR_TOP,
+        theme::SEARCH_BAR_BOT,
+        theme::cross(theme::SEARCH_BAR_RIM, theme::ACCENT, hot),
+        theme::SEARCH_BAR_RIM_TOP,
+    );
+    let lead = rect.h * 0.5;
+    let icon = Rect::new(
+        rect.x + lead - theme::SEARCH_BAR_ICON * 0.25,
+        rect.cy() - theme::SEARCH_BAR_ICON * 0.5,
+        theme::SEARCH_BAR_ICON,
+        theme::SEARCH_BAR_ICON,
+    );
+    crate::icons::draw(p, crate::icons::Icon::Search, icon,
+        theme::cross(theme::TEXT_TERTIARY, theme::ACCENT, hot));
+    let x = icon.x + icon.w + theme::SEARCH_BAR_PAD;
+    Rect::new(x, rect.y, (rect.x + rect.w - lead - x).max(0.0), rect.h)
+}
+
+/// **A soft panel**: the quiet rounded ground a block of controls stands on, so it reads as one
+/// group on a busy page (the Search page's browse filters).
+pub fn soft_panel(p: Painter, rect: Rect) {
+    p.rect_rimmed(
+        rect,
+        theme::SOFT_PANEL_RAD,
+        theme::SOFT_PANEL_TOP,
+        theme::SOFT_PANEL_BOT,
+        theme::SOFT_PANEL_RIM,
+        theme::SHELF_TRAY_RIM_TOP,
+    );
+}
+
 // ---- PageGround: the item-keyed ground a BROWSING screen stands on. ----
 
 /// **The page ground under a browsing surface** — one [`AmbientWash`] dissolving toward the colours

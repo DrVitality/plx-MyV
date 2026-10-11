@@ -396,6 +396,21 @@ impl<K: Copy + Eq> Stack<K> {
         }
     }
 
+    /// Grid `k`'s state (`None` while the layout has no such grid). Its page (top and scroll) is
+    /// the one the stack handed it on the last event, so a page that paints its own sections can
+    /// `draw` it as it stands.
+    pub fn grid(&self, k: K) -> Option<&Grid> {
+        match self.bodies.get(self.index(k)?) {
+            Some(Body::Grid(g)) => Some(g),
+            _ => None,
+        }
+    }
+
+    /// Section `k`'s top in document space (`None` while the layout has no such section).
+    pub fn top_of<H: Host, P: StackPage<H, Key = K>>(&self, p: &P, cx: &Cx<'_, H>, k: K) -> Option<f32> {
+        Some(self.top(p, cx, self.index(k)?))
+    }
+
     /// Where shelf `k`'s tiles sit now.
     pub fn shelf_frame<H: Host, P: StackPage<H, Key = K>>(&self, p: &P, cx: &Cx<'_, H>, k: K) -> Option<SectionFrame> {
         Some(self.frame(p, cx, self.index(k)?))

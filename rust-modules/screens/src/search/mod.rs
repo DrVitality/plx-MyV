@@ -73,7 +73,7 @@ struct Row { kind: Kind, group: GroupId, elems: Vec<u32> }
 /// The sections of the page, top to bottom. A result row's key carries the page's `rows_gen`: a
 /// row the page wiped and rebuilt is a new section with a new shelf, as a wiped row always was.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Sec { Head, Recents, Clear, Filter(u8), Row(Kind, u32) }
+pub enum Sec { Head, Recents, Clear, Filter(u8), Row(Kind, u32), Label(Kind, u32) }
 
 pub struct SearchScreen {
     entry: EntryId,
@@ -208,13 +208,13 @@ impl SearchScreen {
 
     /// The top of filter line `line`, in document space (the page's scroll not applied).
     pub(super) fn filter_line_top(&self, line: usize) -> f32 {
-        layout::CONTENT_TOP + self.recents_h() + self.filters_pad() + line as f32 * filters::LINE_H
+        layout::CONTENT_TOP + self.recents_h() + self.filters_pad() + filters::PANEL_V + line as f32 * filters::LINE_H
     }
 
     /// The screen top of filter `line`'s pills inside its section, whose top is `section_y` (the
     /// first line's section carries the air above the filters).
     fn filter_section_line_y(&self, line: u8, section_y: f32) -> f32 {
-        if line == 0 { section_y + self.filters_pad() } else { section_y }
+        if line == 0 { section_y + self.filters_pad() + filters::PANEL_V } else { section_y }
     }
 
     /// The browse filters, for the renderer.
@@ -536,6 +536,10 @@ impl SearchScreen {
         let cx = f.cx;
         let view = H::search(cx);
         let Some(src) = self.row_cards(view, row) else { return };
+        if let Some(grid) = self.stack.grid(self.section(row)) {
+            grid.redraw_focused(f, painter, &src, Some(key));
+            return;
+        }
         let Some((frame, shelf)) = self.row_frame(cx, row) else { return };
         shelf.redraw_focused(f, painter, &src, frame, Some(key));
     }
@@ -606,6 +610,13 @@ impl SearchScreen {
     }
     /// The stack's key of result row `row`.
     fn section(&self, row: usize) -> Sec { Sec::Row(self.rows[row].kind, self.rows_gen) }
+    /// Whether result row `row` is laid out as a GRID — rows of posters the page scrolls down
+    /// through — rather than a shelf scrolled sideways. A poster row is a grid whenever the store's
+    /// query is one this page composed with its browse filters ([`filters::MARK`]): browsing, and
+    /// every search typed here. Stills and headshots stay shelves.
+    fn grid_row(kind: Kind, query: &str) -> bool {
+        matches!(kind, Kind::Movie | Kind::Show | Kind::Collection) && query.contains(filters::MARK)
+    }
     /// Result row `row`'s shelf, over `cx`'s page: where its tiles sit now and what they hold.
     fn row_frame<H: SearchLike>(&self, cx: &Cx<'_, H>, row: usize) -> Option<(SectionFrame, &Shelf)> {
         let k = self.section(row);
@@ -694,7 +705,7 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
         }
         h
     }
-    fn sections(&self, _cx: &Cx<'_, H>, out: &mut Vec<SectionSpec<Sec>>) {
+    fn sections(&self, cx: &Cx<'_, H>, out: &mut Vec<SectionSpec<Sec>>) {
         out.push(SectionSpec::new(Sec::Head, plx_ui::cards::Kind::Custom { height: layout::CONTENT_TOP, focusable: true }, FIELD_GROUP));
         if !self.recents.is_empty() {
             let shown = self.recents.len().min(layout::RECENT_CAP) as f32;
@@ -706,13 +717,23 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
         }
         let lines = self.filter_lines();
         for line in 0..lines {
-            let pad = if line == 0 { self.filters_pad() } else { 0.0 };
-            let last = if line + 1 == lines { plx_ui::theme::space::MD } else { 0.0 };
+            let pad = if line == 0 { self.filters_pad() + filters::PANEL_V } else { 0.0 };
+            let last = if line + 1 == lines { filters::PANEL_V + plx_ui::theme::space::MD } else { 0.0 };
             out.push(SectionSpec::new(Sec::Filter(line as u8), plx_ui::cards::Kind::Custom {
                 height: pad + filters::LINE_H + last, focusable: true }, filter_group(line)));
         }
+        let query = H::search(cx).query();
         for row in &self.rows {
             let elem = if matches!(row.kind, Kind::Movie | Kind::Show | Kind::Episode) { ElemKind::Card } else { ElemKind::Bare };
+            if Self::grid_row(row.kind, query) {
+                // the heading stands in the flow above the grid, which has none of its own
+                out.push(SectionSpec::new(Sec::Label(row.kind, self.rows_gen),
+                    plx_ui::cards::Kind::Custom { height: layout::HEAD_TO_ROW, focusable: false }, layout::label_group(row.kind)));
+                out.push(SectionSpec::new(Sec::Row(row.kind, self.rows_gen),
+                    plx_ui::cards::Kind::Grid { spec: layout::grid_spec() }, row.group)
+                    .of_kind(elem));
+                continue;
+            }
             // Search owns the vertical model: explicit links between rows and a seat projected from
             // where the move came from, not the shelf's remembered card.
             out.push(SectionSpec::new(Sec::Row(row.kind, self.rows_gen),
@@ -738,7 +759,7 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
     }
     fn plain_len(&self, k: Sec) -> usize {
         match k { Sec::Recents => self.recents.len(), Sec::Head => 1, Sec::Clear => (!self.recents.is_empty() && !self.showing_suggestions()) as usize,
-            Sec::Filter(line) => filters::len(line as usize), Sec::Row(..) => 0 }
+            Sec::Filter(line) => filters::len(line as usize), Sec::Row(..) | Sec::Label(..) => 0 }
     }
     fn plain_elem(&self, k: Sec, n: usize) -> Option<u32> {
         match k {
@@ -760,14 +781,14 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
         match k {
             Sec::Recents => layout::recent(0, layout::CONTENT_TOP - section.y),
             Sec::Clear => layout::clear_below(section.y, cx.measure),
-            Sec::Filter(line) => filters::pill(0, self.filter_section_line_y(line, section.y)),
+            Sec::Filter(line) => filters::pill(line as usize, 0, self.filter_section_line_y(line, section.y), cx.measure),
             _ => Rect::new(layout::FIELD.x, layout::FIELD.y + section.y, layout::FIELD.w, layout::FIELD.h),
         }
     }
     fn element_rect(&self, cx: &Cx<'_, H>, k: Sec, n: usize, section: Rect) -> Rect {
         match k {
             Sec::Recents => layout::recent(n, layout::CONTENT_TOP - section.y),
-            Sec::Filter(line) => filters::pill(n, self.filter_section_line_y(line, section.y)),
+            Sec::Filter(line) => filters::pill(line as usize, n, self.filter_section_line_y(line, section.y), cx.measure),
             _ => self.focus_rect(cx, k, section),
         }
     }
@@ -786,8 +807,10 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
     /// Entered from the field, a group takes the card focus last left on in it, else its first.
     fn seat_override(&self, cx: &Cx<'_, H>, k: Sec, _from: Placed) -> Option<u32> {
         if !cx.focus.current.is_some_and(|key| key.elem == FIELD) { return None; }
+        if matches!(k, Sec::Label(..)) { return None; }
         let group = match k { Sec::Recents => RECENTS_GROUP, Sec::Clear => CLEAR_GROUP, Sec::Head => FIELD_GROUP,
-            Sec::Filter(line) => filter_group(line as usize), Sec::Row(kind, _) => layout::group(kind) };
+            Sec::Filter(line) => filter_group(line as usize), Sec::Row(kind, _) => layout::group(kind),
+            Sec::Label(kind, _) => layout::label_group(kind) };
         let valid = |elem: &u32| match k {
             Sec::Row(kind, _) => self.rows.iter().any(|row| row.kind == kind && row.elems.contains(elem)),
             _ => (0..StackPage::<H>::plain_len(self, k)).any(|n| StackPage::<H>::plain_elem(self, k, n) == Some(*elem)),
@@ -912,6 +935,7 @@ impl LogicalState for SearchScreen {
             c.u32(layout::ordinal(row.kind)).u32(row.group.0).seq(row.elems.len());
             for elem in &row.elems { c.u32(*elem); }
             if let Some(shelf) = self.stack.shelf(Sec::Row(row.kind, self.rows_gen)) { shelf.write(c); }
+            else if let Some(grid) = self.stack.grid(Sec::Row(row.kind, self.rows_gen)) { grid.write(c); }
         }
     }
     fn probe(&self, out: &mut String) {

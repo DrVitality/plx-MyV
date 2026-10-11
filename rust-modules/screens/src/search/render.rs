@@ -2,7 +2,7 @@
 use super::*;
 use crate::registry::tile_facts;
 use plx_data::search::scope::{ScopeSource, SourceScopeSnapshot};
-use plx_ui::consts::{MARGIN_X, SCR_H};
+use plx_ui::consts::{MARGIN_X, SCR_H, SCR_W};
 use plx_ui::label::{HAlign, Label, VAlign};
 use plx_ui::widgets::{Art, Button, StatusKind, StatusOverlay};
 use plx_ui::{theme, Env, Painter, View};
@@ -56,11 +56,11 @@ impl Resources {
             };
             let (_, head) = run_and_head(q, caret);
             self.head = cstring(head);
-            self.run_w = cx.measure.width(&self.run, theme::size::HERO, true);
+            self.run_w = cx.measure.width(&self.run, layout::FIELD_SIZE, true);
             self.head_w = if q.trim().is_empty() {
                 0.0
             } else {
-                cx.measure.width(&self.head, theme::size::HERO, true)
+                cx.measure.width(&self.head, layout::FIELD_SIZE, true)
             };
         }
         let scope = H::search(cx).scope();
@@ -147,6 +147,20 @@ pub(super) fn draw<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '
     }
     filter_rows(screen, f, p);
     for (i, row) in screen.rows.iter().enumerate() {
+        // a poster grid: its heading section above it, then the grid as the stack last placed it
+        if let Some(grid) = screen.stack.grid(screen.section(i)) {
+            let label = Sec::Label(row.kind, screen.rows_gen);
+            if let Some(top) = screen.stack.top_of(screen, f.cx, label) {
+                let y = top - screen.stack.scroll();
+                if plx_ui::on_axis(y, layout::HEAD_TO_ROW, SCR_H, 0.0) {
+                    row_heading(screen, f, p, i, row.kind, y);
+                }
+            }
+            if let Some(src) = screen.row_cards(H::search(f.cx), i) {
+                grid.draw(f, p, &src);
+            }
+            continue;
+        }
         let Some((frame, shelf)) = screen.row_frame(f.cx, i) else { continue };
         let top = frame.y - layout::HEAD_TO_ROW;
         if !plx_ui::on_axis(
@@ -157,34 +171,7 @@ pub(super) fn draw<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '
         ) {
             continue;
         }
-        let slot = layout::ordinal(row.kind) as usize;
-        let title = &screen.render.titles[slot];
-        let cap = f.cx.measure.cap_h(theme::size::HEADLINE);
-        let source = if screen.owner_row == Some(i) && screen.owner_alpha.pos > OWNER_FLOOR {
-            screen.render.owner.as_c_str()
-        } else {
-            c""
-        };
-        heading_flow(
-            title,
-            &screen.render.counts[slot],
-            source,
-            |run, dx, size, bold, ink, faded| {
-                let mut label = Label::new(run.as_ptr(), size, ink).v(VAlign::Baseline);
-                if bold != 0 {
-                    label = label.bold();
-                }
-                label.draw(
-                    if faded {
-                        p.alpha(screen.owner_alpha.pos.clamp(0.0, 1.0))
-                    } else {
-                        p
-                    },
-                    Rect::new(MARGIN_X + dx, top - shelf.heading_lift(), 0.0, cap),
-                );
-                f.cx.measure.width(run, size, bold != 0)
-            },
-        );
+        row_heading(screen, f, p, i, row.kind, top - shelf.heading_lift());
         if let Some(src) = screen.row_cards(H::search(f.cx), i) {
             shelf.draw(f, p, &src, frame);
         }
@@ -194,16 +181,58 @@ pub(super) fn draw<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '
     screen.stack.draw_hold_hint(f.painter.alpha(f.page_alpha), f.measure);
 }
 
+/// Result row `i`'s heading — its kind, its count, and the server it came from while one of its
+/// cards is focused — with its text's top at `y`.
+fn row_heading<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Painter, i: usize, kind: Kind, y: f32) {
+    let slot = layout::ordinal(kind) as usize;
+    let title = &screen.render.titles[slot];
+    let cap = f.cx.measure.cap_h(theme::size::HEADLINE);
+    let source = if screen.owner_row == Some(i) && screen.owner_alpha.pos > OWNER_FLOOR {
+        screen.render.owner.as_c_str()
+    } else {
+        c""
+    };
+    heading_flow(
+        title,
+        &screen.render.counts[slot],
+        source,
+        |run, dx, size, bold, ink, faded| {
+            let mut label = Label::new(run.as_ptr(), size, ink).v(VAlign::Baseline);
+            if bold != 0 {
+                label = label.bold();
+            }
+            label.draw(
+                if faded {
+                    p.alpha(screen.owner_alpha.pos.clamp(0.0, 1.0))
+                } else {
+                    p
+                },
+                Rect::new(MARGIN_X + dx, y, 0.0, cap),
+            );
+            f.cx.measure.width(run, size, bold != 0)
+        },
+    );
+}
+
 fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: Painter) {
     let data = &screen.render;
-    let rect = Rect::new(
+    let hot = screen.hot.pos;
+    // the capsule stands a little outside the field's own rect, and the text sits inside it,
+    // clear of the magnifier
+    let bar = Rect::new(
         layout::FIELD.x,
-        layout::FIELD.y - screen.stack.scroll(),
+        layout::FIELD.y - layout::BAR_OUTSET - screen.stack.scroll(),
         layout::FIELD.w,
+        layout::FIELD.h + 2.0 * layout::BAR_OUTSET,
+    );
+    let inner = plx_ui::widgets::search_bar(p, bar, hot);
+    let rect = Rect::new(
+        inner.x,
+        layout::FIELD.y - screen.stack.scroll(),
+        inner.w,
         layout::FIELD.h,
     );
     let blank = data.query.trim().is_empty();
-    let hot = screen.hot.pos;
     let ink = if blank {
         theme::cross(theme::TEXT_TERTIARY, theme::TEXT_SECONDARY, hot)
     } else {
@@ -215,19 +244,19 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
         rect.w,
         screen.editing,
     );
-    let (cap_top, cap_base) = plx_gfx::text::text_cap_band(theme::size::HERO, 1);
+    let (cap_top, cap_base) = plx_gfx::text::text_cap_band(layout::FIELD_SIZE, 1);
     let pad = descent_pad(
         rect.h,
-        plx_gfx::text::text_height(theme::size::HERO, 1),
+        plx_gfx::text::text_height(layout::FIELD_SIZE, 1),
         cap_top,
         cap_base,
     );
     {
         let _clip = f.clip(p, Rect::new(rect.x, rect.y, rect.w, rect.h + pad));
-        Label::new(data.run.as_ptr(), theme::size::HERO, ink)
+        Label::new(data.run.as_ptr(), layout::FIELD_SIZE, ink)
             .bold()
             .draw(p, Rect::new(rect.x + run_dx, rect.y, rect.w, rect.h));
-        let text_y = plx_gfx::text::text_vcenter_y(theme::size::HERO, 1, rect.cy());
+        let text_y = plx_gfx::text::text_vcenter_y(layout::FIELD_SIZE, 1, rect.cy());
         if caret_shown(screen.editing, screen.blink_us < super::BLINK_US) {
             p.rect(
                 Rect::new(
@@ -243,7 +272,7 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
             );
         }
         if ghost_shown(&data.query) {
-            let y = plx_gfx::text::baseline_y(theme::size::BODY, 0, theme::size::HERO, 1, text_y);
+            let y = plx_gfx::text::baseline_y(theme::size::BODY, 0, layout::FIELD_SIZE, 1, text_y);
             p.text(
                 plx_platform::i18n::msg::browse_search_one_more_c().as_ptr(),
                 rect.x + caret_dx + CARET_W + GHOST_GAP,
@@ -259,9 +288,9 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
         Label::new(line.as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY).draw(
             p,
             Rect::new(
-                rect.x,
+                bar.x + bar.h * 0.5,
                 layout::SCOPE_Y - screen.stack.scroll(),
-                rect.w,
+                bar.w - bar.h,
                 layout::SCOPE_H,
             ),
         );
@@ -358,19 +387,29 @@ fn filter_rows<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H
     use super::filters;
     let env = Env::inert();
     let scroll = screen.stack.scroll();
-    for line in 0..screen.filter_lines() {
+    let lines = screen.filter_lines();
+    if lines == 0 {
+        return;
+    }
+    // the filters stand together on one quiet panel
+    let panel_top = screen.filter_line_top(0) - scroll - filters::PANEL_V;
+    let panel_h = lines as f32 * filters::LINE_H + 2.0 * filters::PANEL_V;
+    if plx_ui::on_axis(panel_top, panel_h, SCR_H, 0.0) {
+        plx_ui::widgets::soft_panel(p, Rect::new(MARGIN_X, panel_top, SCR_W - 2.0 * MARGIN_X, panel_h));
+    }
+    for line in 0..lines {
         let top = screen.filter_line_top(line) - scroll;
         if !plx_ui::on_axis(top, filters::LINE_H, SCR_H, 0.0) {
             continue;
         }
         if let Some(label) = filters::row_label(line) {
-            Label::new(label.as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY)
+            Label::new(label.as_ptr(), theme::size::CAPTION, theme::TEXT_SECONDARY)
                 .bold()
-                .draw(p, Rect::new(MARGIN_X, top, filters::LABEL_W, filters::LINE_H));
+                .draw(p, Rect::new(filters::label_x(), top, filters::LABEL_W, filters::LINE_H));
         }
         let chosen = screen.filters().chosen(line);
         for i in 0..filters::len(line) {
-            let rect = filters::pill(i, top);
+            let rect = filters::pill(line, i, top, f.cx.measure);
             let elem = filters::elem(line, i);
             let focused = f.cx.focus.current == Some(screen.key(elem));
             let picked = chosen == Some(i);
@@ -381,7 +420,7 @@ fn filter_rows<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H
             } else {
                 plx_ui::widgets::ControlStyle::Accent
             };
-            Button::new(filters::label(line, i).as_ptr(), theme::size::LABEL, rect)
+            Button::new(filters::label(line, i).as_ptr(), filters::PILL_SIZE, rect)
                 .style(style)
                 .focused(focused)
                 .draw(&env, p);
@@ -402,7 +441,7 @@ fn empty<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Pain
     let lines = screen.filter_lines();
     if lines > 0 {
         // under the filters, which stand between the field and any results
-        let below = screen.filter_line_top(lines) + theme::space::MD;
+        let below = screen.filter_line_top(lines) + super::filters::PANEL_V + theme::space::MD;
         rect.h = (rect.y + rect.h - below).max(theme::space::XL * 4.0);
         rect.y = below;
     }

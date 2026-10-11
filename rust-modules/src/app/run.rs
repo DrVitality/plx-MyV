@@ -1645,8 +1645,9 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
         // Search's suggestions, once a run, as soon as there is a server to ask
         crate::app::input::search_suggestions_fetch();
         // a title sent from the phone remote: its page opens (never playback); while the player
-        // is up it waits, so a phone cannot cut into what is playing
-        if !fr.player {
+        // is up it waits, so a phone cannot cut into what is playing (the route, not `fr.player`,
+        // which `prepare_window` has not written yet this frame)
+        if !matches!(app.route(), AppArg::Player) {
             if let Some(rk) = crate::stremio::take_remote_request() {
                 log("phone remote: opening a title");
                 super::bridge::open_detail(&mut app.pages, &mut app.bridge,
@@ -2340,7 +2341,9 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
                 &mut app.pages, &mut app.bridge, &mut super::playback::LivePlaybackResources, fr.now);
         }
         // The player's Change stream page: its list fetched once per item, and a pick's landing.
-        if fr.player {
+        // Keyed on the route itself, not `fr.player`: that is written by `prepare_window`, which
+        // runs AFTER this phase, so it read false on every frame and the list was never asked for.
+        if matches!(app.route(), AppArg::Player) {
             crate::app::input::player_streams_fetch(&app.player.session);
         }
         if app.bridge.player_stream.is_some() {
@@ -4828,5 +4831,32 @@ mod pump_wiring_tests {
             "pump_detail() and pump_season() must be pumped from the same function — found what \
              looks like an intervening function boundary between them"
         );
+    }
+}
+
+/// `Frame::player` is written by `prepare_window`, which runs after `playback_tick` and `update`,
+/// so in those two phases it is always `false`. Reading it there is how the player's Streams page
+/// never asked for its list (and how a phone remote could open a page over playback).
+#[cfg(test)]
+mod frame_player_order_tests {
+    #[test]
+    fn no_phase_before_prepare_window_reads_the_player_bit() {
+        let whole = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app/run.rs"),
+        )
+        .expect("read run.rs");
+        let src = whole.split("#[cfg(test)]").next().expect("the loop's source");
+        for (open, close) in [
+            ("pub(crate) unsafe fn playback_tick(", "pub(crate) unsafe fn land_results("),
+            ("pub(crate) unsafe fn update(", "pub(crate) unsafe fn draw("),
+        ] {
+            let at = src.find(open).expect(open);
+            let end = at + src[at..].find(close).expect(close);
+            let reads: Vec<&str> = src[at..end]
+                .lines()
+                .filter(|l| !l.trim_start().starts_with("//") && l.contains("fr.player"))
+                .collect();
+            assert!(reads.is_empty(), "{open} reads `fr.player` before it is written: {reads:?}");
+        }
     }
 }

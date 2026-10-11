@@ -993,6 +993,26 @@ pub const PEEK_RIM: [f32; 4] = with_a(WHITE, 0.12);
 pub const PEEK_RIM_TOP: f32 = 0.12;
 /// The shadow the bubble casts on the shelf it stands over.
 pub const PEEK_SHADOW: [f32; 4] = with_a(BLACK, 0.55);
+/// The search bar's capsule (`widgets::search_bar`): a lit film over the page, brighter at the top.
+pub const SEARCH_BAR_TOP: [f32; 4] = with_a(WHITE, 0.11);
+/// …and its foot.
+pub const SEARCH_BAR_BOT: [f32; 4] = with_a(WHITE, 0.045);
+/// The capsule's perimeter at rest; the live focus crosses it toward [`ACCENT`].
+pub const SEARCH_BAR_RIM: [f32; 4] = with_a(WHITE, 0.16);
+/// Extra rim weight on the capsule's top edge.
+pub const SEARCH_BAR_RIM_TOP: f32 = 0.10;
+/// The capsule's glyph column (the magnifier) and the gap after it, px at 1080p.
+pub const SEARCH_BAR_ICON: f32 = 40.0;
+pub const SEARCH_BAR_PAD: f32 = 34.0;
+/// A soft grouping panel (`widgets::soft_panel`) — the Search page's browse filters stand on one:
+/// a whisper of light, brighter at its top, with a quiet perimeter.
+pub const SOFT_PANEL_TOP: [f32; 4] = with_a(WHITE, 0.065);
+/// …and its foot.
+pub const SOFT_PANEL_BOT: [f32; 4] = with_a(WHITE, 0.02);
+/// A soft panel's perimeter.
+pub const SOFT_PANEL_RIM: [f32; 4] = with_a(WHITE, 0.07);
+/// A soft panel's corner radius, px at 1080p.
+pub const SOFT_PANEL_RAD: f32 = 28.0;
 /// Section divider hairline.
 pub const HAIRLINE: [f32; 4] = with_a(WHITE, 0.10);
 /// A glass container's **perimeter line** — the design system's `--glass-rim`, one notch under the

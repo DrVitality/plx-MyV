@@ -102,6 +102,66 @@ fn pretty_day(day: &str) -> String {
 
 /// Runs `jobs` side by side and returns their results in order. A job whose thread the OS refuses
 /// runs inline instead, so a refusal costs time, never an answer.
+/// The most the stream addons are waited for, all together.
+const STREAMS_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
+/// Once one addon has listed streams, the most the others are waited for: one dead or slow addon
+/// among a dozen used to hold every play and every stream list for its whole request timeout.
+const STREAMS_GRACE: std::time::Duration = std::time::Duration::from_millis(2500);
+
+/// One addon's streams for an item (none when it failed).
+fn streams_from(b: &Bridge, url: &str, name: &str) -> Vec<super::super::streams::Stream> {
+    match b.fetch_json(url) {
+        Ok(v) => match v.get("streams") {
+            Some(Value::Array(a)) => a.iter().filter_map(|s| super::super::streams::Stream::read(name, s)).collect(),
+            _ => Vec::new(),
+        },
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Ask every stream addon in `asks` (`(url, addon name)`) at once and gather what has answered
+/// within [`STREAMS_BUDGET`] — or [`STREAMS_GRACE`] after the first that listed any. An addon that
+/// answers later still lands in the JSON memo, so the next ask of the item has it.
+fn gather_streams(me: &Arc<Bridge>, asks: Vec<(String, String)>) -> Vec<super::super::streams::Stream> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut out = Vec::new();
+    let mut waiting = 0usize;
+    for (url, name) in asks {
+        let (tx, me2) = (tx.clone(), me.clone());
+        let (url2, name2) = (url.clone(), name.clone());
+        let spawned = plx_base::task::spawn("stremio-streams", move || {
+            let _ = tx.send(streams_from(&me2, &url2, &name2));
+        });
+        if spawned.is_some() {
+            waiting += 1;
+        } else {
+            out.extend(streams_from(me, &url, &name));
+        }
+    }
+    drop(tx);
+    let start = std::time::Instant::now();
+    let mut deadline = start + STREAMS_BUDGET;
+    if !out.is_empty() {
+        deadline = deadline.min(start + STREAMS_GRACE);
+    }
+    while waiting > 0 {
+        match rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())) {
+            Ok(streams) => {
+                waiting -= 1;
+                if !streams.is_empty() && out.is_empty() {
+                    deadline = deadline.min(std::time::Instant::now() + STREAMS_GRACE);
+                }
+                out.extend(streams);
+            }
+            Err(_) => {
+                plx_base::eventlog::log(&format!("stremio: {waiting} stream addon(s) still silent; going on without them"));
+                break;
+            }
+        }
+    }
+    out
+}
+
 pub(super) fn parallel<'a, T: Send + 'a>(jobs: Vec<Box<dyn FnOnce() -> T + Send + 'a>>) -> Vec<Option<T>> {
     std::thread::scope(|scope| {
         let pending: Vec<_> = jobs
@@ -960,7 +1020,7 @@ impl Bridge {
     pub(super) fn metadata(&self, token: &str, rk_s: &str) -> Response {
         let Some(rk) = Rk::decode(rk_s) else { return Response::empty(404) };
         if matches!(rk, Rk::Item { kind: catalog::Kind::Movie, .. } | Rk::Episode { .. }) {
-            return match self.metadata_row(token, &rk, rk_s) {
+            return match self.metadata_row(token, &rk, rk_s, Some(super::play::PAGE_WAIT)) {
                 Ok(row) => Response::json(200, &container(json!({"size": 1, "Metadata": [row]}))),
                 Err(r) => r,
             };
@@ -1352,23 +1412,23 @@ impl Bridge {
         let providers: Vec<&Addon> = library::stream_providers(&addons, stype, id)
             .filter(|a| self.with_config(|c| c.addon_on(a, super::super::api::Resource::Stream)))
             .collect();
-        let jobs: Vec<Box<dyn FnOnce() -> Vec<Stream> + Send + '_>> = providers
+        let asks: Vec<(String, String)> = providers
             .iter()
-            .map(|&addon| {
-                Box::new(move || {
-                    let url = format!("{}/stream/{}/{}.json", addon.base_url(), segment(stype), segment(id));
-                    let name = addon.manifest.name.clone();
-                    match self.fetch_json(&url) {
-                        Ok(v) => match v.get("streams") {
-                            Some(Value::Array(a)) => a.iter().filter_map(|s| Stream::read(&name, s)).collect(),
-                            _ => Vec::new(),
-                        },
-                        Err(_) => Vec::new(),
-                    }
-                }) as Box<dyn FnOnce() -> Vec<Stream> + Send + '_>
-            })
+            .map(|addon| (format!("{}/stream/{}/{}.json", addon.base_url(), segment(stype), segment(id)),
+                          addon.manifest.name.clone()))
             .collect();
-        let mut ranked = rank(parallel(jobs).into_iter().flatten().flatten().collect());
+        let found: Vec<Stream> = match self.me.get().and_then(std::sync::Weak::upgrade) {
+            Some(me) => gather_streams(&me, asks),
+            None => {
+                let jobs: Vec<Box<dyn FnOnce() -> Vec<Stream> + Send + '_>> = asks
+                    .into_iter()
+                    .map(|(url, name)| Box::new(move || streams_from(self, &url, &name))
+                        as Box<dyn FnOnce() -> Vec<Stream> + Send + '_>)
+                    .collect();
+                parallel(jobs).into_iter().flatten().flatten().collect()
+            }
+        };
+        let mut ranked = rank(found);
         self.adjust_ranking(rk, &mut ranked);
         Ok(super::super::streams::narrow(ranked, super::super::streams::prefs()))
     }

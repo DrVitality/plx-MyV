@@ -382,5 +382,7 @@ fn media_read(url: &str, from: u64, len: u64) -> Option<Vec<u8>> {
 }
 
 /// How long one track read may take, first byte included: a debrid addon may add the torrent to
-/// the account on the request before it redirects.
-const MEDIA_READ_BUDGET: std::time::Duration = std::time::Duration::from_secs(25);
+/// the account on the request before it redirects. A cached link answers in a few seconds; one
+/// that has not after this is passed over for the next (`bridge::play`), which is already being
+/// read by then.
+pub(super) const MEDIA_READ_BUDGET: std::time::Duration = std::time::Duration::from_secs(12);

@@ -1223,3 +1223,58 @@ fn a_poster_is_fetched_once_and_served_again_without_blocking_other_reads() {
     let got = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("the bridge answered (no deadlock)");
     assert_eq!(got, (200, 200, 200));
 }
+
+/// A scripted account whose file reads are slow — a debrid link still finding its first byte.
+struct SlowFiles {
+    inner: Scripted,
+    delay: std::time::Duration,
+    heads: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl Stremio for SlowFiles {
+    fn create_link(&self) -> Result<LinkCode, ApiError> { self.inner.create_link() }
+    fn read_link(&self, code: &str) -> Result<Option<String>, ApiError> { self.inner.read_link(code) }
+    fn user(&self, k: &str) -> Result<User, ApiError> { self.inner.user(k) }
+    fn addons(&self, k: &str) -> Result<Vec<Addon>, ApiError> { self.inner.addons(k) }
+    fn library(&self, k: &str) -> Result<Vec<Value>, ApiError> { self.inner.library(k) }
+    fn library_put(&self, k: &str, items: &[Value]) -> Result<(), ApiError> { self.inner.library_put(k, items) }
+    fn fetch(&self, url: &str) -> Result<Vec<u8>, ApiError> { self.inner.fetch(url) }
+    fn fetch_range(&self, url: &str, from: u64, len: u64) -> Result<Vec<u8>, ApiError> {
+        if from == 0 && url == "https://t/r/2" {
+            self.heads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        std::thread::sleep(self.delay);
+        self.inner.fetch_range(url, from, len)
+    }
+}
+
+/// The detail page used to wait for the stream to be found and its first bytes read — fifteen
+/// seconds and more on a slow debrid link, which was the page itself taking that long to open.
+/// It now waits a moment at most and the resolve goes on behind it, so the player's own request
+/// joins the one already running rather than reading the file a second time.
+#[test]
+fn a_page_does_not_wait_for_a_slow_stream_and_the_player_joins_its_resolve() {
+    let mut s = content_scripted();
+    s.files.insert("https://t/r/2".into(), sample_mkv());
+    let heads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let b = std::sync::Arc::new(Bridge::new(Box::new(SlowFiles {
+        inner: s, delay: std::time::Duration::from_millis(3000), heads: heads.clone() }), 32498));
+    b.share();
+    let rk = Rk::item("movie", "tt0111161").unwrap().encode();
+
+    let started = std::time::Instant::now();
+    let page = json_of(&b.handle(&authed("GET", &format!("/library/metadata/{rk}"))));
+    let took = started.elapsed();
+    assert!(took < std::time::Duration::from_millis(2500), "the page waited {took:?} for the stream");
+    let row = &page["MediaContainer"]["Metadata"][0];
+    assert!(row["Media"][0]["Part"][0]["key"].as_str().is_some_and(|k| k.ends_with(".mkv")),
+        "the page still carries a part Play can start: {row}");
+
+    let decision = json_of(&b.handle(&authed("GET",
+        &format!("/video/:/transcode/universal/decision?path=%2Flibrary%2Fmetadata%2F{rk}&directPlay=1"))));
+    let mc = &decision["MediaContainer"];
+    assert_eq!(mc["generalDecisionCode"], 1000);
+    assert_eq!(mc["Metadata"][0]["Media"][0]["videoCodec"], "hevc", "the tracks were read from the file");
+    assert_eq!(heads.load(std::sync::atomic::Ordering::SeqCst), 1,
+        "the player's request joined the resolve the page started rather than reading the file again");
+}
