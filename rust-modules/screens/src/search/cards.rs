@@ -17,6 +17,8 @@ pub struct RowCards<'a> {
     pub(super) elems: &'a [u32],
     pub(super) items: &'a [Item],
     pub(super) sources: &'a [ScopeSource],
+    /// The most cards shown: a shelf's capacity, unbounded for a grid ([`SearchScreen::row_cards`]).
+    pub(super) cap: usize,
 }
 
 impl RowCards<'_> {
@@ -34,10 +36,10 @@ impl<H: SearchLike> CardSource<H> for RowCards<'_> {
             _ => None,
         }
     }
-    fn len(&self) -> usize { self.elems.len().min(self.items.len()) }
+    fn len(&self) -> usize { self.elems.len().min(self.items.len()).min(self.cap) }
     fn elem(&self, i: usize) -> u32 { self.elems[i] }
     fn index_of(&self, e: &u32) -> Option<usize> {
-        self.elems.iter().position(|elem| elem == e).filter(|&i| i < self.items.len())
+        self.elems.iter().position(|elem| elem == e).filter(|&i| i < self.items.len().min(self.cap))
     }
     fn art(&self, i: usize) -> Art<'_> {
         self.items.get(i).map_or(Art::Poster(None), |item| render::tile_art(self.kind, item))

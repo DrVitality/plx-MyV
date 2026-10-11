@@ -438,13 +438,12 @@ const SETTLE_US_TARGET: u32 = (SETTLE_S * 1_000_000.0) as u32;
 /// merged cap exactly, and a search that needs the 13th hit needs a better query instead.
 const LIMIT: i64 = 12;
 
-/// Per-shelf item cap, for the same reason `person.rs` carries one: a `CardRow` owns exactly
-/// `ui::cards::MAX_ROW_ITEMS` focus-scale springs and `scale(i)` clamps past the end,
-/// so an item beyond the cap would draw with the last cell's pop and never pop at all when focused.
-/// The data layer cannot name the UI library's constant, so this is [`crate::pms::MAX_SHELF_ITEMS`],
-/// the data layer's own spelling of the same number (`screens::home`'s
-/// `the_data_shelf_cap_is_the_card_rows_capacity` pins the two equal).
-const SHELF_MAX: usize = crate::pms::MAX_SHELF_ITEMS;
+/// Per-shelf item cap. A result row the Search page lays out as a GRID (its own composed queries,
+/// `screens::search`) is scrolled down through and draws every item it holds, so the store keeps
+/// four shelves' worth; a row drawn as a SHELF is capped at the screen, for the reason `person.rs`
+/// carries one — a `CardRow` owns exactly `ui::cards::MAX_ROW_ITEMS` focus-scale springs and
+/// `scale(i)` clamps past the end, so an item beyond it would never pop when focused.
+const SHELF_MAX: usize = 4 * crate::pms::MAX_SHELF_ITEMS;
 
 /// Fetch-slot ceiling — the registry's own `MAX_SERVERS`, named rather than copied, so raising the
 /// ceiling cannot leave this module quietly never asking the extra servers.

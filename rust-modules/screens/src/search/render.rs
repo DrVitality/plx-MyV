@@ -2,7 +2,7 @@
 use super::*;
 use crate::registry::tile_facts;
 use plx_data::search::scope::{ScopeSource, SourceScopeSnapshot};
-use plx_ui::consts::{MARGIN_X, SCR_H, SCR_W};
+use plx_ui::consts::{MARGIN_X, SCR_H};
 use plx_ui::label::{HAlign, Label, VAlign};
 use plx_ui::widgets::{Art, Button, StatusKind, StatusOverlay};
 use plx_ui::{theme, Env, Painter, View};
@@ -153,7 +153,7 @@ pub(super) fn draw<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '
             if let Some(top) = screen.stack.top_of(screen, f.cx, label) {
                 let y = top - screen.stack.scroll();
                 if plx_ui::on_axis(y, layout::HEAD_TO_ROW, SCR_H, 0.0) {
-                    row_heading(screen, f, p, i, row.kind, y);
+                    grid_heading(screen, f, p, y);
                 }
             }
             if let Some(src) = screen.row_cards(H::search(f.cx), i) {
@@ -178,7 +178,24 @@ pub(super) fn draw<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '
     }
     // A standing note, never a target: the page paints through here, not `StackView::paint`, so it
     // ends the draw itself, over everything the page painted.
+    // the open dropdown stands over everything the page drew
+    dropdown(screen, f, p);
     screen.stack.draw_hold_hint(f.painter.alpha(f.page_alpha), f.measure);
+}
+
+/// A result grid's heading: what the page is browsing ("Popular"), or "Results" over a search.
+/// The grid mixes films and shows, so it names no kind and counts nothing.
+fn grid_heading<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Painter, y: f32) {
+    let title = if screen.draft.query().trim().is_empty() {
+        super::filters::label(1, screen.filters().chosen_in(1))
+    } else {
+        plx_platform::i18n::msg::browse_search_results_heading_c()
+    };
+    let cap = f.cx.measure.cap_h(theme::size::HEADLINE);
+    Label::new(title.as_ptr(), theme::size::HEADLINE, theme::TEXT_HEADING)
+        .v(VAlign::Baseline)
+        .bold()
+        .draw(p, Rect::new(MARGIN_X, y, 0.0, cap));
 }
 
 /// Result row `i`'s heading — its kind, its count, and the server it came from while one of its
@@ -381,51 +398,53 @@ fn recents<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p
     stop(screen, CLEAR, ElemKind::Control, f, p);
 }
 
-/// The browse filters: a label column, then a line of pills per row (the genres wrapped onto
-/// several). The chosen pill wears the accent; the focused one the control face's focus.
+/// The browse filters: one line of dropdown buttons, each naming its filter and its setting. A
+/// filter set away from its default wears the accent, so what narrows the page reads at a glance.
 fn filter_rows<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: Painter) {
     use super::filters;
     let env = Env::inert();
     let scroll = screen.stack.scroll();
-    let lines = screen.filter_lines();
-    if lines == 0 {
+    if screen.filter_lines() == 0 {
         return;
     }
-    // the filters stand together on one quiet panel
-    let panel_top = screen.filter_line_top(0) - scroll - filters::PANEL_V;
-    let panel_h = lines as f32 * filters::LINE_H + 2.0 * filters::PANEL_V;
-    if plx_ui::on_axis(panel_top, panel_h, SCR_H, 0.0) {
-        plx_ui::widgets::soft_panel(p, Rect::new(MARGIN_X, panel_top, SCR_W - 2.0 * MARGIN_X, panel_h));
+    let top = screen.filter_line_top(0) - scroll;
+    if !plx_ui::on_axis(top, filters::LINE_H, SCR_H, 0.0) {
+        return;
     }
-    for line in 0..lines {
-        let top = screen.filter_line_top(line) - scroll;
-        if !plx_ui::on_axis(top, filters::LINE_H, SCR_H, 0.0) {
-            continue;
-        }
-        if let Some(label) = filters::row_label(line) {
-            Label::new(label.as_ptr(), theme::size::CAPTION, theme::TEXT_SECONDARY)
-                .bold()
-                .draw(p, Rect::new(filters::label_x(), top, filters::LABEL_W, filters::LINE_H));
-        }
-        let chosen = screen.filters().chosen(line);
-        for i in 0..filters::len(line) {
-            let rect = filters::pill(line, i, top, f.cx.measure);
-            let elem = filters::elem(line, i);
-            let focused = f.cx.focus.current == Some(screen.key(elem));
-            let picked = chosen == Some(i);
-            // the chosen pill is lit in the accent whether focused or not; the rest are the
-            // ordinary control face, bright only under focus
-            let style = if picked {
-                plx_ui::widgets::ControlStyle::Custom { fill: theme::ACCENT, ink: theme::ACCENT_INK }
-            } else {
-                plx_ui::widgets::ControlStyle::Accent
-            };
-            Button::new(filters::label(line, i).as_ptr(), filters::PILL_SIZE, rect)
-                .style(style)
-                .focused(focused)
-                .draw(&env, p);
-            stop(screen, elem, ElemKind::Control, f, p);
-        }
+    for k in 0..filters::DROPS {
+        let rect = filters::pill(k, top, screen.filters(), f.cx.measure);
+        let elem = filters::elem(0, k);
+        let text = filters::button_text(k, screen.filters());
+        let set = screen.filters().chosen_in(k) != 0;
+        let style = if set {
+            plx_ui::widgets::ControlStyle::Custom { fill: theme::ACCENT, ink: theme::ACCENT_INK }
+        } else {
+            plx_ui::widgets::ControlStyle::Accent
+        };
+        let open = screen.open_dropdown() == Some(k);
+        Button::new(text.as_ptr(), filters::PILL_SIZE, rect)
+            .style(style)
+            .trailing_icon(if open { plx_ui::icons::Icon::ChevronUp } else { plx_ui::icons::Icon::ChevronDown })
+            .focused(f.cx.focus.current == Some(screen.key(elem)) || open)
+            .draw(&env, p);
+        stop(screen, elem, ElemKind::Control, f, p);
+    }
+}
+
+/// The open dropdown: its options on a panel hung under its button, over whatever stands there.
+/// The chosen option carries a check; the focused one the accent.
+fn dropdown<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: Painter) {
+    use super::filters;
+    let Some(k) = screen.open_dropdown() else { return };
+    let panel = screen.drop_panel(k, f.cx.measure);
+    plx_ui::widgets::dropdown_panel(p, panel);
+    let chosen = screen.filters().chosen_in(k);
+    for i in 0..filters::options(k) {
+        let cell = filters::opt_rect(k, i, panel);
+        let elem = filters::opt_elem(k, i);
+        let focused = f.cx.focus.current == Some(screen.key(elem));
+        plx_ui::widgets::dropdown_option(p, cell, filters::label(k, i), filters::PILL_SIZE, focused, i == chosen);
+        stop(screen, elem, ElemKind::Control, f, p);
     }
 }
 

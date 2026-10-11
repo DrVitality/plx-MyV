@@ -1387,3 +1387,42 @@ fn the_hold_hint_stands_on_a_resting_result_card_once_per_run() {
     rest(&mut screen, card, 4.0);
     assert!(!screen.stack.hint_visible(), "and not a second time on Search this run");
 }
+
+/// A filter is a dropdown: its button opens the options over the page with focus on the one set,
+/// a pick closes it and asks the store again under the new choice, and BACK closes it untouched.
+#[test]
+fn a_filter_opens_as_a_dropdown_and_a_pick_closes_it_and_asks_again() {
+    let _serial = plx_base::testlock::serial();
+    let session = plx_plex::plex::session::TempSession::new("owned-search-dropdown");
+    watching(&session, "owned-search-dropdown-fresh", &[]);
+    let fixture = Fixture::new();
+    let mut screen = fixture.screen();
+    let genre = filters::elem(0, 2);
+    assert_eq!(screen.open_dropdown(), None, "the options are not on the page until asked for");
+
+    let (_, out, _) = deliver(&mut screen, &fixture, Some(screen.key(genre)), ScreenEvent::Activate(genre));
+    assert_eq!(screen.open_dropdown(), Some(2));
+    let all_genres = screen.key(filters::opt_elem(2, 0));
+    assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::Deliver(_, Delivery::Screen(ScreenEvent::Enter(
+        Enter::Fresh { focus: FocusTarget::Elem(key) }))) if *key == all_genres)),
+        "focus goes to the option that is set");
+    let cx = fixture.cx(Some(all_genres));
+    let mut groups = Vec::new();
+    <SearchScreen as Focusable<HostFixture>>::groups(&screen, &cx, &mut groups);
+    assert!(groups.iter().any(|g| g.id == DROP_GROUP && g.len == filters::options(2)));
+
+    let comedy = filters::opt_elem(2, 4);
+    let (_, out, _) = deliver(&mut screen, &fixture, Some(screen.key(comedy)), ScreenEvent::Activate(comedy));
+    assert_eq!(screen.open_dropdown(), None, "a pick closes it");
+    assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::App(AppFx::Store(StoreId::Search,
+        StoreCmd::Search(SearchCmd::SetQueryScoped { query, .. }))) if query.ends_with("|Comedy"))),
+        "…and asks again under the genre");
+
+    deliver(&mut screen, &fixture, Some(screen.key(genre)), ScreenEvent::Activate(genre));
+    assert_eq!(screen.open_dropdown(), Some(2));
+    let (handled, _, _) = deliver(&mut screen, &fixture, Some(screen.key(filters::opt_elem(2, 4))),
+        key_event(Key::Back, 0));
+    assert_eq!(handled, Handled::Yes);
+    assert_eq!(screen.open_dropdown(), None, "BACK closes it rather than leaving the page");
+    assert_eq!(screen.filters().chosen_in(2), 4, "…and changes nothing");
+}

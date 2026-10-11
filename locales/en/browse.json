@@ -347,53 +347,53 @@
     "value": "one more character",
     "description": "browse search one_more"
   },
-  "browse.search.filter.type": {
-    "value": "TYPE",
-    "description": "Search filters: label before the row of type choices (All, Movies, Shows, Anime)."
+  "browse.search.filter.genre_button": {
+    "value": "Genre",
+    "description": "Search: the name on the dropdown button that picks a genre, before its setting: “Genre: Comedy”."
   },
-  "browse.search.filter.sort": {
-    "value": "SORT",
-    "description": "Search filters: label before the row of orderings (For You, Popular, Top rated, Newest)."
+  "browse.search.filter.sort_button": {
+    "value": "Sort",
+    "description": "Search: the name on the dropdown button that picks the order (for you, popular, top rated, newest), before its setting: “Sort: Popular”."
   },
-  "browse.search.filter.genre": {
-    "value": "GENRE",
-    "description": "Search filters: label before the rows of genres."
+  "browse.search.filter.type_button": {
+    "value": "Type",
+    "description": "Search: the name on the dropdown button that picks the kind of title (all, films, shows, anime), before its setting: “Type: All”."
   },
   "browse.search.filter.all": {
     "value": "All",
-    "description": "Search filters: type choice \u2014 films, shows and anime together."
+    "description": "Search filters: type choice — films, shows and anime together."
   },
   "browse.search.filter.movies": {
     "value": "Movies",
-    "description": "Search filters: type choice \u2014 films only."
+    "description": "Search filters: type choice — films only."
   },
   "browse.search.filter.shows": {
     "value": "Shows",
-    "description": "Search filters: type choice \u2014 series only."
+    "description": "Search filters: type choice — series only."
   },
   "browse.search.filter.anime": {
     "value": "Anime",
-    "description": "Search filters: type choice \u2014 anime only."
+    "description": "Search filters: type choice — anime only."
   },
   "browse.search.filter.for_you": {
     "value": "For You",
-    "description": "Search filters: ordering \u2014 titles recommended from what the viewer has watched."
+    "description": "Search filters: ordering — titles recommended from what the viewer has watched."
   },
   "browse.search.filter.popular": {
     "value": "Popular",
-    "description": "Search filters: ordering \u2014 most popular now."
+    "description": "Search filters: ordering — most popular now."
   },
   "browse.search.filter.top_rated": {
     "value": "Top rated",
-    "description": "Search filters: ordering \u2014 best rated."
+    "description": "Search filters: ordering — best rated."
   },
   "browse.search.filter.newest": {
     "value": "Newest",
-    "description": "Search filters: ordering \u2014 newest releases."
+    "description": "Search filters: ordering — newest releases."
   },
   "browse.search.filter.any_genre": {
     "value": "All genres",
-    "description": "Search filters: genre choice \u2014 no genre filter."
+    "description": "Search filters: genre choice — no genre filter."
   },
   "browse.search.genre.action": {
     "value": "Action",
@@ -490,6 +490,10 @@
   "browse.search.results": {
     "value": "SEARCH RESULTS",
     "description": "browse search results"
+  },
+  "browse.search.results_heading": {
+    "value": "Results",
+    "description": "Search: the heading over the grid of titles a typed search found."
   },
   "browse.search.your_server": {
     "value": "your server",

@@ -1013,6 +1013,15 @@ pub const SOFT_PANEL_BOT: [f32; 4] = with_a(WHITE, 0.02);
 pub const SOFT_PANEL_RIM: [f32; 4] = with_a(WHITE, 0.07);
 /// A soft panel's corner radius, px at 1080p.
 pub const SOFT_PANEL_RAD: f32 = 28.0;
+/// A dropdown's panel (`widgets::dropdown_panel`): the details bubble's own dark — opaque enough to
+/// stand over posters — with its rim and a deeper shadow.
+pub const DROPDOWN_TOP: [f32; 4] = PEEK_TOP;
+pub const DROPDOWN_BOT: [f32; 4] = PEEK_BOT;
+pub const DROPDOWN_RIM: [f32; 4] = PEEK_RIM;
+pub const DROPDOWN_SHADOW: [f32; 4] = PEEK_SHADOW;
+/// A dropdown panel's corner radius and an option's text inset, px at 1080p.
+pub const DROPDOWN_RAD: f32 = 24.0;
+pub const DROPDOWN_TEXT_X: f32 = 26.0;
 /// Section divider hairline.
 pub const HAIRLINE: [f32; 4] = with_a(WHITE, 0.10);
 /// A glass container's **perimeter line** — the design system's `--glass-rim`, one notch under the

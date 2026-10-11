@@ -183,13 +183,24 @@ fn has_fps_mode(banner: &str) -> bool {
     (major, minor) >= (5, 1)
 }
 
+/// How much of the piped stream ffmpeg may read before its first picture, and over how long.
+///
+/// Its defaults are 5 MB and 5 s, and over a raw pipe it waits for the whole 5 MB before it decodes
+/// anything. A 1080p remux passes that in a few seconds; a 640x352 SD episode at ~600 kb/s takes
+/// over a minute, so the plane stayed black under a playback that was otherwise running (heard,
+/// fed, never seen). The codec is named on the command line, so all the probe still has to find is
+/// the first keyframe's parameter sets, which lead the first access unit.
+const PROBE_ARGS: [&str; 6] = ["-probesize", "65536", "-analyzeduration", "500000", "-fflags", "nobuffer"];
+
 fn spawn() -> Option<Session> {
     let generation = GENERATION.load(Relaxed);
     let scale = format!(
         "scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,format=rgba"
     );
     let spawned = Command::new(ffmpeg_path())
-        .args(["-hide_banner", "-loglevel", "error", "-f"])
+        .args(["-hide_banner", "-loglevel", "error"])
+        .args(PROBE_ARGS)
+        .arg("-f")
         .arg(if HEVC.load(Relaxed) { "hevc" } else { "h264" })
         .args(["-i", "pipe:0", "-an", "-vf"])
         .arg(scale)
@@ -286,7 +297,18 @@ pub fn composite_under() {
 
 #[cfg(test)]
 mod tests {
-    use super::has_fps_mode;
+    use super::{has_fps_mode, PROBE_ARGS};
+
+    /// The probe window is what a low-bitrate stream has to fill before its first picture; at
+    /// ffmpeg's 5 MB default a 600 kb/s SD episode needed over a minute of feed.
+    #[test]
+    fn the_first_picture_waits_for_at_most_a_second_of_a_low_bitrate_stream() {
+        let bytes: f64 = PROBE_ARGS[1].parse().unwrap();
+        let sd_bytes_per_s = 600_000.0 / 8.0;
+        assert!(bytes / sd_bytes_per_s <= 1.0, "{bytes} bytes is {}s of SD", bytes / sd_bytes_per_s);
+        let micros: f64 = PROBE_ARGS[3].parse().unwrap();
+        assert!(micros <= 1_000_000.0);
+    }
 
     #[test]
     fn the_sync_flag_follows_the_installed_ffmpegs_release() {

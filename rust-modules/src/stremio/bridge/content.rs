@@ -102,6 +102,33 @@ fn pretty_day(day: &str) -> String {
 
 /// Runs `jobs` side by side and returns their results in order. A job whose thread the OS refuses
 /// runs inline instead, so a refusal costs time, never an answer.
+/// Titles per kind a search typed on the Search page carries: it shows them as one grid scrolled
+/// down through, not a shelf.
+const GRID_RESULTS: usize = 48;
+
+/// The page's own query answered as ONE hub: films and shows taken in turn (so neither buries the
+/// other), then the "All …" listing cards at the end. The Search page lays it out as a single grid;
+/// every row keeps its own `type`, so a show still opens as a show.
+fn one_grid(hubs: Vec<Value>) -> Vec<Value> {
+    let rows_of = |h: &Value| h.get("Metadata").and_then(Value::as_array).cloned().unwrap_or_default();
+    let (cards, titles): (Vec<&Value>, Vec<&Value>) =
+        hubs.iter().partition(|h| h.get("type").and_then(Value::as_str) == Some("collection"));
+    let mut lanes: Vec<std::collections::VecDeque<Value>> = titles.iter().map(|h| rows_of(h).into()).collect();
+    let mut rows = Vec::new();
+    while lanes.iter().any(|l| !l.is_empty()) {
+        for lane in &mut lanes {
+            if let Some(row) = lane.pop_front() {
+                rows.push(row);
+            }
+        }
+    }
+    rows.extend(cards.iter().flat_map(|h| rows_of(h)));
+    if rows.is_empty() {
+        return Vec::new();
+    }
+    vec![json!({"title": "movie", "type": "movie", "hubIdentifier": "movie", "size": rows.len(), "Metadata": rows})]
+}
+
 /// The most the stream addons are waited for, all together.
 const STREAMS_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
 /// Once one addon has listed streams, the most the others are waited for: one dead or slow addon
@@ -944,10 +971,13 @@ impl Bridge {
         };
         if query.is_empty() {
             return match filters {
-                Some(f) => Response::json(200, &container(json!({"Hub": self.browse(token, &addons, &f)}))),
+                Some(f) => Response::json(200, &container(json!({"Hub": one_grid(self.browse(token, &addons, &f))}))),
                 None => Response::json(200, &container(json!({"Hub": []}))),
             };
         }
+        // the page's own searches show as one grid, so they carry a grid's worth
+        let grid = filters.is_some();
+        let limit = if grid { GRID_RESULTS } else { limit };
         let mut hubs = Vec::new();
         let mut listings = Vec::new();
         let wanted = filters.map_or(Kind2::All, |f| f.kind);
@@ -994,6 +1024,9 @@ impl Bridge {
         if !listings.is_empty() {
             hubs.push(json!({"title": "collection", "type": "collection", "hubIdentifier": "collection",
                              "size": listings.len(), "Metadata": listings}));
+        }
+        if grid {
+            hubs = one_grid(hubs);
         }
         Response::json(200, &container(json!({"size": hubs.len(), "Hub": hubs})))
     }
@@ -2159,6 +2192,20 @@ fn row_has_genre(row: &Value, genre: &str) -> bool {
 #[cfg(test)]
 mod browse_tests {
     use super::*;
+
+    #[test]
+    fn the_pages_own_query_is_answered_as_one_grid_films_and_shows_in_turn() {
+        let hub = |kind: &str, ids: &[&str]| json!({"type": kind, "hubIdentifier": kind,
+            "Metadata": ids.iter().map(|id| json!({"ratingKey": id, "type": kind})).collect::<Vec<_>>()});
+        let got = one_grid(vec![hub("movie", &["m1", "m2", "m3"]), hub("show", &["s1"]),
+            hub("collection", &["all"])]);
+        assert_eq!(got.len(), 1);
+        let keys: Vec<&str> = got[0]["Metadata"].as_array().unwrap().iter()
+            .map(|r| r["ratingKey"].as_str().unwrap()).collect();
+        assert_eq!(keys, ["m1", "s1", "m2", "m3", "all"]);
+        assert_eq!(got[0]["Metadata"][1]["type"], "show", "a row keeps its own type");
+        assert!(one_grid(Vec::new()).is_empty());
+    }
 
     #[test]
     fn a_query_carries_its_text_and_its_filters() {

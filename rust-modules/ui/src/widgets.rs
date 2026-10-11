@@ -3603,6 +3603,49 @@ pub fn soft_panel(p: Painter, rect: Rect) {
     );
 }
 
+/// **A dropdown's panel**: the dark rounded sheet an open dropdown's options stand on, with a
+/// soft shadow under it so it reads as lifted over the page.
+pub fn dropdown_panel(p: Painter, rect: Rect) {
+    let lift = theme::DROPDOWN_RAD * 0.5;
+    p.rect(
+        Rect::new(rect.x - lift * 0.5, rect.y + lift * 0.5, rect.w + lift, rect.h + lift),
+        theme::DROPDOWN_RAD + lift,
+        theme::DROPDOWN_SHADOW,
+        theme::with_a(theme::DROPDOWN_SHADOW, 0.0),
+        0.0,
+    );
+    p.rect_rimmed(
+        rect,
+        theme::DROPDOWN_RAD,
+        theme::DROPDOWN_TOP,
+        theme::DROPDOWN_BOT,
+        theme::DROPDOWN_RIM,
+        theme::PEEK_RIM_TOP,
+    );
+}
+
+/// **One option of an open dropdown** in its `cell`: the focused option lit in the accent, the
+/// chosen one bold with a check at its trailing end.
+pub fn dropdown_option(p: Painter, cell: Rect, label: &CStr, size: c_int, focused: bool, chosen: bool) {
+    let inset = 4.0;
+    let pill = Rect::new(cell.x + inset, cell.y + inset, cell.w - 2.0 * inset, cell.h - 2.0 * inset);
+    if focused {
+        p.rounded().rect(pill, pill.h * 0.5, theme::ACCENT, theme::ACCENT, 0.0);
+    }
+    let ink = if focused { theme::ACCENT_INK } else if chosen { theme::TEXT_PRIMARY } else { theme::TEXT_SECONDARY };
+    let check = size as f32;
+    let mut text = Label::new(label.as_ptr(), size, ink).v(VAlign::Middle);
+    if chosen {
+        text = text.bold();
+    }
+    text.draw(p, Rect::new(pill.x + theme::DROPDOWN_TEXT_X, pill.y,
+        (pill.w - 2.0 * theme::DROPDOWN_TEXT_X - check).max(0.0), pill.h));
+    if chosen {
+        let icon = Rect::new(pill.x + pill.w - theme::DROPDOWN_TEXT_X - check, pill.cy() - check * 0.5, check, check);
+        crate::icons::draw(p, crate::icons::Icon::Check, icon, if focused { theme::ACCENT_INK } else { theme::ACCENT });
+    }
+}
+
 // ---- PageGround: the item-keyed ground a BROWSING screen stands on. ----
 
 /// **The page ground under a browsing surface** — one [`AmbientWash`] dissolving toward the colours

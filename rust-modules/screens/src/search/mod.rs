@@ -40,6 +40,8 @@ const RECENTS_GROUP: GroupId = GroupId(0x5345_4101);
 const CLEAR_GROUP: GroupId = GroupId(0x5345_4102);
 /// The filter lines' groups, one per line ([`filters::lines`]).
 fn filter_group(line: usize) -> GroupId { GroupId(0x5345_4110 + line as u32) }
+/// An open filter dropdown's group.
+const DROP_GROUP: GroupId = GroupId(0x5345_4120);
 const STRIP: GroupId = plx_ui::containers::tabs::STRIP;
 /// The alpha at or under which the owner annotation is invisible: the renderer draws no run
 /// below it, and the instance swaps the word it holds only there — so a handle never changes
@@ -73,7 +75,7 @@ struct Row { kind: Kind, group: GroupId, elems: Vec<u32> }
 /// The sections of the page, top to bottom. A result row's key carries the page's `rows_gen`: a
 /// row the page wiped and rebuilt is a new section with a new shelf, as a wiped row always was.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Sec { Head, Recents, Clear, Filter(u8), Row(Kind, u32), Label(Kind, u32) }
+pub enum Sec { Head, Recents, Clear, Filter(u8), Row(Kind, u32), Label(Kind, u32), Drop(u8) }
 
 pub struct SearchScreen {
     entry: EntryId,
@@ -105,6 +107,9 @@ pub struct SearchScreen {
     render: render::Resources,
     /// The browse filters (type, order, genre) every query carries ([`filters`]).
     filters: filters::Filters,
+    /// The filter dropdown standing open, if one is ([`filters`]): its options are an overlay
+    /// hung under its button, and focus is inside it until an option is picked or BACK closes it.
+    open: Option<usize>,
     /// Diagnostic-only counter, not part of [`LogicalState::write`]/the state hash — how many
     /// `Search` `StoreChanged` deliveries this instance has seen. It carries the same name
     /// (`notices`) the retired route-word page kept its own count under, so `app::bridge`'s generic
@@ -121,7 +126,7 @@ impl SearchScreen {
             recent_clear_pending: false, publication: None, content_dirty: true,
             fade: plx_ui::xfade::Xfade::new(), ground: plx_ui::widgets::PageGround::new(),
             owner_row: None, owner: String::new(), owner_alpha: Spring::at(0.0), restored: None, render: Default::default(),
-            filters: filters::Filters::default(), notices: 0 }
+            filters: filters::Filters::default(), open: None, notices: 0 }
     }
     fn key(&self, elem: u32) -> FocusKey<u32> { FocusKey { entry: self.entry, elem } }
     fn real_query(&self) -> bool { plx_data::search::terms(self.draft.query()).is_some() }
@@ -220,6 +225,24 @@ impl SearchScreen {
     /// The browse filters, for the renderer.
     fn filters(&self) -> &filters::Filters {
         &self.filters
+    }
+
+    /// The dropdown standing open, for the renderer — only while the filter bar is shown.
+    pub(super) fn open_dropdown(&self) -> Option<usize> {
+        self.open.filter(|_| self.filter_lines() > 0)
+    }
+
+    /// Close the open dropdown and put focus back on its button.
+    fn close_dropdown<H: SearchLike>(&mut self, fx: &mut Effects<'_, H>) {
+        if let Some(k) = self.open.take() {
+            self.reseat(FocusTarget::Elem(self.key(filters::elem(0, k))), fx);
+            fx.invalidate(Provenance::Input);
+        }
+    }
+
+    /// Dropdown `k`'s panel, in document space (the page is unscrolled while one is open).
+    fn drop_panel(&self, k: usize, measure: &dyn plx_machine::machine::Measure) -> Rect {
+        filters::drop_panel(k, filters::pill(k, self.filter_line_top(0), &self.filters, measure))
     }
 
     /// Drop the result rows, and with them their shelves.
@@ -334,8 +357,19 @@ impl SearchScreen {
             self.keyboard(!self.editing, true, fx);
             return Handled::Yes;
         }
-        if let Some((line, i)) = filters::of_elem(elem) {
-            self.filters.pick(line, i);
+        if let Some((_, k)) = filters::of_elem(elem) {
+            self.open = if self.open == Some(k) { None } else { Some(k) };
+            if let Some(k) = self.open {
+                // the panel hangs at the bar's place on an unscrolled page
+                self.stack.jump_to(0.0);
+                self.reseat(FocusTarget::Elem(self.key(filters::opt_elem(k, self.filters.chosen_in(k)))), fx);
+            }
+            fx.invalidate(Provenance::Input);
+            return Handled::Yes;
+        }
+        if let Some((k, i)) = filters::of_opt(elem) {
+            self.filters.pick_in(k, i);
+            self.close_dropdown(fx);
             self.send_query(fx);
             return Handled::Yes;
         }
@@ -444,6 +478,10 @@ impl<H: SearchLike> Machine<H> for SearchScreen {
                 }
                 InputKind::Text(edit) if self.editing || matches!(cx.owner, InputOwner::System(_)) => self.edit(edit, fx),
                 InputKind::Wheel { dy } => {
+                    if self.open.is_some() {
+                        self.close_dropdown(fx);
+                        return Handled::Yes;
+                    }
                     if !self.editing && dy.is_finite() {
                         let max = self.stack.max_scroll(&*self, cx);
                         self.stack.scroll_to((self.stack.target() - dy * plx_ui::table::ROW_H).clamp(0.0, max));
@@ -477,6 +515,10 @@ impl<H: SearchLike> Machine<H> for SearchScreen {
                         return Handled::Yes;
                     }
                     if *key == Key::Back {
+                        if self.open.is_some() {
+                            self.close_dropdown(fx);
+                            return Handled::Yes;
+                        }
                         fx.push(Fx::App(AppFx::Search(SearchReq::Back)));
                         return Handled::Yes;
                     }
@@ -487,6 +529,10 @@ impl<H: SearchLike> Machine<H> for SearchScreen {
             ScreenEvent::Tick(tick) => self.tick(*tick, cx, fx),
             ScreenEvent::FocusMoved { to, .. } => {
                 if to.elem != FIELD { self.keyboard(false, true, fx); }
+                // focus that leaves an open dropdown (a pointer elsewhere) closes it
+                if self.open.is_some_and(|k| filters::of_opt(to.elem).is_none_or(|(at, _)| at != k)) {
+                    self.open = None;
+                }
                 self.keep_home_while_editing();
                 fx.invalidate(Provenance::Input);
             }
@@ -625,8 +671,9 @@ impl SearchScreen {
     /// Result row `row`'s cards over `view`; `None` when the view has no such shelf.
     fn row_cards<'a>(&'a self, view: plx_data::search::view::SearchView<'a>, row: usize) -> Option<RowCards<'a>> {
         let model = self.rows.get(row)?;
+        let cap = if Self::grid_row(model.kind, view.query()) { usize::MAX } else { plx_ui::cards::MAX_ROW_ITEMS };
         Some(RowCards { kind: model.kind, elems: &model.elems, items: &view.shelves().get(row)?.items,
-            sources: view.scope().sources() })
+            sources: view.scope().sources(), cap })
     }
     fn tick<H: SearchLike>(&mut self, tick: plx_machine::machine::Tick, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) {
         fx.push(Fx::App(AppFx::StoreWork(plx_data::stores::StoreWork::BrowseDiscovery)));
@@ -699,6 +746,7 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
         let view = H::search(cx);
         let mix = |h: u64, v: u64| (h ^ v).wrapping_mul(0x0100_0000_01b3);
         let mut h = mix(mix(0xcbf2_9ce4_8422_2325, self.rows_gen as u64), self.recents.len() as u64);
+        h = mix(h, self.open_dropdown().map_or(0, |k| k as u64 + 1));
         for (i, row) in self.rows.iter().enumerate() {
             let shown = view.shelves().get(i).map_or(0, |shelf| shelf.items.len()).min(row.elems.len());
             h = mix(mix(h, layout::ordinal(row.kind) as u64), shown as u64);
@@ -742,6 +790,11 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
                 .edges([EdgeRule::Geometric, EdgeRule::Geometric, EdgeRule::Stop, EdgeRule::Stop])
                 .of_kind(elem));
         }
+        // an open dropdown: its options out of the flow, over whatever stands under its button
+        if let Some(k) = self.open_dropdown() {
+            out.push(SectionSpec::new(Sec::Drop(k as u8),
+                plx_ui::cards::Kind::Overlay { rect: self.drop_panel(k, cx.measure), focusable: true }, DROP_GROUP));
+        }
     }
     fn fallback(&self, _cx: &Cx<'_, H>, out: &mut Vec<Sec>) { out.push(Sec::Head); }
     fn cards<'a>(&'a self, cx: &'a Cx<'_, H>, k: Sec) -> Option<RowCards<'a>> {
@@ -759,12 +812,14 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
     }
     fn plain_len(&self, k: Sec) -> usize {
         match k { Sec::Recents => self.recents.len(), Sec::Head => 1, Sec::Clear => (!self.recents.is_empty() && !self.showing_suggestions()) as usize,
-            Sec::Filter(line) => filters::len(line as usize), Sec::Row(..) | Sec::Label(..) => 0 }
+            Sec::Filter(line) => filters::len(line as usize), Sec::Drop(k) => filters::options(k as usize),
+            Sec::Row(..) | Sec::Label(..) => 0 }
     }
     fn plain_elem(&self, k: Sec, n: usize) -> Option<u32> {
         match k {
             Sec::Recents => self.recents.get(n).copied(),
             Sec::Filter(line) => (n < filters::len(line as usize)).then(|| filters::elem(line as usize, n)),
+            Sec::Drop(k) => (n < filters::options(k as usize)).then(|| filters::opt_elem(k as usize, n)),
             _ => if n == 0 { StackPage::<H>::elem_of(self, k) } else { None },
         }
     }
@@ -774,6 +829,7 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
             (Sec::Recents, Dir::Down) => at.checked_add(1),
             (Sec::Filter(_), Dir::Left) => at.checked_sub(1),
             (Sec::Filter(line), Dir::Right) => (at + 1 < filters::len(line as usize)).then_some(at + 1),
+            (Sec::Drop(k), dir) => filters::opt_step(k as usize, at, dir),
             _ => None,
         }
     }
@@ -781,14 +837,16 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
         match k {
             Sec::Recents => layout::recent(0, layout::CONTENT_TOP - section.y),
             Sec::Clear => layout::clear_below(section.y, cx.measure),
-            Sec::Filter(line) => filters::pill(line as usize, 0, self.filter_section_line_y(line, section.y), cx.measure),
+            Sec::Filter(line) => filters::pill(0, self.filter_section_line_y(line, section.y), &self.filters, cx.measure),
+            Sec::Drop(k) => filters::opt_rect(k as usize, 0, section),
             _ => Rect::new(layout::FIELD.x, layout::FIELD.y + section.y, layout::FIELD.w, layout::FIELD.h),
         }
     }
     fn element_rect(&self, cx: &Cx<'_, H>, k: Sec, n: usize, section: Rect) -> Rect {
         match k {
             Sec::Recents => layout::recent(n, layout::CONTENT_TOP - section.y),
-            Sec::Filter(line) => filters::pill(line as usize, n, self.filter_section_line_y(line, section.y), cx.measure),
+            Sec::Filter(line) => filters::pill(n, self.filter_section_line_y(line, section.y), &self.filters, cx.measure),
+            Sec::Drop(k) => filters::opt_rect(k as usize, n, section),
             _ => self.focus_rect(cx, k, section),
         }
     }
@@ -796,6 +854,12 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
         match k {
             Sec::Recents => group(id, GroupKind::Column, self.recents.len(), extent, ElemKind::Bare, Seat::Remembered),
             Sec::Filter(line) => group(id, GroupKind::Row { wrap: false }, filters::len(line as usize), extent, ElemKind::Control, Seat::Remembered),
+            // focus stays inside an open dropdown until a pick or BACK closes it
+            Sec::Drop(k) => {
+                let mut drop = group(id, GroupKind::Column, filters::options(k as usize), extent, ElemKind::Control, Seat::First);
+                drop.edge = [EdgeRule::Stop; 4];
+                drop
+            }
             Sec::Clear => {
                 let mut clear = group(id, GroupKind::Row { wrap: false }, 1, extent, ElemKind::Control, Seat::First);
                 clear.edge[1] = EdgeRule::Stop;
@@ -807,10 +871,10 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
     /// Entered from the field, a group takes the card focus last left on in it, else its first.
     fn seat_override(&self, cx: &Cx<'_, H>, k: Sec, _from: Placed) -> Option<u32> {
         if !cx.focus.current.is_some_and(|key| key.elem == FIELD) { return None; }
-        if matches!(k, Sec::Label(..)) { return None; }
+        if matches!(k, Sec::Label(..) | Sec::Drop(..)) { return None; }
         let group = match k { Sec::Recents => RECENTS_GROUP, Sec::Clear => CLEAR_GROUP, Sec::Head => FIELD_GROUP,
             Sec::Filter(line) => filter_group(line as usize), Sec::Row(kind, _) => layout::group(kind),
-            Sec::Label(kind, _) => layout::label_group(kind) };
+            Sec::Label(kind, _) => layout::label_group(kind), Sec::Drop(_) => DROP_GROUP };
         let valid = |elem: &u32| match k {
             Sec::Row(kind, _) => self.rows.iter().any(|row| row.kind == kind && row.elems.contains(elem)),
             _ => (0..StackPage::<H>::plain_len(self, k)).any(|n| StackPage::<H>::plain_elem(self, k, n) == Some(*elem)),
@@ -822,7 +886,7 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
         Some(cx.focus.remembered(group).filter(valid).or(first).unwrap_or(FIELD))
     }
     /// Recents and the Clear control are part of the head's block: the page rests at its top.
-    fn reveal_with(&self, k: Sec) -> Option<Sec> { matches!(k, Sec::Recents | Sec::Clear).then_some(Sec::Head) }
+    fn reveal_with(&self, k: Sec) -> Option<Sec> { matches!(k, Sec::Recents | Sec::Clear | Sec::Drop(_)).then_some(Sec::Head) }
     fn reveal_margin(&self, _k: Sec) -> f32 { layout::CONTENT_TOP }
     fn shelf_foot(&self, _k: Sec) -> f32 { plx_ui::consts::UNDER_LABEL_AIR }
     fn wide_extent(&self, _k: Sec) -> bool { false }
