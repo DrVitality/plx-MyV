@@ -25,3 +25,23 @@ done
 # Workflow-command escaping: %, CR and LF.
 msg=$(printf '%s' "$out" | head -c 60000 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN{ORS="%0A"} {print}')
 echo "::error title=build errors::$msg"
+
+# The whole of every failing test's panic (an assertion's `left:` can be a long golden text the
+# summary above cuts off), in pieces small enough for one annotation each — warnings, then notices,
+# ten of each per step. Only `left:` (what the test GOT) is kept of an assert_eq: the expectation
+# is already in the tree.
+for log in "$@"; do
+    [ -s "$log" ] || continue
+    grep -q 'panicked at' "$log" || continue
+    full=$(awk '/panicked at/{p=1} p&&/^(note: run with|thread .* panicked at)/&&!/panicked at/{p=0} p' "$log" \
+        | grep -v '^ *right: \|^note: run with')
+    printf '%s' "$full" | fold -b -w 3900 | awk -v n=0 '
+        { chunk = chunk $0 "\n"; if (length(chunk) > 3800) { emit(); } }
+        END { if (length(chunk)) emit(); }
+        function emit(   msg, kind) {
+            n++; if (n > 20) return;
+            kind = (n <= 10) ? "warning" : "notice";
+            msg = chunk; gsub(/%/, "%25", msg); gsub(/\r/, "%0D", msg); gsub(/\n/, "%0A", msg);
+            printf "::%s title=panic part %d::%s\n", kind, n, msg; chunk = "";
+        }'
+done
