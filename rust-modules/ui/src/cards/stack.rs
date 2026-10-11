@@ -662,6 +662,13 @@ impl<K: Copy + Eq> Stack<K> {
         reported
     }
 
+    /// Re-read the page's sections now, for a page whose own state just changed what they are
+    /// (a panel it opened) and which must be focusable before the next event reaches the stack.
+    pub fn relayout<H: Host<Elem = u32>, P: StackPage<H, Key = K>>(&mut self, p: &P, cx: &Cx<'_, H>) {
+        self.refresh(p, cx);
+        self.sync_pages(p, cx);
+    }
+
     /// Under [`reveal_on_move`](Self::reveal_on_move): bring the focused element's block into view
     /// now, as a `FocusMoved` to it would (a page whose sections changed under a standing focus).
     pub fn reveal<H: Host<Elem = u32>, P: StackPage<H, Key = K>>(&mut self, p: &P, cx: &Cx<'_, H>) {

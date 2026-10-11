@@ -359,6 +359,8 @@ impl SearchScreen {
         }
         if let Some((_, k)) = filters::of_elem(elem) {
             self.open = if self.open == Some(k) { None } else { Some(k) };
+            // the panel's options must be focusable before the reseat below reaches the engine
+            self.with_stack(|stack, page| stack.relayout(page, cx));
             if let Some(k) = self.open {
                 // the panel hangs at the bar's place on an unscrolled page
                 self.stack.jump_to(0.0);
