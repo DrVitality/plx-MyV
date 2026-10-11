@@ -1,11 +1,11 @@
 0x53454100 Row { wrap: false } seat=First edge=[Geometric, Geometric, Stop, Stop] len=1 elem=Bare extent=[96.0 138.0 1728.0 80.0]
 0x53454101 Column seat=Remembered edge=[Geometric, Geometric, Stop, Stop] len=4 elem=Bare extent=[96.0 340.0 820.0 60.0]
 0x53454102 Row { wrap: false } seat=First edge=[Geometric, Stop, Stop, Stop] len=1 elem=Control extent=[128.0 604.0 362.0 60.0]
-0x53454110 Row { wrap: false } seat=Remembered edge=[Geometric, Geometric, Stop, Stop] len=4 elem=Control extent=[264.0 697.0 206.0 54.0]
-0x53454111 Row { wrap: false } seat=Remembered edge=[Geometric, Geometric, Stop, Stop] len=4 elem=Control extent=[264.0 769.0 206.0 54.0]
-0x53454112 Row { wrap: false } seat=Remembered edge=[Geometric, Geometric, Stop, Stop] len=7 elem=Control extent=[264.0 841.0 206.0 54.0]
-0x53454113 Row { wrap: false } seat=Remembered edge=[Geometric, Geometric, Stop, Stop] len=7 elem=Control extent=[264.0 913.0 206.0 54.0]
-0x53454114 Row { wrap: false } seat=Remembered edge=[Geometric, Geometric, Stop, Stop] len=4 elem=Control extent=[264.0 985.0 206.0 54.0]
+0x53454110 Row { wrap: false } seat=Remembered edge=[Geometric, Geometric, Stop, Stop] len=4 elem=Control extent=[264.0 714.0 120.0 52.0]
+0x53454111 Row { wrap: false } seat=Remembered edge=[Geometric, Geometric, Stop, Stop] len=4 elem=Control extent=[264.0 782.0 159.0 52.0]
+0x53454112 Row { wrap: false } seat=Remembered edge=[Geometric, Geometric, Stop, Stop] len=7 elem=Control extent=[264.0 850.0 198.0 52.0]
+0x53454113 Row { wrap: false } seat=Remembered edge=[Geometric, Geometric, Stop, Stop] len=7 elem=Control extent=[264.0 918.0 133.0 52.0]
+0x53454114 Row { wrap: false } seat=Remembered edge=[Geometric, Geometric, Stop, Stop] len=4 elem=Control extent=[264.0 986.0 146.0 52.0]
 --
 field: up=- down=- left=- right=-
 recent0: up=- down=recent1 left=- right=-
