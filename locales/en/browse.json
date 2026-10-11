@@ -127,6 +127,10 @@
     "value": "Cast & Crew",
     "description": "browse detail cast"
   },
+  "browse.detail.streams": {
+    "value": "Streams",
+    "description": "Detail page pill on the Stremio bridge: opens the list of streams (sources) for this film or episode, to play a different one (another language, quality or release)."
+  },
   "browse.detail.also_available": {
     "value": "Also available",
     "description": "browse detail also_available"

@@ -1125,6 +1125,17 @@ pub enum ContentReq {
     /// all.
     PreviewSeek(i64),
     ItemMenu,
+    /// **Choose which stream plays** the page's film or episode (the Stremio bridge's ranked list),
+    /// presented as the stream menu anchored to the *Streams* pill (`anchor`, bit-preserving like
+    /// [`ContentPanel::AltSources`]). Carries the leaf itself, so the choice can play it.
+    ChooseStream {
+        sid: plx_plex::plex::ServerId,
+        rk: String,
+        part: String,
+        title: String,
+        episode: bool,
+        anchor: [u32; 4],
+    },
     /// **Present one of the Detail page's own panels** on the container tree (spec §6.2's
     /// "page-owned panels"). The page names WHICH and supplies whatever the panel needs to place
     /// itself; the loop knows the style and the page's identity, so neither is on this request.

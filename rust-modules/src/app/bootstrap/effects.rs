@@ -179,6 +179,7 @@ fn content_request(request: &plx_screens::registry::ContentReq) -> Result<Value,
         ContentReq::PreviewTransport(play) => json!({"preview_transport":play}),
         ContentReq::PreviewSeek(position) => json!({"preview_seek":position}),
         ContentReq::ItemMenu => json!("itemmenu"),
+        ContentReq::ChooseStream { sid, rk, .. } => json!({"choose_stream":{"sid":sid.raw(),"rk":rk}}),
         ContentReq::Panel(panel) => json!({"panel":match panel {
             ContentPanel::AltSources { anchor } => json!({"alt_sources":anchor}),
             ContentPanel::Tracks { page } => json!({"tracks":page}),

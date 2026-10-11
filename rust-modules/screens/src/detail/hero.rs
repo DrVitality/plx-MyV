@@ -75,7 +75,38 @@ const FACTS_R: f32 = plx_ui::consts::SCR_W
 const HERO_ICON_RATIO: f32 = 1.15;
 const HERO_ICON_GAP: f32 = 12.0;
 
-pub fn alt_label() -> &'static CStr { plx_platform::i18n::msg::browse_detail_also_available_c() }
+/// The second pill's label: *Also available* (other servers holding this item) — or, on the Stremio
+/// bridge, where there is one server and many streams, *Streams* ([`streams_offered`]).
+pub fn alt_label() -> &'static CStr {
+    if on_stremio_bridge() {
+        plx_platform::i18n::msg::browse_detail_streams_c()
+    } else {
+        plx_platform::i18n::msg::browse_detail_also_available_c()
+    }
+}
+
+/// Is the server being browsed the Stremio bridge?
+pub fn on_stremio_bridge() -> bool {
+    plx_plex::plex::client_for(plx_plex::plex::current_server())
+        .is_some_and(|c| plx_plex::plex::origin::is_stremio_bridge(c.origin()))
+}
+
+/// The leaf the *Streams* pill chooses a stream for — the film itself, or the episode a show's
+/// hero is about to play — as `(rk, part, title, episode)`; `None` when there is no such leaf (a
+/// show not yet started: its Play picks the first episode, which has a page of its own).
+pub fn streams_leaf(d: &Detail) -> Option<(String, String, String, bool)> {
+    if d.is_show {
+        let ep = hero_episode(d)?;
+        (!ep.part.is_empty()).then(|| (ep.rk.clone(), ep.part.clone(), d.title.clone(), true))
+    } else {
+        (!d.part.is_empty()).then(|| (d.rk.clone(), d.part.clone(), d.title.clone(), d.kind == "episode"))
+    }
+}
+
+/// Does the hero offer the *Streams* pill: on the bridge, for a page with a leaf to play.
+pub fn streams_offered(d: &Detail) -> bool {
+    on_stremio_bridge() && streams_leaf(d).is_some()
+}
 
 fn mark_watched_label() -> &'static CStr { plx_platform::i18n::msg::browse_detail_mark_watched_c() }
 fn mark_unwatched_label() -> &'static CStr { plx_platform::i18n::msg::browse_detail_mark_unwatched_c() }

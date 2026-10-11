@@ -608,6 +608,19 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
                     target_ns,
                 );
             }
+            ContentReq::ChooseStream { sid, rk, part, title, episode, anchor } => {
+                halt_preview(app);
+                let item = plx_data::pms::PmsMovie {
+                    sid,
+                    rk,
+                    part,
+                    title,
+                    kind: if episode { 3 } else { 0 },
+                    ..Default::default()
+                };
+                let origin = plx_screens::registry::MenuOrigin { host: entry, focus: ret.focus, anchor };
+                super::input::choose_stream_for(&mut app.bridge, &item, origin, fr.now);
+            }
             ContentReq::Panel(panel) => {
                 halt_preview(app);
                 // **The SUBJECT is the page's item, and a page need not have one.** A panel that

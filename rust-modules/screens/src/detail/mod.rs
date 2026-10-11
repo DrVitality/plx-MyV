@@ -3706,7 +3706,7 @@ impl DetailScreen {
     /// four controls' worth of geometry and three drawn) is exactly the class of bug this
     /// publication exists to remove.
     pub fn alt_available(&self, meta: plx_data::metadata::MetadataView<'_>) -> bool {
-        meta.alt_available(self.sid, &self.rk)
+        meta.alt_available(self.sid, &self.rk) || self.detail(meta).is_some_and(hero::streams_offered)
     }
 
     /// **Is there a file for the *Track information* sheet to describe?** — the Languages column's
@@ -3868,6 +3868,17 @@ impl DetailScreen {
                     );
                     let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y, widths);
                     rect.y -= self.scroll.pos;
+                    let anchor = [rect.x, rect.y, rect.w, rect.h].map(f32::to_bits);
+                    // On the Stremio bridge the pill is *Streams*: the stream menu for the leaf
+                    if let Some((rk, part, title, episode)) = self
+                        .detail(meta)
+                        .filter(|d| hero::streams_offered(d))
+                        .and_then(hero::streams_leaf)
+                    {
+                        let sid = plx_media::route::item_sid(self.sid);
+                        self.content(fx, ContentReq::ChooseStream { sid, rk, part, title, episode, anchor });
+                        return;
+                    }
                     // The ANCHOR travels on the argument, bit for bit, so the surface places
                     // itself off the pill without the page or a static holding a `Rect` for it.
                     self.content(

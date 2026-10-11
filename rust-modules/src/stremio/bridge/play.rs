@@ -262,6 +262,16 @@ impl Bridge {
         // first pick stands, and the player reports what it finds.
         let mut chosen = first;
         let mut probed = None;
+        // A stream the viewer picked themselves plays as picked; one the ranking picked is passed
+        // over when it turns out to carry no audio in the account's language (a release whose
+        // name did not say it was dubbed), as long as another can be tried.
+        let picked = self.play.choice.lock().unwrap_or_else(|e| e.into_inner()).contains_key(rk_s);
+        let wanted = {
+            let profile = self.profile.lock().unwrap_or_else(|e| e.into_inner());
+            profile.get("defaultAudioLanguage").and_then(Value::as_str)
+                .and_then(super::subs::two_letter).unwrap_or_else(|| "en".into())
+        };
+        let mut foreign: Option<(usize, Option<Probe>)> = None;
         let candidates = first.into_iter().chain(
             (0..streams.len()).filter(|i| Some(*i) != first && fallback_ok(&streams[*i].1)));
         for (tried, i) in candidates.enumerate() {
@@ -272,11 +282,18 @@ impl Bridge {
             match self.probe_url(url) {
                 Ok(p) => {
                     self.mark_alive(rk_s, &streams[i].0);
+                    if !picked && tried + 1 < FALLBACK_TRIES && lacks_language(p.as_ref(), &wanted) {
+                        plx_base::eventlog::log(&format!("stremio: stream {i} has no {wanted} audio; trying the next"));
+                        self.mark_dead(rk_s, &streams[i].0);
+                        foreign.get_or_insert((i, p));
+                        continue;
+                    }
                     if tried > 0 {
                         plx_base::eventlog::log(&format!("stremio: stream {} answered after {tried} that did not", i));
                     }
                     chosen = Some(i);
                     probed = p;
+                    foreign = None;
                     break;
                 }
                 Err(()) => {
@@ -284,6 +301,11 @@ impl Bridge {
                     plx_base::eventlog::log(&format!("stremio: stream {i} did not answer; trying the next"));
                 }
             }
+        }
+        // nothing better answered: the foreign-language stream that did is still a picture
+        if let Some((i, p)) = foreign {
+            chosen = Some(i);
+            probed = p;
         }
         if let (Some(i), Rk::Episode { id, .. }) = (chosen, rk) {
             self.remember_stream(id, &streams[i].0, &streams[i].1);
@@ -827,4 +849,38 @@ pub(super) fn aniskip_markers(v: &Value, duration_ms: i64) -> Vec<Value> {
         }
     }
     out
+}
+
+
+/// Does a read file carry audio, every track of it labelled, and none in the language `wanted`
+/// (two letters)? Unlabelled audio is not evidence of anything.
+fn lacks_language(p: Option<&Probe>, wanted: &str) -> bool {
+    let Some(p) = p else { return false };
+    let audio: Vec<&super::super::probe::Track> =
+        p.tracks.iter().filter(|t| t.kind == super::super::probe::TrackKind::Audio).collect();
+    !audio.is_empty()
+        && audio.iter().all(|t| !t.language.is_empty() && t.language != "und")
+        && !audio.iter().any(|t| super::subs::two_letter(&t.language).as_deref() == Some(wanted))
+}
+
+#[cfg(test)]
+mod language_tests {
+    use super::*;
+    use super::super::super::probe::{Track, TrackKind};
+
+    fn audio(lang: &str) -> Track {
+        Track { kind: TrackKind::Audio, codec: "ac3".into(), language: lang.into(), name: String::new(),
+            default: false, forced: false, width: 0, height: 0, channels: 6, dovi: false }
+    }
+
+    #[test]
+    fn a_file_lacks_a_language_only_when_every_audio_track_says_another() {
+        let probe = |langs: &[&str]| Probe { container: "mkv", duration_ms: 0, tracks: langs.iter().map(|l| audio(l)).collect() };
+        assert!(lacks_language(Some(&probe(&["spa"])), "en"));
+        assert!(lacks_language(Some(&probe(&["spa", "cat"])), "en"));
+        assert!(!lacks_language(Some(&probe(&["spa", "eng"])), "en"));
+        assert!(!lacks_language(Some(&probe(&["spa", ""])), "en"), "an unlabelled track may be English");
+        assert!(!lacks_language(Some(&probe(&[])), "en"));
+        assert!(!lacks_language(None, "en"));
+    }
 }

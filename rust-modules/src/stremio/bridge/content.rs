@@ -1035,7 +1035,10 @@ impl Bridge {
     /// The image behind an art stand-in, as fetched. Only JPEG and PNG pass: those are the formats
     /// the app decodes, and anything else would be a broken tile rather than an empty one.
     pub(super) fn art(&self, key: &str) -> Response {
-        let Some(url) = self.art.url(key) else { return Response::empty(404) };
+        let Some(url) = self.art.url(key) else {
+            note_art_trouble("https://(unknown key)/", "was asked for by a key this run never made");
+            return Response::empty(404);
+        };
         // Read into a local FIRST: a guard taken in a `match` scrutinee lives to the end of the
         // match, and the miss arm locks the cache again to store — a self-deadlock that froze the
         // first poster request and then every request after it (each takes the lock to warm art).
@@ -1043,8 +1046,18 @@ impl Bridge {
         let bytes = match cached {
             Some(b) => b,
             None => {
-                let Ok(bytes) = self.stremio.fetch(&url) else { return Response::empty(502) };
+                let fetched = {
+                    // a bounded number at once: fifty posters asked for in one scroll otherwise
+                    // race one another to the image host and time out together
+                    let _slot = ArtSlot::take();
+                    self.stremio.fetch_image(&url).or_else(|_| self.stremio.fetch_image(&url))
+                };
+                let Ok(bytes) = fetched else {
+                    note_art_trouble(&url, "did not answer");
+                    return Response::empty(502);
+                };
                 if image_kind(&bytes).is_none() {
+                    note_art_trouble(&url, "answered with something that is not a JPEG or PNG");
                     return Response::empty(404);
                 }
                 let bytes = Arc::new(bytes);
@@ -1125,6 +1138,47 @@ const ART_WARM_MAX: usize = 60;
 const ART_WARM_WIDTH: usize = 6;
 /// The fetched-artwork memory's budget, bytes: a few hundred posters, small beside the app's own.
 const ART_CACHE_BYTES: usize = 24 * 1024 * 1024;
+
+/// Artwork fetched from image hosts at once, at most (the app's own requests and the warm-ups).
+const ART_FETCH_WIDTH: usize = 8;
+
+static ART_FETCHING: Mutex<usize> = Mutex::new(0);
+static ART_FREED: std::sync::Condvar = std::sync::Condvar::new();
+
+/// One of [`ART_FETCH_WIDTH`] fetch slots, held while an image is fetched.
+struct ArtSlot;
+
+impl ArtSlot {
+    fn take() -> ArtSlot {
+        let mut n = ART_FETCHING.lock().unwrap_or_else(|e| e.into_inner());
+        while *n >= ART_FETCH_WIDTH {
+            n = ART_FREED.wait(n).unwrap_or_else(|e| e.into_inner());
+        }
+        *n += 1;
+        ArtSlot
+    }
+}
+
+impl Drop for ArtSlot {
+    fn drop(&mut self) {
+        let mut n = ART_FETCHING.lock().unwrap_or_else(|e| e.into_inner());
+        *n = n.saturating_sub(1);
+        ART_FREED.notify_one();
+    }
+}
+
+/// Say once per image host (and kind of trouble) that its artwork could not be used — the host
+/// only: an image address can carry a service's key.
+fn note_art_trouble(url: &str, what: &str) {
+    static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let host = url.splitn(4, '/').nth(2).unwrap_or("?");
+    let line = format!("stremio: artwork from {host} {what}");
+    let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    if seen.len() < 32 && !seen.contains(&line) {
+        plx_base::eventlog::log(&line);
+        seen.push(line);
+    }
+}
 
 /// The image type `bytes` start with, as an HTTP content type; `None` for anything else.
 fn image_kind(bytes: &[u8]) -> Option<&'static str> {

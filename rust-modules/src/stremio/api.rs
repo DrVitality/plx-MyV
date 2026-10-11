@@ -236,6 +236,12 @@ pub trait Stremio: Send + Sync {
     fn library_put(&self, auth_key: &str, items: &[serde_json::Value]) -> Result<(), ApiError>;
     /// A public resource: an addon's catalog, meta, stream or subtitles JSON, or an image.
     fn fetch(&self, url: &str) -> Result<Vec<u8>, ApiError>;
+    /// An image: [`fetch`](Stremio::fetch), asking for the formats the app decodes (JPEG, PNG)
+    /// rather than JSON — an image host that negotiates on `Accept` answered the JSON ask with
+    /// something that was not a picture, and the card stayed blank.
+    fn fetch_image(&self, url: &str) -> Result<Vec<u8>, ApiError> {
+        self.fetch(url)
+    }
     /// `len` bytes of the resource at `url` starting at `from` (an HTTP range request, following
     /// redirects): the first bytes of a video file, to read its tracks.
     fn fetch_range(&self, url: &str, from: u64, len: u64) -> Result<Vec<u8>, ApiError>;
@@ -246,7 +252,11 @@ pub struct Live;
 
 impl Live {
     fn get(url: &str) -> Result<Vec<u8>, ApiError> {
-        let headers = ["Accept: application/json".to_string()];
+        Self::get_as(url, "application/json")
+    }
+
+    fn get_as(url: &str, accept: &str) -> Result<Vec<u8>, ApiError> {
+        let headers = [format!("Accept: {accept}")];
         // Addons and image hosts sit behind redirects often enough (a moved host, a CDN) that a
         // public read follows them; nothing here carries a credential.
         let resp = plx_net::net::request(url, &headers, "GET", None, plx_net::net::API, true,
@@ -319,6 +329,10 @@ impl Stremio for Live {
 
     fn fetch(&self, url: &str) -> Result<Vec<u8>, ApiError> {
         Self::get(url)
+    }
+
+    fn fetch_image(&self, url: &str) -> Result<Vec<u8>, ApiError> {
+        Self::get_as(url, "image/jpeg,image/png;q=0.9,*/*;q=0.1")
     }
 
     fn fetch_range(&self, url: &str, from: u64, len: u64) -> Result<Vec<u8>, ApiError> {

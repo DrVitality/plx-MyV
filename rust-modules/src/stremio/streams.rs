@@ -144,6 +144,9 @@ const OTHER_LANGUAGES: &[&str] = &[
     "LATINO", "CASTELLANO", "ESP", "HINDI", "TAMIL", "TELUGU", "RUS", "RUSSIAN", "UKR", "POLISH",
     "PL", "PORTUGUESE", "POR", "TURKISH", "ARABIC", "KOREAN", "CHINESE", "JAPANESE", "DUTCH",
     "SWEDISH", "CZECH", "HUNGARIAN", "GREEK", "THAI", "VIETNAMESE",
+    // Spanish release sites, whose file names say only where they came from (`….pctmix.com.mkv`)
+    "PCTMIX", "PCTFENIX", "NEWPCT", "NEWPCT1", "DONTORRENT", "MEJORTORRENT", "DIVXTOTAL",
+    "ELITETORRENT", "GRANTORRENT", "ATOMOHD", "WOLFMAX4K", "CINECALIDAD", "TODOTORRENTS",
 ];
 
 /// Reads what a stream's name, detail and file name say about it.
@@ -376,6 +379,7 @@ mod tests {
     #[test]
     fn languages_come_from_flags_and_release_words() {
         let en = |d: &str| facts(&stream("[RD+] Torrentio\n1080p", d)).english;
+        assert_eq!(en("Spider-Man 3 4Kmicro2160.pctmix.com.mkv"), English::No, "a Spanish site's release");
         assert_eq!(en("Movie.2021.1080p.WEB-DL\n👤 120 💾 4.2 GB ⚙️ YTS"), English::Unknown);
         assert_eq!(en("Movie.2021.1080p\n🇬🇧"), English::Yes);
         assert_eq!(en("Movie.2021.1080p.ITA.ENG\n"), English::Yes);

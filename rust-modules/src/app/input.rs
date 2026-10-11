@@ -807,6 +807,17 @@ pub(crate) struct StreamPickAwait {
 /// How long a stream-picker answer is waited for. The bridge's own addon reads give up sooner.
 const STREAM_PICK_CEILING_MS: u32 = 45_000;
 
+/// The Detail page's *Streams* pill: list the leaf's streams and present the menu over `origin`
+/// (the page, anchored to the pill). The same worker and menu as the card menu's *Choose stream*.
+pub(super) fn choose_stream_for(
+    bridge: &mut super::bridge::Bridge,
+    item: &plx_data::pms::PmsMovie,
+    origin: plx_screens::registry::MenuOrigin,
+    now: u32,
+) {
+    bridge.stream_pick = StreamPickAwait::start(StreamPickJob::List { instant: false }, item.sid, item, origin, false, now);
+}
+
 impl StreamPickAwait {
     /// Starts `job` for `item` on a worker. `None` when the server is not registered or the worker
     /// was refused (logged), which leaves nothing waiting.
@@ -931,10 +942,14 @@ pub(super) fn player_streams_fetch(ps: &plx_media::route::PlaybackSession) {
     }
     // claimed now, so the next frame does not ask again
     plx_appkit::more_menu::set_streams(&rk, Some(Vec::new()), None);
-    let Some(client) = plx_plex::plex::client_for(plx_media::route::cur_sid(ps)) else {
+    let client = plx_plex::plex::client_for(plx_media::route::cur_sid(ps))
+        .or_else(|| plx_plex::plex::client_for(plx_plex::plex::current_server()));
+    let Some(client) = client else {
+        log("player streams: no server to ask");
         plx_appkit::more_menu::set_streams(&rk, None, None);
         return;
     };
+    log("player streams: asking for the list (More > Change stream)");
     let worker_rk = rk.clone();
     let started = plx_base::task::spawn_off_frame("player streams", move |_| {
         let listed = client.stream_choices(&worker_rk).map(|mc| plx_screens::registry::StreamChoice::from_container(&mc));
@@ -960,6 +975,7 @@ pub(super) fn player_streams_fetch(ps: &plx_media::route::PlaybackSession) {
         plx_machine::present::wake_from_worker();
     });
     if !started {
+        log("player streams: the worker was refused");
         plx_appkit::more_menu::set_streams(&rk, None, None);
     }
 }
