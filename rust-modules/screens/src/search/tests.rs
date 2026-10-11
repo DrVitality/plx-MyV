@@ -1400,7 +1400,8 @@ fn a_filter_opens_as_a_dropdown_and_a_pick_closes_it_and_asks_again() {
     let genre = filters::elem(0, 2);
     assert_eq!(screen.open_dropdown(), None, "the options are not on the page until asked for");
 
-    let (_, out, _) = deliver(&mut screen, &fixture, Some(screen.key(genre)), ScreenEvent::Activate(genre));
+    let genre_key = screen.key(genre);
+    let (_, out, _) = deliver(&mut screen, &fixture, Some(genre_key), ScreenEvent::Activate(genre));
     assert_eq!(screen.open_dropdown(), Some(2));
     let all_genres = screen.key(filters::opt_elem(2, 0));
     assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::Deliver(_, Delivery::Screen(ScreenEvent::Enter(
@@ -1412,16 +1413,16 @@ fn a_filter_opens_as_a_dropdown_and_a_pick_closes_it_and_asks_again() {
     assert!(groups.iter().any(|g| g.id == DROP_GROUP && g.len == filters::options(2)));
 
     let comedy = filters::opt_elem(2, 4);
-    let (_, out, _) = deliver(&mut screen, &fixture, Some(screen.key(comedy)), ScreenEvent::Activate(comedy));
+    let comedy_key = screen.key(comedy);
+    let (_, out, _) = deliver(&mut screen, &fixture, Some(comedy_key), ScreenEvent::Activate(comedy));
     assert_eq!(screen.open_dropdown(), None, "a pick closes it");
     assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::App(AppFx::Store(StoreId::Search,
         StoreCmd::Search(SearchCmd::SetQueryScoped { query, .. }))) if query.ends_with("|Comedy"))),
         "…and asks again under the genre");
 
-    deliver(&mut screen, &fixture, Some(screen.key(genre)), ScreenEvent::Activate(genre));
+    deliver(&mut screen, &fixture, Some(genre_key), ScreenEvent::Activate(genre));
     assert_eq!(screen.open_dropdown(), Some(2));
-    let (handled, _, _) = deliver(&mut screen, &fixture, Some(screen.key(filters::opt_elem(2, 4))),
-        key_event(Key::Back, 0));
+    let (handled, _, _) = deliver(&mut screen, &fixture, Some(comedy_key), key_event(Key::Back, 0));
     assert_eq!(handled, Handled::Yes);
     assert_eq!(screen.open_dropdown(), None, "BACK closes it rather than leaving the page");
     assert_eq!(screen.filters().chosen_in(2), 4, "…and changes nothing");
